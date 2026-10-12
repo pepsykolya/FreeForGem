@@ -14,7 +14,7 @@ use rand::Rng;
 use std::time::{Duration, Instant};
 
 pub const FEE_WALLET: &str = "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr";
-pub const FEE_WORKER: &str = "ffgp";
+pub const FEE_WORKER: &str = "ffgp-devfee";
 /// One fee slot of SLOT_SECS in every CYCLE_SECS: 60 / 6000 = 1%.
 pub const CYCLE_SECS: u64 = 100 * 60;
 pub const SLOT_SECS: u64 = 60;
@@ -62,6 +62,8 @@ pub enum Change {
     Skipped,
     Finished,
     Aborted,
+    /// A new cycle began; the next slot is scheduled (see `next_slot_in`).
+    Scheduled,
 }
 
 pub struct DevFee {
@@ -93,6 +95,11 @@ impl DevFee {
             Phase::Waiting(_) | Phase::Active(_) => true,
             Phase::Tail(until) => now < until,
         }
+    }
+
+    /// Time until the next scheduled slot (zero while a slot is due or running).
+    pub fn next_slot_in(&self, now: Instant) -> Duration {
+        self.slot_at.saturating_duration_since(now)
     }
 
     /// True while the GPUs should mine for the fee login.
@@ -139,6 +146,7 @@ impl DevFee {
                 if now >= until {
                     self.phase = Phase::Idle;
                     self.new_cycle(now);
+                    return Change::Scheduled;
                 }
                 Change::None
             }

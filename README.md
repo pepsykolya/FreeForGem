@@ -13,11 +13,12 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
+| FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
+| FreeForGemPear 1.2.0, core locked at ~1537 MHz (pipeline bench) | ~68.2 TH/s | ~104 W |
 | FreeForGemPear 1.1.0 | 68.3 TH/s | ~114 W |
-| FreeForGemPear 1.1.0, core locked at 1515 MHz (pipeline bench) | ~66.5 TH/s | ~103 W |
 | FreeForGemPear 1.0.0 | 65.6 TH/s | ~105 W |
 
-Kernel bench (1.1.0): 69.3 TMAC/s, 94.3% of the card's int8 tensor peak at 1560 MHz. The main loop
+Kernel bench (1.2.0): 69.1 TMAC/s, 94.1% of the card's int8 tensor peak at 1560 MHz. The main loop
 is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
 
 ## Supported hardware
@@ -31,8 +32,8 @@ is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
 ## Usage
 
 ```
-tar xzf freeforgempear-1.1.0-linux-x86_64.tar.gz
-cd freeforgempear-1.1.0
+tar xzf freeforgempear-1.2.0-linux-x86_64.tar.gz
+cd freeforgempear-1.2.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -51,8 +52,8 @@ plus the submitted, accepted and rejected shares.
 
 **Tuning.** For best efficiency on a 3070, lock the core clock (for example
 `nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
-works from L2 cache and barely uses VRAM bandwidth. If you want lower power, 1515-1530 MHz is the
-sweet spot (power rises steeply above 1530 MHz).
+works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W; for
+~104 W lock the core at ~1537 MHz.
 
 ## HiveOS
 
@@ -60,7 +61,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.1.0/freeforgempear-1.1.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.2.0/freeforgempear-1.2.0.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`. The step-by-step guide,
@@ -69,8 +70,9 @@ in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**
 ## Developer fee
 
 1% of the mining time: one 60-second slot in every 100 minutes, at a random moment of the cycle,
-on **the same pool you configured**, under a separate login (worker `ffgp`). The log shows
-`devfee: mining 60s for FreeForGemPear dev (1%)` and `devfee: back to user`. If the fee login
+on **the same pool you configured**, under a separate login (worker `ffgp-devfee`). The log shows
+`devfee: next slot in N min`, `devfee: mining 60s for FreeForGemPear dev (1%)` and
+`devfee: back to user`. The first slot comes at a random moment within the first 100 minutes. If the fee login
 can't be served, the slot is skipped; your mining is never blocked.
 
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted

@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.1.0):**
+**Installation URL (1.2.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.1.0/freeforgempear-1.1.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.2.0/freeforgempear-1.2.0.tar.gz
 ```
 
 ### Flight sheet
@@ -43,12 +43,12 @@ The kernel works from L2 cache and needs almost no VRAM bandwidth:
 
 | Setting | Value |
 |---|---|
-| Core clock | absolute, `1515`–`1560` MHz |
+| Core clock | absolute, `1537`–`1560` MHz |
 | Memory clock | absolute, `810` MHz (in HiveOS: Memory clock `810`, or the lowest your card accepts) |
 | Power limit | `120` W |
 
-- **1560 MHz:** ~68 TH/s at ~114 W.
-- **1515 MHz:** ~66.5 TH/s at ~103 W.
+- **1560 MHz:** ~69 TH/s at ~107 W.
+- **1537 MHz:** ~68 TH/s at ~104 W.
 
 ### Requirements
 
@@ -64,10 +64,10 @@ The kernel works from L2 cache and needs almost no VRAM bandwidth:
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.1.0):**
+**Ссылка для установки (1.2.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.1.0/freeforgempear-1.1.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.2.0/freeforgempear-1.2.0.tar.gz
 ```
 
 ### Полётный лист
@@ -101,12 +101,12 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.1.0/freeforgem
 
 | Параметр | Значение |
 |---|---|
-| Частота ядра | абсолютная, `1515`–`1560` МГц |
+| Частота ядра | абсолютная, `1537`–`1560` МГц |
 | Частота памяти | абсолютная, `810` МГц (или минимальная, которую принимает карта) |
 | Лимит мощности | `120` Вт |
 
-- **1560 МГц:** ~68 TH/s при ~114 Вт.
-- **1515 МГц:** ~66.5 TH/s при ~103 Вт.
+- **1560 МГц:** ~69 TH/s при ~107 Вт.
+- **1537 МГц:** ~68 TH/s при ~104 Вт.
 
 ### Требования
 

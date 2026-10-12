@@ -10,6 +10,9 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Miner name shown by pools (LuckyPool reads it from the `agent` field of mining.authorize).
+pub const AGENT: &str = concat!("FreeForGemPear/", env!("CARGO_PKG_VERSION"));
+
 #[derive(Debug, Clone)]
 pub struct PoolJob {
     pub job_id: String,
@@ -138,8 +141,8 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     stats.connected.store(1, Ordering::Relaxed);
     // subscribe and authorize back-to-back (LuckyPool drops us otherwise)
     let hello = [
-        json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[concat!("freeforgempear/", env!("CARGO_PKG_VERSION"))]}),
-        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":l.wallet,"worker":l.worker,"pass":"x"}}),
+        json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[AGENT]}),
+        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":l.wallet,"worker":l.worker,"pass":"x","agent":AGENT}}),
     ];
     for h in &hello {
         sock.write_all(format!("{h}\n").as_bytes())?;

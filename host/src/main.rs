@@ -302,6 +302,7 @@ fn mine(a: Args) -> Result<()> {
     let mut switched = false;
     let mut st = [SrcState::default(), SrcState::default()];
     let mut fee = DevFee::new(devfee::Params::from_env(), start);
+    println!("devfee: next slot in {:.1} min", fee.next_slot_in(start).as_secs_f64() / 60.0);
     let mut published: Option<Arc<Assignment>> = None;
     let mut last_attempts = vec![0u64; gstats.len()];
     let mut win_start = Instant::now();
@@ -368,6 +369,7 @@ fn mine(a: Args) -> Result<()> {
             Change::Finished => println!("devfee: back to user"),
             Change::Aborted => println!("devfee: fee connection lost mid-slot, back to user"),
             Change::Skipped => println!("devfee: fee login unavailable, skipping this slot (user mining continues)"),
+            Change::Scheduled => println!("devfee: next slot in {:.1} min", fee.next_slot_in(now).as_secs_f64() / 60.0),
             Change::None => {}
         }
 
