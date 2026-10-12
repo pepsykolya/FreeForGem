@@ -17,6 +17,14 @@ echo "== freeforgempear"
 
 D=dist/freeforgempear-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgempear gpu/libpearlgpu.so LICENSE NOTICE README.md "$D/"
+cp host/target/release/freeforgempear gpu/libpearlgpu.so LICENSE NOTICE README.md HIVEOS.md "$D/"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgempear-$VERSION"
-(cd dist && sha256sum "freeforgempear-$VERSION-linux-x86_64.tar.gz" | tee "freeforgempear-$VERSION-linux-x86_64.tar.gz.sha256")
+# HiveOS custom miner package: freeforgempear-<version>.tar.gz with a top-level freeforgempear/ folder
+H=dist/hive/freeforgempear
+rm -rf dist/hive; mkdir -p "$H"
+cp host/target/release/freeforgempear gpu/libpearlgpu.so LICENSE NOTICE README.md HIVEOS.md hiveos/h-*.sh "$H/"
+sed "s/@VERSION@/$VERSION/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
+chmod +x "$H"/h-*.sh "$H/freeforgempear"
+tar -C dist/hive -czf "dist/freeforgempear-$VERSION.tar.gz" freeforgempear
+
+(cd dist && sha256sum "freeforgempear-$VERSION-linux-x86_64.tar.gz" "freeforgempear-$VERSION.tar.gz" | tee SHA256SUMS)

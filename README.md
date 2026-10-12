@@ -13,9 +13,12 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
+| FreeForGemPear 1.1.0 | 68.3 TH/s | ~114 W |
+| FreeForGemPear 1.1.0, core locked at 1515 MHz (pipeline bench) | ~66.5 TH/s | ~103 W |
 | FreeForGemPear 1.0.0 | 65.6 TH/s | ~105 W |
 
-Kernel bench: 66.6 TMAC/s, 90.7% of the card's int8 tensor peak at that clock.
+Kernel bench (1.1.0): 69.3 TMAC/s, 94.3% of the card's int8 tensor peak at 1560 MHz. The main loop
+is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
 
 ## Supported hardware
 
@@ -28,8 +31,8 @@ Kernel bench: 66.6 TMAC/s, 90.7% of the card's int8 tensor peak at that clock.
 ## Usage
 
 ```
-tar xzf freeforgempear-1.0.0-linux-x86_64.tar.gz
-cd freeforgempear-1.0.0
+tar xzf freeforgempear-1.1.0-linux-x86_64.tar.gz
+cd freeforgempear-1.1.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -48,7 +51,20 @@ plus the submitted, accepted and rejected shares.
 
 **Tuning.** For best efficiency on a 3070, lock the core clock (for example
 `nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
-works from L2 cache and barely uses VRAM bandwidth.
+works from L2 cache and barely uses VRAM bandwidth. If you want lower power, 1515-1530 MHz is the
+sweet spot (power rises steeply above 1530 MHz).
+
+## HiveOS
+
+FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to *Custom* and use
+this *Installation URL*:
+
+```
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.1.0/freeforgempear-1.1.0.tar.gz
+```
+
+Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`. The step-by-step guide,
+in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**.
 
 ## Developer fee
 
@@ -77,7 +93,9 @@ docker run --rm -v "$PWD":/src ffgp-build
 
 `gpu/g13_patched_cubin.h` holds the SASS-tuned kernel. It is generated from `kernels/` by
 `tools/sass/build_patched.sh`, which needs a [CuAssembler](https://github.com/cloudcores/CuAssembler)
-checkout (MIT) and changes only instruction control codes. If the patched kernel can't be loaded,
+checkout (MIT): `v1gen.py` replaces the compiler's main loop with a generated one. The build refuses
+to run if the compiler output differs from `tools/sass/data/g13.cuasm`, and every new cubin must pass
+`tools/sass/validate_patched.sh` (bit-exact check against the CPU reference plus repeated-run stress). If the patched kernel can't be loaded,
 or `PEARL_NO_PATCH=1` is set, the library falls back to the plain compiled kernel and says so in
 the log.
 
