@@ -157,7 +157,7 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
             }
             if let (true, Some(n)) = (job_changed, &a) {
                 let t = Instant::now();
-                gpu::set_job(&n.job.br_t, &n.job.q1, &n.job.q2, N, K)?;
+                gpu::set_job(&n.job.br_t, &n.job.q1, &n.job.q2, N, k())?;
                 loaded = Some(n.job.clone());
                 println!("GPU {dev}: [{}] job {} (cert {}) loaded in {:?}", src_name(n.src), n.pj.job_id, n.pj.cert_version, t.elapsed());
             }
@@ -170,8 +170,8 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
         // prepare and enqueue the next attempt, then collect the previous one
         let row0 = c.job.nonce_row(counter);
         let a_seed = c.job.a_noise_seed(&row0);
-        let (p1, p2) = a_perm(&a_seed);
-        gpu::launch(slot, &a_seed, &p1, &p2, M, &target_words(c.target))?;
+        // the kernel derives P_A and A_L from a_seed itself: no host-side permutation (a_perm = 512 hashes per attempt)
+        gpu::launch(slot, &a_seed, &[], &[], M, &target_words(c.target))?;
         let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: c.job.clone(), row0, a_seed, target: c.target, counter };
         counter += 1;
         slot ^= 1;
@@ -249,7 +249,7 @@ fn submit_hit(p: &Work, h: &gpu::Hit, id: u64) -> Result<String> {
         "job_id": p.pj.job_id,
         "plain_proof": base64::engine::general_purpose::STANDARD.encode(&payload),
         "jackpot": jackpot,
-        "adjustment_factor": ADJUSTMENT_FACTOR,
+        "adjustment_factor": adjustment_factor(),
     });
     if enc {
         params["proof_encoding"] = "gzip".into();

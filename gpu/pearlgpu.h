@@ -25,6 +25,8 @@ typedef struct {
 // error string); use one thread per GPU for multi-GPU mining.
 // Number of CUDA devices visible to the process (honours CUDA_VISIBLE_DEVICES); name of device `device`.
 int pg_device_count(void);
+// Common dimension k the library (and its embedded kernel) was built for.
+int pg_kdim(void);
 int pg_device_name(int device, char* out, int len);
 
 // Select the CUDA device (ordinal as seen by the process). Returns 0 on success.

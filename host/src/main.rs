@@ -79,14 +79,14 @@ fn prove_hit(job: &Job, row0: &[u8], hit: &gpu::Hit, a_seed: &[u8; 32], target: 
 }
 
 fn set_job_gpu(job: &Job) -> Result<()> {
-    gpu::set_job(&job.br_t, &job.q1, &job.q2, N, K)
+    gpu::set_job(&job.br_t, &job.q1, &job.q2, N, k())
 }
 
 fn self_test(device: i32) -> Result<()> {
     println!("== self-test ==");
     let t0 = Instant::now();
     let job = Job::new(&test_header(7), 3)?;
-    println!("[ok] public_params_sanity_check for m={M} n={N} k={K} rank={RANK}; job built in {:?}", t0.elapsed());
+    println!("[ok] public_params_sanity_check for m={M} n={N} k={} rank={RANK}; job built in {:?}", k(), t0.elapsed());
     println!("     job_key={}", hex(&job.job_key));
 
     // item 3: incremental BLAKE3 root == full hash
@@ -413,7 +413,7 @@ fn mine(a: Args) -> Result<()> {
                 let n = g.attempts.load(Ordering::Relaxed);
                 let rate = (n - last_attempts[i]) as f64 / el.as_secs_f64();
                 last_attempts[i] = n;
-                let ths = rate * (M * N * K) as f64 / 1e12;
+                let ths = rate * (M * N * k()) as f64 / 1e12;
                 total_att += rate;
                 total_ths += ths;
                 parts.push(format!("GPU{} {:.3}{}", g.dev, ths, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));

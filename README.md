@@ -13,12 +13,12 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
+| FreeForGemPear 1.3.0 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
-| FreeForGemPear 1.2.0, core locked at ~1537 MHz (pipeline bench) | ~68.2 TH/s | ~104 W |
 | FreeForGemPear 1.1.0 | 68.3 TH/s | ~114 W |
 | FreeForGemPear 1.0.0 | 65.6 TH/s | ~105 W |
 
-Kernel bench (1.2.0): 69.1 TMAC/s, 94.1% of the card's int8 tensor peak at 1560 MHz. The main loop
+Kernel bench (1.3.0, k = 8192): 69.5 TMAC/s, 94.6% of the card's int8 tensor peak at 1560 MHz. The main loop
 is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
 
 ## Supported hardware
@@ -32,8 +32,8 @@ is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
 ## Usage
 
 ```
-tar xzf freeforgempear-1.2.0-linux-x86_64.tar.gz
-cd freeforgempear-1.2.0
+tar xzf freeforgempear-1.3.0-linux-x86_64.tar.gz
+cd freeforgempear-1.3.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -52,8 +52,10 @@ plus the submitted, accepted and rejected shares.
 
 **Tuning.** For best efficiency on a 3070, lock the core clock (for example
 `nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
-works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W; for
-~104 W lock the core at ~1537 MHz.
+works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W.
+
+**CPU.** The host needs well under 10% of one CPU core per GPU (GPU waits sleep instead of spinning), so
+multi-GPU rigs with older CPUs run at full speed.
 
 ## HiveOS
 
@@ -61,7 +63,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.2.0/freeforgempear-1.2.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.0/freeforgempear-1.3.0.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`. The step-by-step guide,

@@ -13,6 +13,7 @@ pub struct Hit {
 
 unsafe extern "C" {
     fn pg_device_count() -> i32;
+    fn pg_kdim() -> i32;
     fn pg_device_name(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_init(device: i32) -> i32;
     fn pg_set_job(br_t: *const i8, q1: *const i32, q2: *const i32, n: i32, k: i32) -> i32;
@@ -31,6 +32,11 @@ fn last_error() -> String {
 }
 
 /// Number of CUDA devices visible to the process (honours CUDA_VISIBLE_DEVICES).
+/// k the loaded libpearlgpu was built for.
+pub fn kdim() -> usize {
+    unsafe { pg_kdim().max(0) as usize }
+}
+
 pub fn device_count() -> usize {
     unsafe { pg_device_count().max(0) as usize }
 }

@@ -14,10 +14,24 @@ use zk_pow::ffi::plain_proof::{CertificateVersion, MatrixMerkleProof, PlainProof
 
 pub const M: usize = 23552;
 pub const N: usize = 512;
-pub const K: usize = 4096;
+/// Common dimension k: the k the loaded libpearlgpu was built for (production 8192), overridable with `PEARL_K` for
+/// tests (pg_set_job refuses a mismatch).  Everything else (config, adjustment factor, commitment, proof size) follows
+/// from it.
+pub fn k() -> usize {
+    static KV: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *KV.get_or_init(|| match std::env::var("PEARL_K") {
+        Ok(v) => match v.trim().parse::<usize>() {
+            Ok(x) if x % 1024 == 0 && x >= 2048 && x <= 8192 => x,
+            _ => panic!("PEARL_K={v}: want a multiple of 1024 in 2048..=8192"),
+        },
+        Err(_) => crate::gpu::kdim(),
+    })
+}
 pub const RANK: usize = 128;
-/// rows*cols*(k/rank)*128 = 8*16*(K/RANK)*128 (524288 at k = 4096); scales a "base" share target to the jackpot target.
-pub const ADJUSTMENT_FACTOR: u64 = (8 * 16 * (K / RANK) * 128) as u64;
+/// rows*cols*(k/rank)*128 = 8*16*(k/RANK)*128 (524288 at k = 4096, 1048576 at 8192); scales a "base" share target to the jackpot target.
+pub fn adjustment_factor() -> u64 {
+    (8 * 16 * (k() / RANK) * 128) as u64
+}
 const CHUNK: usize = 1024;
 
 pub const LABEL_A: [u8; 32] = label(*b"A_tensor");
@@ -34,7 +48,7 @@ const fn label(l: [u8; 8]) -> [u8; 32] {
 
 pub fn mining_config() -> MiningConfiguration {
     MiningConfiguration {
-        common_dim: K as u32,
+        common_dim: k() as u32,
         rank: RANK as u16,
         mma_type: MMAType::Int7xInt7ToInt32,
         rows_pattern: PeriodicPattern::from_list(&[0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
@@ -106,9 +120,10 @@ impl Job {
         data.extend_from_slice(&mining_config().to_bytes());
         let job_key = blake3_digest(&data, None);
 
-        let a_base = vec![64u8; M * K];
-        let b_col = vec![64u8; N * K];
-        ensure!(a_base.len() % CHUNK == 0 && b_col.len() % CHUNK == 0 && K % CHUNK == 0 && (K / CHUNK).is_power_of_two());
+        let kk = k();
+        let a_base = vec![64u8; M * kk];
+        let b_col = vec![64u8; N * kk];
+        ensure!(a_base.len() % CHUNK == 0 && b_col.len() % CHUNK == 0 && kk % CHUNK == 0 && (kk / CHUNK).is_power_of_two());
         let hash_b = blake3_digest(&b_col, Some(job_key));
         let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, M as u32, N as u32);
         let b_noise_seed = blake3_digest(&[&job_key[..], &bound_b[..]].concat(), None);
@@ -116,7 +131,7 @@ impl Job {
         // Subtrees right of the left path (everything not containing the chunks of row 0).
         let mut n = a_base.len() / CHUNK;
         let mut parts = vec![]; // (start chunk, chunk count), top to bottom
-        while n > K / CHUNK {
+        while n > kk / CHUNK {
             let left = 1usize << (usize::BITS - 1 - (n - 1).leading_zeros()); // largest power of two < n
             parts.push((left, n - left)); // the left path always starts at chunk 0
             n = left;
@@ -129,7 +144,7 @@ impl Job {
 
         let all_cols: Vec<usize> = (0..N).collect();
         let br_t: Vec<i8> = generate_uniform_random_matrix(&LABEL_B, &b_noise_seed, &all_cols, RANK).concat();
-        let (q1, q2) = split_pairs(&generate_permutation_matrix(&LABEL_B, &b_noise_seed, K, RANK));
+        let (q1, q2) = split_pairs(&generate_permutation_matrix(&LABEL_B, &b_noise_seed, kk, RANK));
 
         Ok(Job { header, cert_version, deriv, job_key, b_noise_seed, a_base, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
     }
@@ -140,7 +155,7 @@ impl Job {
         h.update(b"pearl-miner/nonce/v1");
         h.update(&self.job_key);
         h.update(&self.nonce_base.wrapping_add(counter).to_le_bytes());
-        let mut out = vec![0u8; K];
+        let mut out = vec![0u8; k()];
         h.finalize_xof().fill(&mut out);
         for b in out.iter_mut() {
             *b = ((*b & 0x7f) as i8 - 64) as u8;
@@ -166,7 +181,7 @@ impl Job {
     /// Reference: hash of the whole A with the given row 0.
     pub fn hash_a_full(&self, row0: &[u8]) -> [u8; 32] {
         let mut a = self.a_base.clone();
-        a[..K].copy_from_slice(row0);
+        a[..k()].copy_from_slice(row0);
         blake3_digest(&a, Some(self.job_key))
     }
 
@@ -181,11 +196,11 @@ impl Job {
         let a_rows: Vec<usize> = cfg.rows_pattern.to_list().iter().map(|&d| t_rows + d as usize).collect();
         let b_cols: Vec<usize> = cfg.cols_pattern.to_list().iter().map(|&d| t_cols + d as usize).collect();
         let mut a = self.a_base.clone();
-        a[..K].copy_from_slice(row0);
+        a[..k()].copy_from_slice(row0);
         PlainProof {
             m: M,
             n: N,
-            k: K,
+            k: k(),
             noise_rank: RANK,
             a: matrix_proof(&a, &self.job_key, &a_rows, M),
             bt: matrix_proof(&self.b_col, &self.job_key, &b_cols, N),
@@ -213,8 +228,9 @@ impl Job {
 /// A-side permutation inputs for one attempt: generate_permutation_matrix(LABEL_A, seed, K, RANK) computed on the
 /// calling thread (the official one fans 256 tiny hashes out to rayon). Checked against it in the self-test.
 pub fn a_perm(a_noise_seed: &[u8; 32]) -> (Vec<i32>, Vec<i32>) {
-    let (mut p1, mut p2) = (vec![0i32; K], vec![0i32; K]);
-    for i in 0..K / 8 {
+    let kk = k();
+    let (mut p1, mut p2) = (vec![0i32; kk], vec![0i32; kk]);
+    for i in 0..kk / 8 {
         let h = get_random_hash(i, &LABEL_A, a_noise_seed, 1);
         for j in 0..8 {
             let u = u32::from_le_bytes(h[j * 4..j * 4 + 4].try_into().unwrap());
@@ -228,7 +244,7 @@ pub fn a_perm(a_noise_seed: &[u8; 32]) -> (Vec<i32>, Vec<i32>) {
 
 /// Reference for a_perm (official, rayon).
 pub fn a_perm_official(a_noise_seed: &[u8; 32]) -> (Vec<i32>, Vec<i32>) {
-    split_pairs(&generate_permutation_matrix(&LABEL_A, a_noise_seed, K, RANK))
+    split_pairs(&generate_permutation_matrix(&LABEL_A, a_noise_seed, k(), RANK))
 }
 
 fn split_pairs(p: &[[u32; 2]]) -> (Vec<i32>, Vec<i32>) {
@@ -239,6 +255,6 @@ fn split_pairs(p: &[[u32; 2]]) -> (Vec<i32>, Vec<i32>) {
 fn matrix_proof(data: &[u8], key: &[u8; 32], rows: &[usize], total_rows: usize) -> MatrixMerkleProof {
     assert_eq!(data.len() % CHUNK, 0);
     let tree = MerkleTree::new(data, *key);
-    let leaves = MerkleTree::compute_leaf_indices_from_rows(rows, (total_rows, K));
+    let leaves = MerkleTree::compute_leaf_indices_from_rows(rows, (total_rows, k()));
     MatrixMerkleProof { proof: tree.get_multileaf_proof(&leaves), row_indices: rows.to_vec() }
 }
