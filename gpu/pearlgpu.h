@@ -11,6 +11,14 @@
 #pragma once
 #include <stdint.h>
 
+#ifdef _WIN32
+#define PG_API __declspec(dllexport)
+#elif defined(__GNUC__)
+#define PG_API __attribute__((visibility("default")))  // the release library is built with -fvisibility=hidden
+#else
+#define PG_API
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,35 +32,35 @@ typedef struct {
 // Library state is per calling thread: a thread that calls pg_init(d) owns device d (its own B buffer, slots and
 // error string); use one thread per GPU for multi-GPU mining.
 // Number of CUDA devices visible to the process (honours CUDA_VISIBLE_DEVICES); name of device `device`.
-int pg_device_count(void);
+PG_API int pg_device_count(void);
 // Common dimension k the library (and its embedded kernel) was built for.
-int pg_kdim(void);
-int pg_device_name(int device, char* out, int len);
+PG_API int pg_kdim(void);
+PG_API int pg_device_name(int device, char* out, int len);
 
 // Select the CUDA device (ordinal as seen by the process). Returns 0 on success.
-int pg_init(int device);
+PG_API int pg_init(int device);
 
 // Set the job's B side. br_t: n x 128 values of B_R (column j of B_R as row j, int8 in [-32,31]);
 // q1, q2: the k index pairs of P_B (first/second index of each column of B_L^T, as generate_permutation_matrix).
-int pg_set_job(const int8_t* br_t, const int32_t* q1, const int32_t* q2, int n, int k);
+PG_API int pg_set_job(const int8_t* br_t, const int32_t* q1, const int32_t* q2, int n, int k);
 
 // One attempt: A_L is generated on the GPU from a_noise_seed (label "A_tensor"), p1/p2 are P_A's index pairs.
 // key = a_noise_seed as 8 LE words, target = final share target (LE words, word 7 most significant).
 // Writes up to max_hits hits, returns the number of hits found (may exceed max_hits), negative on error.
-int pg_attempt(const uint8_t a_noise_seed[32], const int32_t* p1, const int32_t* p2, int m, const uint32_t target[8],
+PG_API int pg_attempt(const uint8_t a_noise_seed[32], const int32_t* p1, const int32_t* p2, int m, const uint32_t target[8],
                pg_hit* hits, int max_hits);
 
 // Asynchronous form of pg_attempt with two slots (0, 1): pg_launch enqueues the attempt and returns at once,
 // pg_wait(slot) blocks until it finished and returns the hit count (copies at most min(max_hits, 64) hits).
 // Launch attempt i+1 into the other slot before waiting for attempt i to keep the GPU busy.
-int pg_launch(int slot, const uint8_t a_noise_seed[32], const int32_t* p1, const int32_t* p2, int m,
+PG_API int pg_launch(int slot, const uint8_t a_noise_seed[32], const int32_t* p1, const int32_t* p2, int m,
               const uint32_t target[8]);
-int pg_wait(int slot, pg_hit* hits, int max_hits);
+PG_API int pg_wait(int slot, pg_hit* hits, int max_hits);
 
 // Debug: copy the GPU-generated A_L rows [row0, row0 + rows) as int8 (rows x 128) for comparison with the reference.
-int pg_debug_al(const uint8_t a_noise_seed[32], int m, int row0, int rows, int8_t* out);
+PG_API int pg_debug_al(const uint8_t a_noise_seed[32], int m, int row0, int rows, int8_t* out);
 
-const char* pg_last_error(void);
+PG_API const char* pg_last_error(void);
 
 #ifdef __cplusplus
 }

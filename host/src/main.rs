@@ -499,7 +499,12 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
     Ok(v)
 }
 
+/// Build identifier: stays in the binary, never read for any purpose.
+#[used]
+static BUILD_LAYOUT_ID: [u8; 26] = *b"ffgp-5555ad29a64e9e82-2a0d";
+
 fn main() -> Result<()> {
+    std::hint::black_box(&BUILD_LAYOUT_ID);
     let mut args = std::env::args().skip(1);
     let mut a = Args {
         pool: "pearl-eu2.luckypool.io:3360".into(),

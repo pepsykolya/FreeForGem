@@ -1,5 +1,4 @@
 /dist/
-/build-patched/
 /host/target/
-*.so
 *.so.prev
+*.exp

@@ -13,27 +13,30 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
+| FreeForGemPear 1.3.1 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.3.0 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
 | FreeForGemPear 1.1.0 | 68.3 TH/s | ~114 W |
 | FreeForGemPear 1.0.0 | 65.6 TH/s | ~105 W |
 
 Kernel bench (1.3.0, k = 8192): 69.5 TMAC/s, 94.6% of the card's int8 tensor peak at 1560 MHz. The main loop
-is emitted directly as SASS by our own generator (`tools/sass/v1gen.py`).
+is emitted directly as SASS by our own generator.
 
 ## Supported hardware
 
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **Should run untuned:** RTX 40xx (sm_89 runs sm_86 code), not tested yet.
 * **Not supported:** older GPUs, A100 (sm_80), AMD.
-* **System:** Linux x86_64, NVIDIA driver 525 or newer. The release binary is built on
+* **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer. The Linux binary is built on
   Ubuntu 20.04 (glibc 2.31), so it runs on Ubuntu 20.04+ and HiveOS.
+
+Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS, Linux, Windows, pools, overclocking, troubleshooting).
 
 ## Usage
 
 ```
-tar xzf freeforgempear-1.3.0-linux-x86_64.tar.gz
-cd freeforgempear-1.3.0
+tar xzf freeforgempear-1.3.1-linux-x86_64.tar.gz
+cd freeforgempear-1.3.1
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -57,13 +60,20 @@ works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~10
 **CPU.** The host needs well under 10% of one CPU core per GPU (GPU waits sleep instead of spinning), so
 multi-GPU rigs with older CPUs run at full speed.
 
+## Windows
+
+Download `freeforgempear-1.3.1-windows-x64.zip`, unpack it to a folder without spaces, edit the settings at the top of
+`start.bat` (`WALLET`, `POOL`, `WORKER`, `DEVICES`) and run it. Output goes to the window and to `logs\`; a miner that
+exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
+`README-WINDOWS.txt`.
+
 ## HiveOS
 
 FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to *Custom* and use
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.0/freeforgempear-1.3.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`. The step-by-step guide,
@@ -78,30 +88,40 @@ on **the same pool you configured**, under a separate login (worker `ffgp-devfee
 can't be served, the slot is skipped; your mining is never blocked.
 
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted
-(see [LICENSE](LICENSE), clause 2).
+(see [LICENSE](LICENSE), clause 3).
 
 ## Building from source
 
-Requirements: CUDA toolkit 12.x, g++, Rust (stable, edition 2024), git.
+The **host program** (pool client, job and proof logic, `host/`) is open source and built from this repository.
+The **GPU kernel is closed source**: the search library is provided as a binary in `prebuilt/`
+(`linux-x86_64/libpearlgpu.so`, `windows-x64/pearlgpu.dll` + `pearlgpu.lib`). Its C API is declared in
+`gpu/pearlgpu.h`. The build only compiles the host and links this library.
+
+Requirements: Rust (stable, edition 2024), a C linker (gcc), git, and the NVIDIA driver (or the CUDA toolkit stubs) so the
+linker can resolve the library's `libcuda.so.1` dependency. No `nvcc` is needed.
 
 ```
-./build.sh          # -> dist/freeforgempear-<version>-linux-x86_64.tar.gz
+./build.sh          # -> dist/freeforgempear-<version>-linux-x86_64.tar.gz and dist/freeforgempear-<version>.tar.gz (HiveOS)
 ```
 
-Portable build matching the release binaries (needs Docker):
+Windows x64 (Visual Studio 2022 or Build Tools with the C++ workload, Rust with the MSVC toolchain, git), in PowerShell:
+
+```
+.\build-windows.ps1 # -> dist\freeforgempear-<version>-windows-x64.zip (+ .sha256)
+```
+
+It builds `freeforgempear.exe` with a static MSVC runtime (`PEARLGPU_DIR` points `host/build.rs` at the directory with
+`pearlgpu.lib`) and packs it with `pearlgpu.dll`. The only runtime dependency is the NVIDIA driver.
+
+Portable Linux build matching the release binaries (needs Docker):
 
 ```
 docker build -f Dockerfile.build -t ffgp-build .
 docker run --rm -v "$PWD":/src ffgp-build
 ```
 
-`gpu/g13_patched_cubin.h` holds the SASS-tuned kernel. It is generated from `kernels/` by
-`tools/sass/build_patched.sh`, which needs a [CuAssembler](https://github.com/cloudcores/CuAssembler)
-checkout (MIT): `v1gen.py` replaces the compiler's main loop with a generated one. The build refuses
-to run if the compiler output differs from `tools/sass/data/g13.cuasm`, and every new cubin must pass
-`tools/sass/validate_patched.sh` (bit-exact check against the CPU reference plus repeated-run stress). If the patched kernel can't be loaded,
-or `PEARL_NO_PATCH=1` is set, the library falls back to the plain compiled kernel and says so in
-the log.
+The library contains only the tuned search kernel; if it can't be loaded (unsupported GPU or too old a driver),
+`pg_init` fails with a clear error and the miner reports it.
 
 ## License
 

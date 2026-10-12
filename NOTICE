@@ -1,7 +1,8 @@
 FreeForGemPear
-Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.0 (see LICENSE).
+Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE).
 
-The GPU kernels, the CUDA library and the host program are original work.
+The GPU kernels, the CUDA library and the host program are original work. The GPU library is
+distributed in binary form only.
 
 Release binaries link the following third-party components, which remain under
 their own licenses:
@@ -28,6 +29,6 @@ their own licenses:
   base64, bincode, flate2, rand and their dependencies) -- each under its own
   license, typically MIT and/or Apache-2.0.
 
-* NVIDIA CUDA runtime (cudart) -- statically linked into libpearlgpu.so and
-  redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The
+* NVIDIA CUDA runtime (cudart) -- statically linked into libpearlgpu.so / pearlgpu.dll
+  and redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The
   CUDA driver (libcuda) is not distributed; it comes with the NVIDIA driver.

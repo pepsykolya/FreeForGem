@@ -1,7 +1,7 @@
 // FreeForGemPear — see LICENSE
 //! Developer fee: 1% of the mining time, taken as one 60 s slot in every 100-minute cycle.
 //!
-//! ALL FEE CONSTANTS LIVE IN THIS FILE. The LICENSE (clause 2, "Dev Fee must stay intact") forbids removing, disabling, reducing or
+//! ALL FEE CONSTANTS LIVE IN THIS FILE. The LICENSE (clause 3, "Dev Fee must stay intact") forbids removing, disabling, reducing or
 //! otherwise altering the developer fee, its wallet, its schedule or its accounting, in source or binary form.
 //!
 //! How it works: in every cycle the miner switches, at a random moment of the cycle, to a second stratum login on
