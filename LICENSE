@@ -1,0 +1,41 @@
+FreeForGemPear License, version 1.0
+
+Copyright (c) 2026 pepsykolya. All rights reserved except as granted below.
+
+"Software" means the FreeForGemPear source code, binaries and documentation in
+this repository and any work derived from them. "Dev Fee" means the mechanism in
+the Software that directs a share of mining time (1% in the original release) to
+the developer's wallet, including its rate, schedule, wallet address and the
+code that implements it (src/devfee.rs and the code that calls it).
+
+1. Grant. Subject to the conditions below, you may, free of charge, use, run,
+   copy, study and modify the Software, and distribute it in source or binary
+   form, modified or unmodified.
+
+2. Dev Fee must stay intact. You may not remove, disable, bypass, reduce,
+   shorten, redirect or otherwise alter the Dev Fee, and you may not distribute,
+   publish or offer anything (including patches, wrappers, proxies, network
+   filters, configuration or instructions) whose purpose or effect is to do so.
+   This applies to the Software and to any work derived from it or containing
+   any part of it, including the GPU kernels.
+
+3. Notices. Every copy or derived work must include this license unchanged and
+   keep the copyright and attribution notices of the Software.
+
+4. No other terms. You may not license, sublicense or distribute the Software
+   or derived works under terms that conflict with this license.
+
+5. Termination. Any breach of this license terminates all rights granted to
+   you automatically and without notice. Rights of others who received the
+   Software from you in compliance with this license are not affected.
+
+6. Third-party components. Parts of the Software link to or include third-party
+   components that remain under their own licenses (see NOTICE). This license
+   does not restrict your rights in those components on their own.
+
+7. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR
+   A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING LOST MINING REWARDS, HARDWARE DAMAGE OR POWER COSTS, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
