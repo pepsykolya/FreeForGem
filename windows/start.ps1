@@ -8,7 +8,8 @@ param(
     [string]$Pool = 'pearl-eu2.luckypool.io:3360',
     [string]$Worker = $env:COMPUTERNAME,
     [string]$Devices = '',
-    [string]$AutoUv = ''
+    [string]$AutoUv = '',
+    [string]$Password = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -60,6 +61,7 @@ Get-ChildItem -LiteralPath $logs -Filter 'miner-*.log' | Sort-Object LastWriteTi
 $exe = Join-Path $root 'freeforgempear.exe'
 $cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
 if ($Devices) { $cmdLine += " --devices $Devices" }
+if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " --password $Password" }
 if ($AutoUv -eq '1') {
     $cmdLine += ' --auto-uv'
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

@@ -257,7 +257,7 @@ fn submit_hit(p: &Work, h: &gpu::Hit, id: u64) -> Result<String> {
     let raw = bincode::serialize(&proof)?;
     let jackpot = hex(&hit_hash(h));
     let (payload, enc) = if p.pj.gzip {
-        let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         z.write_all(&raw)?;
         (z.finish()?, true)
     } else {

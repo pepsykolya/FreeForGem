@@ -67,6 +67,8 @@ pub struct Login {
     pub fallback_wallet: Option<String>,
     pub fallback: AtomicBool,
     pub worker: String,
+    /// Stratum password (Kryptex reads a custom share difficulty `d=VALUE` from it).
+    pub password: String,
     /// The connection is only kept while this is true (the fee login is enabled around its slot only).
     pub enabled: Arc<AtomicBool>,
     pub stop: Arc<AtomicBool>,
@@ -181,7 +183,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     // subscribe and authorize back-to-back (LuckyPool drops us otherwise)
     let hello = [
         json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[AGENT]}),
-        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":"x","password":"x","agent":AGENT,"type":"v2"}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":l.password,"password":l.password,"agent":AGENT,"type":"v2"}}),
     ];
     for h in &hello {
         sock.write_all(format!("{h}\n").as_bytes())?;
@@ -191,6 +193,10 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut pending: HashMap<u64, String> = HashMap::new();
     let mut seen = 0;
     let mut v2 = false; // pool confirmed gzip proofs ("type":"v2" in the authorize reply)
+    // jobs that arrive before the authorize reply wait for it: once a pool confirmed v2, every proof must be gzipped
+    let mut authorized = false;
+    let mut early: Vec<Value> = Vec::new();
+    let started = Instant::now();
     let mut last_rx = Instant::now();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
@@ -198,6 +204,16 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
         }
         if last_rx.elapsed() > SILENCE_LIMIT {
             return Err(std::io::Error::new(ErrorKind::TimedOut, format!("no data from the pool for {}s", SILENCE_LIMIT.as_secs())));
+        }
+        // a pool that never answers authorize: go on after 5 s, uncompressed
+        if !authorized && started.elapsed() > Duration::from_secs(5) {
+            authorized = true;
+            log(l, "no authorize reply after 5 s: mining with uncompressed proofs");
+            for e in early.drain(..) {
+                if let Some(j) = parse_job(&e, false) {
+                    let _ = tx.send((src, Event::Job(j)));
+                }
+            }
         }
         // outgoing submits
         while let Ok(s) = rx.try_recv() {
@@ -233,6 +249,11 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                 if seen < 3 {
                     seen += 1;
                     log(l, &format!("RAW JOB: {line}"));
+                }
+                if !authorized {
+                    early.truncate(0); // only the newest job matters
+                    early.push(v.clone());
+                    continue;
                 }
                 match parse_job(&v, v2) {
                     Some(j) => {
@@ -275,11 +296,20 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                     }
                     return Err(std::io::Error::new(ErrorKind::PermissionDenied, format!("authorize failed: {line}")));
                 } else {
+                    log(l, &format!("reply: {line}"));
                     if id == 2 {
                         v2 = v.get("type").and_then(Value::as_str) == Some("v2");
                         log(l, if v2 { "pool confirmed gzip proofs (type v2)" } else { "pool did not confirm gzip (no type v2): proofs go uncompressed" });
+                        authorized = true;
+                        for e in early.drain(..) {
+                            match parse_job(&e, v2) {
+                                Some(j) => {
+                                    let _ = tx.send((src, Event::Job(j)));
+                                }
+                                None => log(l, &format!("job not understood: {e}")),
+                            }
+                        }
                     }
-                    log(l, &format!("reply: {line}"));
                 }
             }
             _ => log(l, &format!("other: {line}")),

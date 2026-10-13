@@ -175,6 +175,7 @@ struct Args {
     pool: String,
     wallet: String,
     worker: String,
+    password: String,
     minutes: Option<f64>,
     devices: Option<Vec<i32>>,
     mode: TargetMode,
@@ -270,7 +271,7 @@ fn mine(a: Args) -> Result<()> {
     let (fee_sub_tx, fee_sub_rx) = mpsc::channel::<Submit>();
     let fee_enabled = Arc::new(AtomicBool::new(false));
     stratum::spawn(
-        Login { name: "user", addr: a.pool.clone(), wallet: user_wallet, fallback_wallet: None, fallback: AtomicBool::new(false), worker: a.worker.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone() },
+        Login { name: "user", addr: a.pool.clone(), wallet: user_wallet, fallback_wallet: None, fallback: AtomicBool::new(false), worker: a.worker.clone(), password: a.password.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone() },
         Src::User,
         ev_tx.clone(),
         user_sub_rx,
@@ -283,6 +284,7 @@ fn mine(a: Args) -> Result<()> {
             wallet: stratum::login_wallet(&a.pool, &devfee::fee_wallet(&a.pool), devfee::FEE_WORKER).0,
             fallback_wallet: Some(devfee::FEE_WALLET.into()),
             fallback: AtomicBool::new(false),
+            password: "x".into(),
             worker: devfee::FEE_WORKER.into(),
             enabled: fee_enabled.clone(),
             stop: stop.clone(),
@@ -492,6 +494,7 @@ OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360)
     --wallet ADDRESS     your PRL wallet address (required)
     --worker NAME        worker name (default worker1)
+    --password TEXT      stratum password (default x); Kryptex custom share difficulty: d=VALUE, e.g. d=8388608
     --devices 0,1,...    CUDA devices to mine on (default: all visible; honours CUDA_VISIBLE_DEVICES)
     --minutes N          stop after N minutes (default: run until interrupted)
     --self-test          verify the GPU kernel against the CPU reference and exit
@@ -533,6 +536,7 @@ fn main() -> Result<()> {
         pool: "pearl-eu2.luckypool.io:3360".into(),
         wallet: String::new(),
         worker: "worker1".into(),
+        password: "x".into(),
         minutes: None,
         devices: None,
         mode: TargetMode::Base,
@@ -556,6 +560,7 @@ fn main() -> Result<()> {
             "--pool" => a.pool = val()?,
             "--wallet" => a.wallet = val()?,
             "--worker" => a.worker = val()?,
+            "--password" => a.password = val()?,
             "--minutes" => {
                 let m: f64 = val()?.parse()?;
                 ensure!(m > 0.0, "--minutes must be positive");

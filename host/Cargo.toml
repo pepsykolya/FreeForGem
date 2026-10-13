@@ -1,7 +1,7 @@
 # FreeForGemPear — see LICENSE
 [package]
 name = "freeforgempear"
-version = "1.4.4"
+version = "1.4.5"
 edition = "2024"
 license-file = "../LICENSE"
 description = "FreeForGemPear: Pearl (PRL) GPU miner"
