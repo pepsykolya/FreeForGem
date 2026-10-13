@@ -67,8 +67,9 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.4.1-windows-x64.zip`, unpack it to a folder without spaces, edit the settings at the top of
-`start.bat` (`WALLET`, `POOL`, `WORKER`, `DEVICES`) and run it. Output goes to the window and to `logs\`; a miner that
+Download `freeforgempear-1.4.1-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+(`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
+`WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
 `README-WINDOWS.txt`.
 

@@ -27,7 +27,7 @@ $name = "freeforgempear-$version-windows-x64"
 $stage = "dist\$name\freeforgempear"
 Remove-Item -Recurse -Force "dist\$name" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item host\target\release\freeforgempear.exe, "$lib\pearlgpu.dll", windows\start.bat, windows\start.ps1, `
+Copy-Item host\target\release\freeforgempear.exe, "$lib\pearlgpu.dll", windows\start*.bat, windows\start.ps1, `
     windows\README-WINDOWS.txt, LICENSE, NOTICE, README.md, HIVEOS.md, MANUAL.md $stage
 $zip = "dist\$name.zip"
 Remove-Item -Force $zip -ErrorAction SilentlyContinue

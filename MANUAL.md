@@ -53,7 +53,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
    | Installation URL | the link above |
    | Hash algorithm | `pearlhash` (or leave `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-   | Pool URL | `pearl-eu2.luckypool.io:3360` (or any pool from section 6) |
+   | Pool URL | `pearl-eu2.luckypool.io:3360`, or Kryptex `prl-eu.kryptex.network:7048` (any pool from section 6) |
    | Pass | leave empty |
    | Extra config arguments | optional, for example `--devices 0,1` |
 
@@ -69,7 +69,8 @@ To update, change the Installation URL to the new version. The same guide with m
 tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
 cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
-./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
+./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
+./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
 ```
 
 | Option | Meaning |
@@ -91,7 +92,17 @@ Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA d
    `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
-3. Right-click **`start.bat`** → *Edit* and set:
+3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
+
+   | File | Pool |
+   |---|---|
+   | `start.bat`, `start-luckypool-eu.bat` | LuckyPool Europe `pearl-eu2.luckypool.io:3360` |
+   | `start-luckypool-ru.bat` / `-us.bat` / `-asia.bat` | LuckyPool Russia / US East / Singapore |
+   | `start-kryptex-eu.bat` | Kryptex Europe `prl-eu.kryptex.network:7048` |
+   | `start-kryptex-ru.bat` / `-us.bat` / `-asia.bat` | Kryptex Russia / North America / Singapore |
+
+   **Important:** in every file `WALLET` is preset to the **developer's example address**. Replace it with yours, or you mine for
+   the developer (the miner warns about this at start). Right-click the file → *Edit* and set:
 
 | Setting | Value |
 |---|---|
@@ -100,7 +111,7 @@ Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA d
 | `WORKER` | rig name, default = computer name |
 | `DEVICES` | empty = all NVIDIA GPUs, or a list like `0,1` (indexes from `nvidia-smi`) |
 
-4. Double-click **`start.bat`**. One miner process drives all GPUs; its output is shown in the window and saved to
+4. Double-click the chosen **`.bat`** file. One miner process drives all GPUs; its output is shown in the window and saved to
    `logs\miner-<date>.log` (the last 10 logs are kept). If the miner exits or crashes, it is restarted after 15 s.
    `Ctrl+C` stops it.
 
@@ -340,7 +351,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
    | Installation URL | ссылка выше |
    | Hash algorithm | `pearlhash` (или оставить `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-   | Pool URL | `pearl-eu2.luckypool.io:3360` (или любой пул из раздела 6) |
+   | Pool URL | `pearl-eu2.luckypool.io:3360` или Kryptex `prl-eu.kryptex.network:7048` (любой пул из раздела 6) |
    | Pass | пусто |
    | Extra config arguments | по желанию, например `--devices 0,1` |
 
@@ -356,7 +367,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
 tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
 cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
-./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1
+./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
+./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
 ```
 
 | Опция | Значение |
@@ -378,7 +390,17 @@ cd freeforgempear-1.4.1
    `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
-3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
+3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
+
+   | Файл | Пул |
+   |---|---|
+   | `start.bat`, `start-luckypool-eu.bat` | LuckyPool Европа `pearl-eu2.luckypool.io:3360` |
+   | `start-luckypool-ru.bat` / `-us.bat` / `-asia.bat` | LuckyPool Россия / США (восток) / Сингапур |
+   | `start-kryptex-eu.bat` | Kryptex Европа `prl-eu.kryptex.network:7048` |
+   | `start-kryptex-ru.bat` / `-us.bat` / `-asia.bat` | Kryptex Россия / Северная Америка / Сингапур |
+
+   **Важно:** во всех файлах `WALLET` заранее заполнен **адресом разработчика из примера**. Замените его своим, иначе вы майните
+   на разработчика (майнер предупредит об этом при старте). Правой кнопкой по файлу → *Изменить* и задайте:
 
 | Параметр | Значение |
 |---|---|
@@ -387,7 +409,7 @@ cd freeforgempear-1.4.1
 | `WORKER` | имя рига, по умолчанию имя компьютера |
 | `DEVICES` | пусто = все GPU NVIDIA, или список вида `0,1` (индексы из `nvidia-smi`) |
 
-4. Запустите **`start.bat`**. Один процесс майнера ведёт все GPU; вывод идёт в окно и в файл
+4. Запустите выбранный **`.bat`**. Один процесс майнера ведёт все GPU; вывод идёт в окно и в файл
    `logs\miner-<дата>.log` (хранятся последние 10 логов). Если майнер завершился или упал, он перезапускается через 15 с.
    `Ctrl+C` — остановка.
 
@@ -629,7 +651,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
    | Installation URL | 上面的链接 |
    | Hash algorithm | `pearlhash`（或保持 `----`） |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-   | Pool URL | `pearl-eu2.luckypool.io:3360`（或第 6 节中的任一矿池） |
+   | Pool URL | `pearl-eu2.luckypool.io:3360`，或 Kryptex `prl-eu.kryptex.network:7048`（第 6 节中的任一矿池） |
    | Pass | 留空 |
    | Extra config arguments | 可选，例如 `--devices 0,1` |
 
@@ -645,7 +667,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
 tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
 cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
-./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1
+./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
+./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
 ```
 
 | 选项 | 含义 |
@@ -667,7 +690,17 @@ cd freeforgempear-1.4.1
    `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
-3. 右键点击 **`start.bat`** → *编辑*，并设置：
+3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
+
+   | 文件 | 矿池 |
+   |---|---|
+   | `start.bat`、`start-luckypool-eu.bat` | LuckyPool 欧洲 `pearl-eu2.luckypool.io:3360` |
+   | `start-luckypool-ru.bat` / `-us.bat` / `-asia.bat` | LuckyPool 俄罗斯 / 美国东部 / 新加坡 |
+   | `start-kryptex-eu.bat` | Kryptex 欧洲 `prl-eu.kryptex.network:7048` |
+   | `start-kryptex-ru.bat` / `-us.bat` / `-asia.bat` | Kryptex 俄罗斯 / 北美 / 新加坡 |
+
+   **重要：**所有文件中的 `WALLET` 预填的是**开发者的示例地址**。请替换为你自己的地址，否则你是在为开发者挖矿（启动时矿工会提示）。
+   右键点击文件 → *编辑*，并设置：
 
 | 设置项 | 值 |
 |---|---|
@@ -676,7 +709,7 @@ cd freeforgempear-1.4.1
 | `WORKER` | 矿机名称，默认 = 计算机名 |
 | `DEVICES` | 留空 = 所有 NVIDIA 显卡，或类似 `0,1` 的列表（编号来自 `nvidia-smi`） |
 
-4. 双击 **`start.bat`**。一个矿工进程驱动所有显卡；输出显示在窗口中并保存到
+4. 双击所选的 **`.bat`** 文件。一个矿工进程驱动所有显卡；输出显示在窗口中并保存到
    `logs\miner-<日期>.log`（保留最近 10 个日志）。矿工退出或崩溃后会在 15 秒后自动重启。`Ctrl+C` 停止。
 
 * **开机自启：** 把 `start.bat` 的快捷方式放进 `shell:startup`（Win+R，输入 `shell:startup`），或在任务计划程序中创建"登录时"运行 `start.bat` 的任务。

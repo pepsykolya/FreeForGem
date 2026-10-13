@@ -28,7 +28,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
    | Installation URL | the link above |
    | Hash algorithm | `pearlhash` (or leave `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-   | Pool URL | `pearl-eu2.luckypool.io:3360` (or any other Pearl stratum pool) |
+   | Pool URL | `pearl-eu2.luckypool.io:3360`, or Kryptex `prl-eu.kryptex.network:7048` (or any other Pearl stratum pool) |
    | Pass | leave empty |
    | Extra config arguments | optional, for example `--devices 0,1`; `--auto-uv` enables the undervolt tuner (see below) |
 
@@ -105,7 +105,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgem
    | Installation URL | ссылка выше |
    | Hash algorithm | `pearlhash` (или оставить `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-   | Pool URL | `pearl-eu2.luckypool.io:3360` (или любой другой stratum-пул Pearl) |
+   | Pool URL | `pearl-eu2.luckypool.io:3360` или Kryptex `prl-eu.kryptex.network:7048` (или любой другой stratum-пул Pearl) |
    | Pass | пусто |
    | Extra config arguments | по желанию, например `--devices 0,1`; `--auto-uv` включает подбор андервольта (см. ниже) |
 

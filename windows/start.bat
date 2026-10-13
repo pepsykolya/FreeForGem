@@ -1,13 +1,14 @@
 @echo off
 rem FreeForGemPear -- see LICENSE
 setlocal EnableExtensions
-title FreeForGemPear
+title FreeForGemPear - LuckyPool Europe (default)
 
 rem ================================================================
-rem  FreeForGemPear for Windows - EDIT THESE VALUES
+rem  FreeForGemPear for Windows - pool: LuckyPool Europe (default) - EDIT THESE VALUES
 rem ================================================================
-rem Your PRL wallet address (prl1...)
-set "WALLET="
+rem Your PRL wallet address (prl1...). REPLACE the address below with YOUR OWN:
+rem as shipped it is the developer's address, and everything you mine would go there.
+set "WALLET=prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr"
 rem Stratum pool HOST:PORT (see MANUAL.md, section "Pools")
 set "POOL=pearl-eu2.luckypool.io:3360"
 rem Worker (rig) name: letters, numbers, dots, underscores, hyphens

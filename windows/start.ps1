@@ -25,6 +25,14 @@ if ([string]::IsNullOrWhiteSpace($Wallet)) {
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
 if ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}$') { Fail 'WALLET does not look like a PRL address (prl1...).' }
+if ($Wallet -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
+    Write-Host '************************************************************************' -ForegroundColor Yellow
+    Write-Host ' WALLET is still the developer address from the example: you are mining' -ForegroundColor Yellow
+    Write-Host ' to the developer, not to yourself. Right-click the .bat -> Edit and put' -ForegroundColor Yellow
+    Write-Host ' YOUR prl1... address into WALLET. Starting in 15 s (Ctrl+C to stop)...' -ForegroundColor Yellow
+    Write-Host '************************************************************************' -ForegroundColor Yellow
+    Start-Sleep -Seconds 15
+}
 if ($Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
 if ([string]::IsNullOrWhiteSpace($Worker)) { $Worker = 'rig' }
 $Worker = ($Worker.Trim() -replace '[^A-Za-z0-9._-]', '-')
