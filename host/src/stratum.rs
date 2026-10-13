@@ -75,9 +75,11 @@ pub struct Login {
 /// No line from the pool for this long: the connection is considered dead (half-open TCP) and is re-established.
 /// The pool has no stratum-level keepalive (it answers unknown methods with "method not supported") but sends a
 /// new job every ~30-60 s, so silence is a reliable sign of a dead link; TCP keepalive is enabled as well.
-/// Proofs are sent gzip-compressed (~200 KB -> ~5 KB) unless the pool rejected a compressed proof; some pools
-/// (LuckyPool) advertise `proof_encodings`, others (Kryptex) accept gzip without advertising it.
-/// FFGP_PROOF_GZIP=on/off forces the choice.
+/// Proofs are sent gzip-compressed (~200 KB -> ~5 KB) when the pool agreed to it in the handshake: the miner sends
+/// `"type":"v2"` in mining.authorize and a pool that decompresses proofs answers `"type":"v2"` (the Pearl stratum gzip
+/// protocol, used by Kryptex and LuckyPool; gzip = zlib wbits 31). Without that answer (or after a rejected compressed proof)
+/// proofs go uncompressed: such a pool would take a compressed proof as raw and silently not credit it.
+/// A job that lists `proof_encodings` with "gzip" also enables it. FFGP_PROOF_GZIP=on/off forces the choice.
 static GZIP_REFUSED: AtomicBool = AtomicBool::new(false);
 
 const SILENCE_LIMIT: Duration = Duration::from_secs(240);
@@ -179,7 +181,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     // subscribe and authorize back-to-back (LuckyPool drops us otherwise)
     let hello = [
         json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[AGENT]}),
-        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":"x","agent":AGENT}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":"x","password":"x","agent":AGENT,"type":"v2"}}),
     ];
     for h in &hello {
         sock.write_all(format!("{h}\n").as_bytes())?;
@@ -188,6 +190,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut buf = String::new();
     let mut pending: HashMap<u64, String> = HashMap::new();
     let mut seen = 0;
+    let mut v2 = false; // pool confirmed gzip proofs ("type":"v2" in the authorize reply)
     let mut last_rx = Instant::now();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
@@ -231,7 +234,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                     seen += 1;
                     log(l, &format!("RAW JOB: {line}"));
                 }
-                match parse_job(&v) {
+                match parse_job(&v, v2) {
                     Some(j) => {
                         let _ = tx.send((src, Event::Job(j)));
                     }
@@ -272,6 +275,10 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                     }
                     return Err(std::io::Error::new(ErrorKind::PermissionDenied, format!("authorize failed: {line}")));
                 } else {
+                    if id == 2 {
+                        v2 = v.get("type").and_then(Value::as_str) == Some("v2");
+                        log(l, if v2 { "pool confirmed gzip proofs (type v2)" } else { "pool did not confirm gzip (no type v2): proofs go uncompressed" });
+                    }
                     log(l, &format!("reply: {line}"));
                 }
             }
@@ -280,7 +287,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     }
 }
 
-fn parse_job(v: &Value) -> Option<PoolJob> {
+fn parse_job(v: &Value, v2: bool) -> Option<PoolJob> {
     let p = v.get("params")?;
     if !p.is_object() {
         return None;
@@ -302,8 +309,7 @@ fn parse_job(v: &Value) -> Option<PoolJob> {
     let gzip = match std::env::var("FFGP_PROOF_GZIP").as_deref() {
         Ok("on") => true,
         Ok("off") => false,
-        // an explicit list without gzip means no; no list means try gzip (falls back after a rejection)
-        _ => encodings.map_or(true, |a| a.iter().any(|e| e == "gzip")) && !GZIP_REFUSED.load(Ordering::Relaxed),
+        _ => (v2 || encodings.map_or(false, |a| a.iter().any(|e| e == "gzip"))) && !GZIP_REFUSED.load(Ordering::Relaxed),
     };
     Some(PoolJob {
         job_id,

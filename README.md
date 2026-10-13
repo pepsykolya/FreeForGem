@@ -13,7 +13,7 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
-| FreeForGemPear 1.4.3 | 70.2 TH/s | ~107 W (optional `--auto-uv`: see below) |
+| FreeForGemPear 1.4.4 | 70.2 TH/s | ~107 W (optional `--auto-uv`: see below) |
 | FreeForGemPear 1.3.1 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.3.0 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
@@ -36,8 +36,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.4.3-linux-x86_64.tar.gz
-cd freeforgempear-1.4.3
+tar xzf freeforgempear-1.4.4-linux-x86_64.tar.gz
+cd freeforgempear-1.4.4
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -67,7 +67,7 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.4.3-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+Download `freeforgempear-1.4.4-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
 (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
 `WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -79,7 +79,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.3/freeforgempear-1.4.3.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.4/freeforgempear-1.4.4.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
