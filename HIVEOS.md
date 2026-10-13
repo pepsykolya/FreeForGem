@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.4.0):**
+**Installation URL (1.4.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
 ```
 
 ### Flight sheet
@@ -83,10 +83,10 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.4.0):**
+**Ссылка для установки (1.4.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
 ```
 
 ### Полётный лист

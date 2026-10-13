@@ -72,6 +72,11 @@ pub struct Login {
 /// No line from the pool for this long: the connection is considered dead (half-open TCP) and is re-established.
 /// The pool has no stratum-level keepalive (it answers unknown methods with "method not supported") but sends a
 /// new job every ~30-60 s, so silence is a reliable sign of a dead link; TCP keepalive is enabled as well.
+/// Proofs are sent gzip-compressed (~200 KB -> ~5 KB) unless the pool rejected a compressed proof; some pools
+/// (LuckyPool) advertise `proof_encodings`, others (Kryptex) accept gzip without advertising it.
+/// FFGP_PROOF_GZIP=on/off forces the choice.
+static GZIP_REFUSED: AtomicBool = AtomicBool::new(false);
+
 const SILENCE_LIMIT: Duration = Duration::from_secs(240);
 const BACKOFF_MIN: Duration = Duration::from_secs(2);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
@@ -223,6 +228,11 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                             stats.low_diff.fetch_add(1, Ordering::Relaxed);
                         }
                         log(l, &format!("share REJECTED (id {id}, job {job_id}): {line}"));
+                        if (low.contains("gzip") || low.contains("encod") || low.contains("decompress") || low.contains("decode"))
+                            && !GZIP_REFUSED.swap(true, Ordering::Relaxed)
+                        {
+                            log(l, "the pool does not take gzip proofs: sending them uncompressed from the next job");
+                        }
                     }
                 } else if id == 2 && !ok {
                     return Err(std::io::Error::new(ErrorKind::PermissionDenied, format!("authorize failed: {line}")));
@@ -253,7 +263,13 @@ fn parse_job(v: &Value) -> Option<PoolJob> {
         let (_, suf) = job_id.rsplit_once('_')?;
         suf.parse::<f64>().ok()
     });
-    let gzip = p["proof_encodings"].as_array().map_or(false, |a| a.iter().any(|e| e == "gzip"));
+    let encodings = p["proof_encodings"].as_array();
+    let gzip = match std::env::var("FFGP_PROOF_GZIP").as_deref() {
+        Ok("on") => true,
+        Ok("off") => false,
+        // an explicit list without gzip means no; no list means try gzip (falls back after a rejection)
+        _ => encodings.map_or(true, |a| a.iter().any(|e| e == "gzip")) && !GZIP_REFUSED.load(Ordering::Relaxed),
+    };
     Some(PoolJob {
         job_id,
         header,

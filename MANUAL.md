@@ -33,10 +33,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.4.0):**
+**Installation URL (1.4.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -66,8 +66,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
-cd freeforgempear-1.4.0
+tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
+cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -87,8 +87,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.4.0-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
+1. Download **`freeforgempear-1.4.1-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Right-click **`start.bat`** → *Edit* and set:
@@ -136,6 +136,14 @@ configuration (`https://pearl.luckypool.io/api/stats`, `config.stratum` and `con
 Example: `--pool pearl-pl.luckypool.io:3360`. Use your plain `prl1...` address as the wallet; the worker name is sent separately.
 Any other Pearl stratum pool that speaks the same JSON-RPC stratum can be used; the dev fee (section 10) is then mined on that pool.
 
+**Kryptex** (checked in 1.4.1): `--pool prl-eu.kryptex.network:7048` (also `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
+`prl-ae` `.kryptex.network`; port 7048 is plain TCP). Wallet: your `prl1...` address.
+
+**Proof compression.** Since 1.4.1 every share's proof is sent gzip-compressed: about 5 KB instead of about 270 KB, so much less
+traffic and faster submits. If a pool lists its accepted encodings, the miner follows the list; if a pool rejects a compressed proof,
+the miner switches to uncompressed proofs by itself (log: `the pool does not take gzip proofs`). `FFGP_PROOF_GZIP=on` / `off`
+forces the choice.
+
 ### 7. Overclocking (RTX 3070)
 
 The kernel works from the L2 cache and needs almost no VRAM bandwidth, so the memory clock can go down.
@@ -160,7 +168,7 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 | Line | Meaning |
 |---|---|
-| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | start banner |
+| `FreeForGemPear 1.4.1 \| pool ... \| worker ... \| N GPU(s)` | start banner |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | the tuned kernel is loaded. `embedded search kernel could not be loaded (reason)` = the miner stops with an error (driver older than 525 or an unsupported GPU) |
 | `new job ... prepared in ...` | a new pool job is ready |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | every 10 s: hashrate per GPU and in total; shares submitted / accepted / rejected for you and for the dev fee; `[DEVFEE]` while a fee slot runs |
@@ -172,9 +180,9 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.1-linux-x86_64.tar.gz freeforgempear-1.4.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.1-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.4.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -312,10 +320,10 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.4.0):**
+**Ссылка для установки (1.4.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -345,8 +353,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
-cd freeforgempear-1.4.0
+tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
+cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1
 ```
@@ -366,8 +374,8 @@ cd freeforgempear-1.4.0
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.4.0-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.4.1-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
@@ -415,6 +423,14 @@ cd freeforgempear-1.4.0
 Пример: `--pool pearl-pl.luckypool.io:3360`. В качестве кошелька указывайте обычный адрес `prl1...`, имя воркера передаётся отдельно.
 Подойдёт любой другой stratum-пул Pearl с тем же JSON-RPC; комиссия (раздел 10) тогда майнится на этом пуле.
 
+**Kryptex** (проверено в 1.4.1): `--pool prl-eu.kryptex.network:7048` (также `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
+`prl-ae` `.kryptex.network`; порт 7048 — обычный TCP). Кошелёк — ваш адрес `prl1...`.
+
+**Сжатие доказательств.** С 1.4.1 доказательство каждой шары отправляется сжатым gzip: около 5 КБ вместо примерно 270 КБ — гораздо
+меньше трафика и быстрее отправка. Если пул сообщает список поддерживаемых кодировок, майнер следует ему; если пул отклонит сжатое
+доказательство, майнер сам перейдёт на несжатые (в логе: `the pool does not take gzip proofs`). `FFGP_PROOF_GZIP=on` / `off`
+задаёт выбор принудительно.
+
 ### 7. Разгон (RTX 3070)
 
 Ядро работает из L2-кэша и почти не использует пропускную способность видеопамяти, поэтому частоту памяти можно снизить.
@@ -439,7 +455,7 @@ cd freeforgempear-1.4.0
 
 | Строка | Значение |
 |---|---|
-| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
+| `FreeForGemPear 1.4.1 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | загружено настроенное ядро. `embedded search kernel could not be loaded (причина)` = майнер останавливается с ошибкой (драйвер старше 525 или неподдерживаемая карта) |
 | `new job ... prepared in ...` | готово новое задание пула |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | каждые 10 с: хэшрейт по картам и общий; отправленные / принятые / отклонённые шары ваши и комиссии; `[DEVFEE]` пока идёт слот комиссии |
@@ -451,9 +467,9 @@ cd freeforgempear-1.4.0
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.1-linux-x86_64.tar.gz freeforgempear-1.4.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.1-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.4.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -593,10 +609,10 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 
 FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.4.0)：**
+**安装链接 (1.4.1)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -626,8 +642,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
-cd freeforgempear-1.4.0
+tar xzf freeforgempear-1.4.1-linux-x86_64.tar.gz
+cd freeforgempear-1.4.1
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1
 ```
@@ -647,8 +663,8 @@ cd freeforgempear-1.4.0
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.4.0-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.4.1-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 右键点击 **`start.bat`** → *编辑*，并设置：
@@ -693,6 +709,13 @@ cd freeforgempear-1.4.0
 示例：`--pool pearl-pl.luckypool.io:3360`。钱包填写普通的 `prl1...` 地址，矿工名单独发送。
 也可使用其他使用相同 JSON-RPC stratum 的 Pearl 矿池；此时开发者抽水（第 10 节）在该矿池上进行。
 
+**Kryptex**（1.4.1 已验证）：`--pool prl-eu.kryptex.network:7048`（另有 `prl`、`prl-us`、`prl-br`、`prl-sg`、`prl-hk`、`prl-ru`、
+`prl-ae` `.kryptex.network`；7048 端口为普通 TCP）。钱包填写你的 `prl1...` 地址。
+
+**证明压缩。** 自 1.4.1 起，每个份额的证明都以 gzip 压缩发送：约 5 KB，而不是约 270 KB，流量大幅减少、提交更快。若矿池公布了支持的编码，
+矿工按其列表执行；若矿池拒绝压缩的证明，矿工会自动改为发送未压缩的证明（日志：`the pool does not take gzip proofs`）。
+`FFGP_PROOF_GZIP=on` / `off` 可强制指定。
+
 ### 7. 超频（RTX 3070）
 
 内核从 L2 缓存工作，几乎不需要显存带宽，因此可以降低显存频率。
@@ -717,7 +740,7 @@ cd freeforgempear-1.4.0
 
 | 行 | 含义 |
 |---|---|
-| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
+| `FreeForGemPear 1.4.1 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | 已加载调优内核。`embedded search kernel could not be loaded (原因)` = 矿工报错退出（驱动低于 525 或显卡不受支持） |
 | `new job ... prepared in ...` | 新的矿池任务已就绪 |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | 每 10 秒：每块显卡和总算力；你和抽水的已提交 / 已接受 / 已拒绝份额；抽水时段显示 `[DEVFEE]` |
@@ -729,9 +752,9 @@ cd freeforgempear-1.4.0
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.4.1-linux-x86_64.tar.gz freeforgempear-1.4.1.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.4.1-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.4.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
