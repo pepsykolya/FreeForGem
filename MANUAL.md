@@ -269,10 +269,11 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ```
 
 **Reference values, RTX 3070 locked at 1560 MHz / 810 MHz memory** (~70 TH/s at every offset, the hashrate does not change):
-about 116 W at +150, 110 W at +195, 105 W at +225 and about 102 W at +255 (our best earlier manual measurement: +3.6% TH/W against
-105.5 W at +225). The edge differs from chip to chip and with temperature; on our test card the built-in check, which is stricter than
-a manual test, stopped between +210 and +240, so the tuner settled at about +195...+210. Expect a gain of roughly 5–10 W per card
-compared with a stock-like offset, and do not copy another card's number.
+about 116 W at +150, 113 W at +180, 110 W at +195 and 107–108 W at +210. On our test card the built-in check found silent
+calculation errors from +225 upward, although a shorter manual test had passed even +255, so the tuner settled at +195...+210.
+Silent errors show no Xid and no rejected shares, but they lose valid shares, so a higher offset that "looks stable" can earn less.
+The edge differs from chip to chip and with temperature: expect roughly 5–10 W per card compared with a stock offset, verify your
+value with `--uv-offset N` and do not copy another card's number.
 
 **Manual tuning (without `--auto-uv`)**, for those who prefer the HiveOS OC tab or Afterburner:
 1. Lock the core clock and lower the memory clock as in section 7, and let the card warm up for a few minutes.
@@ -550,10 +551,11 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ```
 
 **Ориентиры, RTX 3070, ядро 1560 МГц, память 810 МГц** (~70 TH/s при любом offset, хешрейт не меняется):
-около 116 Вт при +150, 110 Вт при +195, 105 Вт при +225 и около 102 Вт при +255 (наш лучший прежний ручной замер:
-+3,6% TH/Вт относительно 105,5 Вт при +225). Предел у каждого кристалла свой и зависит от температуры; на нашей тестовой
-карте встроенная проверка, более строгая, чем ручной тест, остановилась между +210 и +240, и подбор остановился около +195…+210.
-Ждите выигрыша порядка 5–10 Вт на карту по сравнению с «обычным» offset и не копируйте чужие числа.
+около 116 Вт при +150, 113 Вт при +180, 110 Вт при +195 и 107–108 Вт при +210. На нашей тестовой карте встроенная проверка
+нашла тихие ошибки вычислений начиная с +225, хотя более короткий ручной тест проходил даже +255, поэтому подбор остановился на
++195…+210. Тихие ошибки не дают ни Xid, ни отклонённых шар, но теряют верные шары: offset, который «выглядит стабильным», может
+приносить меньше. Предел у каждого кристалла свой и зависит от температуры: ждите порядка 5–10 Вт на карту по сравнению со
+стоковым offset, проверяйте своё значение через `--uv-offset N` и не копируйте чужие числа.
 
 **Ручная настройка (без `--auto-uv`)** — для тех, кто предпочитает вкладку OC в HiveOS или Afterburner:
 1. Зафиксируйте частоту ядра и снизьте частоту памяти, как в разделе 7; дайте карте прогреться несколько минут.
@@ -815,10 +817,10 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ```
 
-**参考值，RTX 3070 锁定 1560 MHz、显存 810 MHz**（任何偏移下都约 70 TH/s，算力不变）：+150 时约 116 W，+195 时约 110 W，
-+225 时约 105 W，+255 时约 102 W（我们此前最好的手动测量：相对 +225 时的 105.5 W，TH/W 提高 3.6%）。每颗芯片的极限不同，
-也随温度变化；在我们的测试卡上，比手动测试更严格的内置检查在 +210 到 +240 之间停止，调校结果约为 +195…+210。
-相比常规偏移，预计每块显卡节省约 5–10 W；不要照搬别人的数值。
+**参考值，RTX 3070 锁定 1560 MHz、显存 810 MHz**（任何偏移下都约 70 TH/s，算力不变）：+150 时约 116 W，+180 时约 113 W，
++195 时约 110 W，+210 时约 107–108 W。在我们的测试卡上，内置检查从 +225 起发现了静默计算错误（较短的手动测试甚至在 +255 也通过），
+因此调校结果为 +195…+210。静默错误不会产生 Xid 或拒绝份额，但会丢失有效份额：看似“稳定”的更高偏移反而可能收益更低。
+每颗芯片的极限不同，也随温度变化：相比默认偏移，预计每块显卡节省约 5–10 W；请用 `--uv-offset N` 验证自己的数值，不要照搬别人的数值。
 
 **手动调校（不使用 `--auto-uv`）**，适合喜欢用 HiveOS 超频页或 Afterburner 的用户：
 1. 按第 7 节锁定核心频率并降低显存频率，让显卡预热几分钟。
