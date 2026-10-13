@@ -24,8 +24,9 @@ if ([string]::IsNullOrWhiteSpace($Wallet)) {
     Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your PRL address (prl1...).'
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
-if ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}$') { Fail 'WALLET does not look like a PRL address (prl1...).' }
-if ($Wallet -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
+$Wallet = ($Wallet -replace '\s', '')
+if ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
+if ($Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Write-Host ' WALLET is still the developer address from the example: you are mining' -ForegroundColor Yellow
     Write-Host ' to the developer, not to yourself. Right-click the .bat -> Edit and put' -ForegroundColor Yellow
@@ -34,6 +35,9 @@ if ($Wallet -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fy
     Start-Sleep -Seconds 15
 }
 if ($Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
+if ($Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
+    Write-Host 'WARNING: WALLET has a +NOCK part, but PRL+NOCK merge mining works on LuckyPool only; this pool may refuse the login.' -ForegroundColor Yellow
+}
 if ([string]::IsNullOrWhiteSpace($Worker)) { $Worker = 'rig' }
 $Worker = ($Worker.Trim() -replace '[^A-Za-z0-9._-]', '-')
 if ($Worker.Length -gt 32) { $Worker = $Worker.Substring(0, 32) }

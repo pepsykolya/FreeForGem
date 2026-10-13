@@ -6,15 +6,16 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.4.1):**
+**Installation URL (1.4.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.2/freeforgempear-1.4.2.tar.gz
 ```
 
 ### Flight sheet
 
-1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
+1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address. On LuckyPool you can merge-mine NOCK as well:
+   use `prl1...+YOUR_NOCK_ADDRESS` as the address (LuckyPool only; see MANUAL.md, section 6).
 2. **New flight sheet.**
    - **Coin:** `PRL`.
    - **Wallet:** the wallet from step 1.
@@ -83,15 +84,16 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.4.1):**
+**Ссылка для установки (1.4.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.1/freeforgempear-1.4.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.2/freeforgempear-1.4.2.tar.gz
 ```
 
 ### Полётный лист
 
-1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
+1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`. На LuckyPool можно заодно майнить NOCK:
+   укажите адрес в виде `prl1...+ВАШ_АДРЕС_NOCK` (только LuckyPool; см. MANUAL.md, раздел 6).
 2. **Новый полётный лист.**
    - **Coin:** `PRL`.
    - **Wallet:** кошелёк из шага 1.

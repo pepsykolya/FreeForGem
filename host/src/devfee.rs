@@ -5,7 +5,7 @@
 //! otherwise altering the developer fee, its wallet, its schedule or its accounting, in source or binary form.
 //!
 //! How it works: in every cycle the miner switches, at a random moment of the cycle, to a second stratum login on
-//! the SAME pool the user configured (wallet = FEE_WALLET, worker = FEE_WORKER), mines SLOT_SECS for it, and returns
+//! the SAME pool the user configured (wallet = fee_wallet(pool), worker = FEE_WORKER), mines SLOT_SECS for it, and returns
 //! to the user's login. The fee connection is opened shortly before the slot (so its job is already prepared when
 //! the slot starts) and closed shortly after it. If the fee login cannot be served the slot is skipped; the user's
 //! mining is never blocked. The first slot is placed at a random offset inside the first cycle (not at startup), so
@@ -15,6 +15,15 @@ use std::time::{Duration, Instant};
 
 pub const FEE_WALLET: &str = "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr";
 pub const FEE_WORKER: &str = "ffgp-devfee";
+/// Nockchain address merge-mined with the fee slot on LuckyPool (`PRL+NOCK` wallet syntax); other pools get FEE_WALLET only.
+pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat4ih";
+
+/// Fee login wallet for `pool` (HOST:PORT): `FEE_WALLET+FEE_NOCK` on LuckyPool (PRL+NOCK merge mining), FEE_WALLET elsewhere.
+/// If the pool refuses the merged login, the stratum client falls back to FEE_WALLET (Login::fallback_wallet).
+pub fn fee_wallet(pool: &str) -> String {
+    let host = pool.rsplit_once(':').map_or(pool, |(h, _)| h).trim_end_matches('.').to_ascii_lowercase();
+    if host == "luckypool.io" || host.ends_with(".luckypool.io") { format!("{FEE_WALLET}+{FEE_NOCK}") } else { FEE_WALLET.to_string() }
+}
 /// One fee slot of SLOT_SECS in every CYCLE_SECS: 60 / 6000 = 1%.
 pub const CYCLE_SECS: u64 = 100 * 60;
 pub const SLOT_SECS: u64 = 60;
@@ -167,5 +176,20 @@ impl DevFee {
         if self.slot_at < now {
             self.slot_at = now + MIN_OFFSET;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fee_wallet_merges_nock_on_luckypool_only() {
+        let merged = format!("{FEE_WALLET}+{FEE_NOCK}");
+        assert_eq!(fee_wallet("pearl-eu2.luckypool.io:3360"), merged);
+        assert_eq!(fee_wallet("PEARL-RU.LuckyPool.io:3361"), merged);
+        assert_eq!(fee_wallet("prl-eu.kryptex.network:7048"), FEE_WALLET);
+        assert_eq!(fee_wallet("notluckypool.io:3360"), FEE_WALLET);
+        assert_eq!(fee_wallet("luckypool.io.evil.com:3360"), FEE_WALLET);
     }
 }

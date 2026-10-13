@@ -63,6 +63,9 @@ pub struct Login {
     pub name: &'static str, // "user" / "fee": log prefix
     pub addr: String,
     pub wallet: String,
+    /// Used instead of `wallet` once the pool has refused it (fee login: plain PRL when the PRL+NOCK login is refused).
+    pub fallback_wallet: Option<String>,
+    pub fallback: AtomicBool,
     pub worker: String,
     /// The connection is only kept while this is true (the fee login is enabled around its slot only).
     pub enabled: Arc<AtomicBool>,
@@ -120,6 +123,13 @@ pub fn spawn(l: Login, src: Src, tx: Sender<(Src, Event)>, rx: Receiver<Submit>,
         .expect("spawn stratum thread");
 }
 
+fn wallet(l: &Login) -> &str {
+    match &l.fallback_wallet {
+        Some(w) if l.fallback.load(Ordering::Relaxed) => w,
+        _ => &l.wallet,
+    }
+}
+
 fn log(l: &Login, s: &str) {
     eprintln!("[stratum:{}] {s}", l.name);
 }
@@ -147,7 +157,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     // subscribe and authorize back-to-back (LuckyPool drops us otherwise)
     let hello = [
         json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[AGENT]}),
-        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":l.wallet,"worker":l.worker,"pass":"x","agent":AGENT}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":"x","agent":AGENT}}),
     ];
     for h in &hello {
         sock.write_all(format!("{h}\n").as_bytes())?;
@@ -235,6 +245,9 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                         }
                     }
                 } else if id == 2 && !ok {
+                    if l.fallback_wallet.is_some() && !l.fallback.swap(true, Ordering::Relaxed) {
+                        log(l, "the pool refused the merged wallet: logging in with the PRL wallet only from now on");
+                    }
                     return Err(std::io::Error::new(ErrorKind::PermissionDenied, format!("authorize failed: {line}")));
                 } else {
                     log(l, &format!("reply: {line}"));
