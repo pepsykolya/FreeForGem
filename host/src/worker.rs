@@ -67,6 +67,10 @@ pub struct GpuStat {
     pub name: String,
     pub attempts: AtomicU64,
     pub alive: AtomicBool,
+    /// Undervolt tuner (uv.rs): asks the worker to stop feeding the GPU for a while / acknowledges it / counts hits that failed CPU verification.
+    pub pause: AtomicBool,
+    pub paused: AtomicBool,
+    pub uv_bad: AtomicU64,
 }
 
 /// An attempt in flight on the GPU, with everything needed to turn its hits into shares.
@@ -118,7 +122,8 @@ pub fn spawn(
         let (work_tx, work_rx) = mpsc::sync_channel::<Work>(WORK_QUEUE);
         let prover = {
             let sh = sh.clone();
-            std::thread::Builder::new().name(format!("prover{dev}")).spawn(move || prover_loop(work_rx, sh, sinks)).expect("spawn prover")
+            let gs = gs.clone();
+            std::thread::Builder::new().name(format!("prover{dev}")).spawn(move || prover_loop(work_rx, sh, sinks, gs)).expect("spawn prover")
         };
         if let Err(e) = run(dev, &sh, &gs, &work_tx) {
             eprintln!("!! GPU {dev} worker stopped: {e:#}");
@@ -139,6 +144,18 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
     let mut counter = (gs.dev as u64 + 1) << 40; // disjoint nonce ranges per GPU; never reset
     let mut hit_buf = vec![gpu::Hit::default(); MAX_HITS];
     while !sh.stop.load(Ordering::Relaxed) {
+        if gs.pause.load(Ordering::Acquire) {
+            // the undervolt tuner wants the GPU for a check (its own process): finish what is in flight and wait
+            if let Some(p) = pending.take() {
+                finish(p, &mut hit_buf, sh, gs, work_tx)?;
+            }
+            gs.paused.store(true, Ordering::Release);
+            while gs.pause.load(Ordering::Acquire) && !sh.stop.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            gs.paused.store(false, Ordering::Release);
+            continue;
+        }
         let g = sh.gen_.load(Ordering::Acquire);
         if g != my_gen {
             my_gen = g;
@@ -214,7 +231,7 @@ fn finish(p: Pending, buf: &mut [gpu::Hit], sh: &Shared, gs: &GpuStat, work_tx: 
 
 /// Proof thread: builds, CPU-verifies and hands over at most one share per queued attempt.
 /// Runs off the GPU-feeding thread, so proof building (~160 ms) never stalls the GPU queue.
-fn prover_loop(rx: mpsc::Receiver<Work>, sh: Arc<Shared>, sinks: [Sender<Submit>; 2]) {
+fn prover_loop(rx: mpsc::Receiver<Work>, sh: Arc<Shared>, sinks: [Sender<Submit>; 2], gs: Arc<GpuStat>) {
     while let Ok(p) = rx.recv() {
         for h in &p.hits {
             let id = sh.next_id.fetch_add(1, Ordering::Relaxed);
@@ -226,6 +243,7 @@ fn prover_loop(rx: mpsc::Receiver<Work>, sh: Arc<Shared>, sinks: [Sender<Submit>
                 }
                 Err(e) => {
                     sh.bad.fetch_add(1, Ordering::Relaxed);
+                    gs.uv_bad.fetch_add(1, Ordering::Relaxed);
                     eprintln!("!! hit not submitted (job {}, counter {}): {e:#}", p.pj.job_id, p.counter);
                 }
             }

@@ -33,10 +33,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.3.1):**
+**Installation URL (1.4.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -66,8 +66,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.3.1-linux-x86_64.tar.gz
-cd freeforgempear-1.3.1
+tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
+cd freeforgempear-1.4.0
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -87,8 +87,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.3.1-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1-windows-x64.zip`
+1. Download **`freeforgempear-1.4.0-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Right-click **`start.bat`** → *Edit* and set:
@@ -108,6 +108,7 @@ Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA d
   task "At log on" that runs `start.bat`.
 * **Overclocking:** MSI Afterburner (core lock in the curve editor, memory down) with the values from section 7.
   Laptops: plug in the charger and choose the maximum performance mode.
+* **Undervolt (optional, experimental on Windows):** remove `rem` before `set "AUTO_UV=1"` in `start.bat` and run it as Administrator; see section 12.
 * Defender / SmartScreen may flag a new unsigned `.exe`: *More info → Run anyway*, or add the folder to the exclusions.
 * Without `start.bat`: `freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1`
 * Build it yourself: `.\build-windows.ps1` (see the README).
@@ -153,11 +154,13 @@ Result: **~70 TH/s at ~105–107 W**.
 
 Other 30-series cards: start from the same values and adjust. If shares get rejected or the log shows `bad` hits, lower the core clock.
 
+Optional, to save more watts at the same speed: lower the core voltage with `--auto-uv` (section 12).
+
 ### 8. Reading the log
 
 | Line | Meaning |
 |---|---|
-| `FreeForGemPear 1.3.1 \| pool ... \| worker ... \| N GPU(s)` | start banner |
+| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | start banner |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | the tuned kernel is loaded. `embedded search kernel could not be loaded (reason)` = the miner stops with an error (driver older than 525 or an unsupported GPU) |
 | `new job ... prepared in ...` | a new pool job is ready |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | every 10 s: hashrate per GPU and in total; shares submitted / accepted / rejected for you and for the dev fee; `[DEVFEE]` while a fee slot runs |
@@ -169,9 +172,9 @@ Other 30-series cards: start from the same values and adjust. If shares get reje
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.3.1-linux-x86_64.tar.gz freeforgempear-1.3.1.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.3.1-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.3.1-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -197,6 +200,88 @@ The fee is a condition of the license: removing, reducing or redirecting it is n
 
 Environment variables (set before starting the miner): `PEARL_SPIN=1` (spin-wait instead of sleeping).
 On Windows: `set PEARL_SPIN=1` in a `cmd` window, then run `start.bat` from that window.
+
+### 12. Undervolt / `--auto-uv` (optional, new in 1.4.0)
+
+**Off by default.** With `--auto-uv` the miner finds, once per GPU, a lower core voltage (the GPU's *V/F offset*) at which the
+card still computes everything correctly, uses it while mining, and puts your own settings back when it exits. Lower voltage
+means fewer watts at the same hashrate: the clock stays where you locked it (section 7).
+
+**What it does**
+1. Reads the V/F offset the card has now (HiveOS OC, your own script, ...) and writes it to a restore file *before* changing anything.
+2. Warms the GPU up for 3 minutes, then raises the offset in steps of **15 MHz**. Every step is checked for about 30 s in a
+   separate process: the same job is computed thousands of times and every tile of every result is compared bit for bit,
+   the hit counts of normal mining attempts are compared, and found results are verified on the CPU with the official verifier.
+   Wrong results without any driver error do happen near the limit, which is why the checks are done on the GPU *and* the CPU.
+3. The first mismatch, CUDA error, Xid error or hang ends the climb. The result is the **last good step minus one step (15 MHz
+   margin)**, confirmed by a longer check (about 2 minutes); if the confirmation fails it goes one step lower. The highest
+   value tried is +300 (`--uv-max`).
+4. The result is saved in `uv.json`, keyed by GPU UUID, driver version and kernel build. Later starts apply it after a
+   quick check (about 30 s). If the driver, the kernel build or your starting offset changed, the GPU is tuned again.
+5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
+   If a found result fails the CPU verification, or a burst of rejected shares appears, the offset goes one step down (never
+   below your own value) and is saved. If somebody else changes the offset (for example HiveOS re-applies its OC), auto-uv
+   stands down on that GPU and does not fight.
+6. On exit (Ctrl+C, SIGTERM, normal end) your offset is restored. If the miner was killed (`kill -9`, crash), the next start
+   restores your offset first, from the restore file `uv-restore.json`. A reboot resets the offset in the driver anyway.
+
+Only the V/F offset is changed: locked clocks, power limit and memory are not touched. Only the GPUs the miner mines on are
+touched. NVML device numbers differ from CUDA numbers, so every GPU is matched by its PCI bus id (and UUID); the log shows the
+bus id of each change.
+
+**Requirements.** NVIDIA driver (NVML is loaded at run time, nothing to install) and **root** on Linux / HiveOS (the miner
+runs as root there) or **Administrator** on Windows. Without NVML or permission the miner logs the reason and mines normally.
+**Time:** the first tuning takes about **15 minutes per GPU** (10-25 depending on how many steps it takes; the GPUs of a rig are tuned in parallel and mining starts when
+it is done). Later starts add about 30 s.
+
+**Windows is experimental.** Reading the offset works through the Windows driver (we checked), but whether the driver lets
+a program change the offset on GeForce cards is not verified by us. If it refuses, the log says so and the miner mines normally.
+
+**Risk.** Undervolting beyond what a card can take makes a driver reset or a hang possible (the tuner only goes where it
+has just checked, with a margin, but silicon, temperature and driver differ). After a hang, reboot: the next start restores your
+offset first. Use it at your own risk, as with any overclocking.
+
+**Enable**
+* HiveOS: put `--auto-uv` into *Extra config arguments* of the flight sheet (details in HIVEOS.md).
+* Linux: `sudo ./freeforgempear --pool ... --wallet ... --auto-uv`
+* Windows: right-click `start.bat` → *Edit* and remove `rem` before `set "AUTO_UV=1"`; start `start.bat` **as Administrator**.
+
+| Option | Meaning |
+|---|---|
+| `--auto-uv` | find, apply and supervise the undervolt (as described above) |
+| `--uv-offset N` | apply the fixed offset N MHz after a quick check, no tuning (if the check fails, your offset stays) |
+| `--uv-reset` | forget the saved results; with `--auto-uv` the GPUs are tuned again; without a wallet the miner just exits |
+| `--uv-max N` | highest offset the tuner tries (default 300) |
+| `--uv-reval-hours H` | re-validation interval while mining (default 6, `0` = never) |
+| `--uv-dir DIR` | where `uv.json` and `uv-restore.json` are kept (also `FFGP_STATE_DIR`) |
+| `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id); changes nothing |
+
+Default location of the files: next to the binary (Windows: the miner folder), on HiveOS `/hive-config/freeforgempear`
+(survives miner updates and reboots). **Reset:** `freeforgempear --uv-reset` (or delete `uv.json`).
+
+**Log lines** (all start with `auto-uv:`, so `grep auto-uv` shows the story):
+```
+auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
+auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
+```
+
+**Reference values, RTX 3070 locked at 1560 MHz / 810 MHz memory** (~70 TH/s at every offset, the hashrate does not change):
+about 116 W at +150, 110 W at +195, 105 W at +225 and about 102 W at +255 (our best earlier manual measurement: +3.6% TH/W against
+105.5 W at +225). The edge differs from chip to chip and with temperature; on our test card the built-in check, which is stricter than
+a manual test, stopped between +210 and +240, so the tuner settled at about +195...+210. Expect a gain of roughly 5–10 W per card
+compared with a stock-like offset, and do not copy another card's number.
+
+**Manual tuning (without `--auto-uv`)**, for those who prefer the HiveOS OC tab or Afterburner:
+1. Lock the core clock and lower the memory clock as in section 7, and let the card warm up for a few minutes.
+2. Raise the core clock **offset** (the V/F offset: HiveOS Overclock tab, Afterburner, or `--uv-offset N`) by 15 MHz.
+3. Run at least 30 minutes and watch: `bad` must stay 0, `rej` must not grow, the log must not show `DEAD`, and `dmesg` / the
+   HiveOS messages must show no `Xid` (13, 31, 43, 79 ...). `freeforgempear --uv-offset N` applies N, runs the same check as
+   `--auto-uv` and mines with it, which is a quick way to test a candidate value.
+4. Repeat from step 2 until the first problem, then go back **two steps (30 MHz)** from the offset where it appeared and keep that.
+5. Test again after a driver update, a new cooler or hot weather.
 
 ---
 
@@ -226,10 +311,10 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.3.1):**
+**Ссылка для установки (1.4.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -259,8 +344,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.3.1-linux-x86_64.tar.gz
-cd freeforgempear-1.3.1
+tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
+cd freeforgempear-1.4.0
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1
 ```
@@ -280,8 +365,8 @@ cd freeforgempear-1.3.1
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.3.1-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.4.0-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Правой кнопкой по **`start.bat`** → *Изменить* и задайте:
@@ -301,6 +386,7 @@ cd freeforgempear-1.3.1
   «При входе в систему», запускающую `start.bat`.
 * **Разгон:** MSI Afterburner (фиксация ядра в редакторе кривой, память вниз) со значениями из раздела 7.
   Ноутбуки: подключите зарядку и выберите режим максимальной производительности.
+* **Андервольт (необязательно, в Windows экспериментально):** уберите `rem` перед `set "AUTO_UV=1"` в `start.bat` и запускайте его от администратора; см. раздел 12.
 * Defender / SmartScreen может ругаться на новый неподписанный `.exe`: *Подробнее → Выполнить в любом случае* или добавьте папку в исключения.
 * Без `start.bat`: `freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1`
 * Собрать самому: `.\build-windows.ps1` (см. README).
@@ -346,11 +432,13 @@ cd freeforgempear-1.3.1
 
 Другие карты 30-й серии: начните с тех же значений и подберите под свою карту. Если шары отклоняются или в логе есть `bad`, снизьте частоту ядра.
 
+По желанию, чтобы сэкономить ещё ватты при той же скорости: снизьте напряжение ядра с помощью `--auto-uv` (раздел 12).
+
 ### 8. Как читать лог
 
 | Строка | Значение |
 |---|---|
-| `FreeForGemPear 1.3.1 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
+| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | загружено настроенное ядро. `embedded search kernel could not be loaded (причина)` = майнер останавливается с ошибкой (драйвер старше 525 или неподдерживаемая карта) |
 | `new job ... prepared in ...` | готово новое задание пула |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | каждые 10 с: хэшрейт по картам и общий; отправленные / принятые / отклонённые шары ваши и комиссии; `[DEVFEE]` пока идёт слот комиссии |
@@ -362,9 +450,9 @@ cd freeforgempear-1.3.1
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.3.1-linux-x86_64.tar.gz freeforgempear-1.3.1.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.3.1-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.3.1-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -390,6 +478,91 @@ cd freeforgempear-1.3.1
 
 Переменные окружения (задаются до запуска майнера): `PEARL_SPIN=1` (активное ожидание вместо сна).
 В Windows: `set PEARL_SPIN=1` в окне `cmd`, затем запустите `start.bat` из этого же окна.
+
+### 12. Андервольт / `--auto-uv` (необязательно, новое в 1.4.0)
+
+**По умолчанию выключено.** С `--auto-uv` майнер один раз для каждой карты подбирает пониженное напряжение ядра
+(*V/F offset* видеокарты), при котором карта всё ещё считает без ошибок, использует его при майнинге и возвращает ваши
+настройки при выходе. Меньше напряжение — меньше ватт при том же хешрейте: частота остаётся той, что вы зафиксировали (раздел 7).
+
+**Что делает**
+1. Читает V/F offset, который стоит сейчас (разгон в HiveOS, ваш скрипт и т. п.), и записывает его в файл восстановления
+   *до* любых изменений.
+2. Прогревает карту 3 минуты, затем поднимает offset шагами по **15 МГц**. Каждый шаг около 30 с проверяется в отдельном
+   процессе: одна и та же задача считается тысячи раз, каждый тайл каждого результата сравнивается побитно, сравниваются
+   счётчики попаданий обычных майнинговых попыток, а найденные результаты проверяются на CPU официальным верификатором.
+   У предела бывают неверные результаты без всякой ошибки драйвера, поэтому проверка идёт и на GPU, и на CPU.
+3. Первое расхождение, ошибка CUDA, Xid или зависание останавливают подъём. Итог — **последний успешный шаг минус один шаг
+   (запас 15 МГц)**, подтверждённый более длинной проверкой (около 2 минут); если подтверждение не прошло, берётся шагом ниже.
+   Выше +300 не поднимается (`--uv-max`).
+4. Результат сохраняется в `uv.json` с ключом: UUID карты, версия драйвера, сборка ядра. При следующих запусках он
+   применяется после быстрой проверки (около 30 с). Если изменились драйвер, сборка ядра или ваш начальный offset,
+   карта подбирается заново.
+5. Во время майнинга: каждые 6 часов (`--uv-reval-hours`) настройка перепроверяется (майнинг на этой карте приостанавливается
+   примерно на 30 с). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
+   снижается на шаг (но не ниже вашего значения) и сохраняется. Если offset изменил кто-то другой (например, HiveOS заново
+   применил разгон), auto-uv отступает на этой карте и не воюет.
+6. При выходе (Ctrl+C, SIGTERM, обычное завершение) ваш offset возвращается. Если майнер был убит (`kill -9`, сбой), то при
+   следующем запуске ваш offset сначала восстанавливается из файла `uv-restore.json`. Перезагрузка в любом случае сбрасывает
+   offset в драйвере.
+
+Меняется только V/F offset: зафиксированные частоты, лимит мощности и память не затрагиваются. Затрагиваются только карты,
+на которых майнер работает. Номера устройств NVML отличаются от номеров CUDA, поэтому каждая карта сопоставляется по
+PCI-адресу (шине) и UUID; в логе у каждого изменения указан адрес шины.
+
+**Требования.** Драйвер NVIDIA (NVML подгружается во время работы, ставить ничего не нужно) и **root** в Linux / HiveOS
+(там майнер запускается от root) или **администратор** в Windows. Без NVML или прав майнер пишет причину в лог и
+майнит как обычно. **Время:** первый подбор занимает около **15 минут на карту** (10-25 в зависимости от числа шагов; карты рига подбираются параллельно,
+майнинг начинается после окончания). Последующие запуски добавляют около 30 с.
+
+**В Windows — экспериментально.** Чтение offset через драйвер Windows работает (проверено), но разрешит ли драйвер
+программе менять offset на GeForce — мы не проверяли. Если драйвер откажет, в логе будет сообщение, майнер продолжит работать как обычно.
+
+**Риск.** При слишком агрессивном андервольте возможен сброс драйвера или зависание (подбор идёт только по тем значениям, которые
+только что проверены, и с запасом, но кристаллы, температура и драйверы разные). После зависания перезагрузитесь: при следующем
+запуске ваш offset будет восстановлен первым делом. Используйте на свой риск, как и любой разгон.
+
+**Включение**
+* HiveOS: добавьте `--auto-uv` в *Extra config arguments* полётного листа (подробнее в HIVEOS.md).
+* Linux: `sudo ./freeforgempear --pool ... --wallet ... --auto-uv`
+* Windows: правой кнопкой по `start.bat` → *Изменить*, уберите `rem` перед `set "AUTO_UV=1"`; запускайте `start.bat` **от администратора**.
+
+| Параметр | Назначение |
+|---|---|
+| `--auto-uv` | подобрать, применить и сопровождать андервольт (как описано выше) |
+| `--uv-offset N` | применить фиксированный offset N МГц после быстрой проверки, без подбора (если проверка не прошла, остаётся ваш offset) |
+| `--uv-reset` | забыть сохранённые результаты; вместе с `--auto-uv` карты подбираются заново; без кошелька майнер просто завершается |
+| `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию 300) |
+| `--uv-reval-hours H` | интервал перепроверки во время майнинга (по умолчанию 6, `0` — не перепроверять) |
+| `--uv-dir DIR` | где лежат `uv.json` и `uv-restore.json` (также `FFGP_STATE_DIR`) |
+| `--auto-uv-dry-run` | только пишет в лог, какие карты были бы изменены (устройство CUDA → устройство NVML, шина); ничего не меняет |
+
+Файлы по умолчанию лежат рядом с программой (Windows — в папке майнера), в HiveOS — `/hive-config/freeforgempear`
+(переживает обновления майнера и перезагрузки). **Сброс:** `freeforgempear --uv-reset` (или удалить `uv.json`).
+
+**Строки лога** (все начинаются с `auto-uv:`, так что `grep auto-uv` показывает всю историю):
+```
+auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
+auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
+```
+
+**Ориентиры, RTX 3070, ядро 1560 МГц, память 810 МГц** (~70 TH/s при любом offset, хешрейт не меняется):
+около 116 Вт при +150, 110 Вт при +195, 105 Вт при +225 и около 102 Вт при +255 (наш лучший прежний ручной замер:
++3,6% TH/Вт относительно 105,5 Вт при +225). Предел у каждого кристалла свой и зависит от температуры; на нашей тестовой
+карте встроенная проверка, более строгая, чем ручной тест, остановилась между +210 и +240, и подбор остановился около +195…+210.
+Ждите выигрыша порядка 5–10 Вт на карту по сравнению с «обычным» offset и не копируйте чужие числа.
+
+**Ручная настройка (без `--auto-uv`)** — для тех, кто предпочитает вкладку OC в HiveOS или Afterburner:
+1. Зафиксируйте частоту ядра и снизьте частоту памяти, как в разделе 7; дайте карте прогреться несколько минут.
+2. Поднимите **offset** ядра (V/F offset: вкладка Overclock в HiveOS, Afterburner или `--uv-offset N`) на 15 МГц.
+3. Проработайте не менее 30 минут и следите: `bad` должно оставаться 0, `rej` не должно расти, в логе не должно быть `DEAD`, а в
+   `dmesg` / сообщениях HiveOS — `Xid` (13, 31, 43, 79 ...). `freeforgempear --uv-offset N` применяет N, выполняет ту же
+   проверку, что и `--auto-uv`, и майнит с ним — это быстрый способ проверить кандидата.
+4. Повторяйте с шага 2 до первой проблемы, затем вернитесь на **два шага (30 МГц)** от значения, где она появилась, и оставьте его.
+5. Проверьте заново после обновления драйвера, нового кулера или в жаркую погоду.
 
 ---
 
@@ -418,10 +591,10 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 
 FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.3.1)：**
+**安装链接 (1.4.0)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -451,8 +624,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.3.1-linux-x86_64.tar.gz
-cd freeforgempear-1.3.1
+tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
+cd freeforgempear-1.4.0
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1
 ```
@@ -472,8 +645,8 @@ cd freeforgempear-1.3.1
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.3.1-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.4.0-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 右键点击 **`start.bat`** → *编辑*，并设置：
@@ -490,6 +663,7 @@ cd freeforgempear-1.3.1
 
 * **开机自启：** 把 `start.bat` 的快捷方式放进 `shell:startup`（Win+R，输入 `shell:startup`），或在任务计划程序中创建"登录时"运行 `start.bat` 的任务。
 * **超频：** 使用 MSI Afterburner（在曲线编辑器中锁定核心频率，降低显存频率），数值见第 7 节。笔记本：接上充电器并选择最高性能模式。
+* **降压（可选，Windows 上为实验性）：**删除 `start.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`，并以管理员身份运行；见第 12 节。
 * Defender / SmartScreen 可能拦截新的未签名 `.exe`：点击"更多信息 → 仍要运行"，或将该文件夹加入排除项。
 * 不使用 `start.bat`：`freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1`
 * 自行编译：`.\build-windows.ps1`（见 README）。
@@ -535,11 +709,13 @@ cd freeforgempear-1.3.1
 
 其他 30 系列显卡：从相同数值开始再按显卡调整。如果份额被拒绝或日志中出现 `bad`，请降低核心频率。
 
+可选：在相同速度下进一步省电，可用 `--auto-uv` 降低核心电压（第 12 节）。
+
 ### 8. 如何阅读日志
 
 | 行 | 含义 |
 |---|---|
-| `FreeForGemPear 1.3.1 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
+| `FreeForGemPear 1.4.0 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | 已加载调优内核。`embedded search kernel could not be loaded (原因)` = 矿工报错退出（驱动低于 525 或显卡不受支持） |
 | `new job ... prepared in ...` | 新的矿池任务已就绪 |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | 每 10 秒：每块显卡和总算力；你和抽水的已提交 / 已接受 / 已拒绝份额；抽水时段显示 `[DEVFEE]` |
@@ -551,9 +727,9 @@ cd freeforgempear-1.3.1
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.3.1-linux-x86_64.tar.gz freeforgempear-1.3.1.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.3.1-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.3.1-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.4.0-linux-x86_64.tar.gz freeforgempear-1.4.0.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.4.0-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.4.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -578,3 +754,76 @@ cd freeforgempear-1.3.1
 
 环境变量（启动矿工前设置）：`PEARL_SPIN=1`（忙等代替休眠）。
 Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运行 `start.bat`。
+
+### 12. 降压 / `--auto-uv`（可选，1.4.0 新增）
+
+**默认关闭。** 启用 `--auto-uv` 后，矿工会为每块显卡找出一个更低的核心电压设置（显卡的 *V/F 偏移*），在该设置下显卡
+仍能全部计算正确；挖矿时使用它，退出时恢复你自己的设置。电压更低意味着在相同算力下功耗更少：频率仍保持你锁定的值（第 7 节）。
+
+**它做什么**
+1. 读取显卡当前的 V/F 偏移（HiveOS 超频、你自己的脚本等），并在做任何改动*之前*把它写入恢复文件。
+2. 先让显卡预热 3 分钟，然后以 **15 MHz** 为步长提高偏移。每一步在单独的进程中检查约 30 秒：同一个任务计算数千次，
+   每个结果的每个 tile 逐位比较；比较正常挖矿尝试的命中计数；找到的结果由官方验证器在 CPU 上验证。接近极限时会出现
+   驱动不报任何错误的错误结果，因此检查同时在 GPU 和 CPU 上进行。
+3. 第一次不一致、CUDA 错误、Xid 错误或卡死就结束爬升。结果为**最后一个正常步长再减一步（15 MHz 余量）**，并用更长的
+   检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +300（`--uv-max`）。
+4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本和内核版本为键。之后启动时，经过快速检查（约 30 秒）后直接应用。
+   如果驱动、内核版本或你的起始偏移发生变化，则重新调校。
+5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
+   或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。如果别人修改了偏移（例如 HiveOS 重新应用超频），
+   auto-uv 会在该显卡上退让，不会与之对抗。
+6. 退出时（Ctrl+C、SIGTERM、正常结束）恢复你的偏移。如果矿工被强制终止（`kill -9`、崩溃），下次启动会先根据恢复文件
+   `uv-restore.json` 恢复你的偏移。重启本身也会重置驱动中的偏移。
+
+只修改 V/F 偏移：锁定频率、功耗上限和显存都不会被改动。只会改动矿工正在挖矿的显卡。NVML 设备编号与 CUDA 编号不同，
+因此每块显卡都通过 PCI 总线地址（和 UUID）匹配；日志中每次改动都会显示总线地址。
+
+**要求。** NVIDIA 驱动（NVML 在运行时加载，无需安装任何东西），Linux / HiveOS 上需要 **root**（那里矿工以 root 运行），
+Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在日志中说明原因并照常挖矿。**耗时：**首次调校每块显卡约
+**15 分钟**（视步数而定，10-25 分钟；矿机上的各显卡并行调校，完成后才开始挖矿）。之后每次启动增加约 30 秒。
+
+**Windows 为实验性支持。** 通过 Windows 驱动读取偏移是可行的（已验证），但驱动是否允许程序修改 GeForce 的偏移我们没有验证。
+如果驱动拒绝，日志会说明，矿工照常挖矿。
+
+**风险。** 降压超过显卡的承受能力可能导致驱动重置或卡死（调校只会走到刚刚检查通过的值并留有余量，但芯片、温度和驱动各不相同）。
+卡死后请重启：下次启动会首先恢复你的偏移。风险自负，与任何超频一样。
+
+**启用**
+* HiveOS：在飞行表的 *Extra config arguments* 中加入 `--auto-uv`（详见 HIVEOS.md）。
+* Linux：`sudo ./freeforgempear --pool ... --wallet ... --auto-uv`
+* Windows：右键 `start.bat` → *编辑*，删除 `set "AUTO_UV=1"` 前面的 `rem`；**以管理员身份**运行 `start.bat`。
+
+| 选项 | 含义 |
+|---|---|
+| `--auto-uv` | 查找、应用并监控降压（如上所述） |
+| `--uv-offset N` | 快速检查后应用固定偏移 N MHz，不做调校（检查失败则保持你的偏移） |
+| `--uv-reset` | 忘记已保存的结果；与 `--auto-uv` 一起使用时重新调校；没有钱包地址时矿工直接退出 |
+| `--uv-max N` | 调校尝试的最高偏移（默认 300） |
+| `--uv-reval-hours H` | 挖矿期间的复查间隔（默认 6，`0` 表示不复查） |
+| `--uv-dir DIR` | `uv.json` 和 `uv-restore.json` 的存放位置（也可用 `FFGP_STATE_DIR`） |
+| `--auto-uv-dry-run` | 只在日志中说明会改动哪些显卡（CUDA 设备 → NVML 设备、总线地址），不做任何改动 |
+
+文件默认位置：程序旁边（Windows：矿工文件夹）；HiveOS 上为 `/hive-config/freeforgempear`（矿工更新和重启后仍保留）。
+**重置：** `freeforgempear --uv-reset`（或删除 `uv.json`）。
+
+**日志行**（都以 `auto-uv:` 开头，`grep auto-uv` 即可看到全过程）：
+```
+auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
+auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
+auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
+```
+
+**参考值，RTX 3070 锁定 1560 MHz、显存 810 MHz**（任何偏移下都约 70 TH/s，算力不变）：+150 时约 116 W，+195 时约 110 W，
++225 时约 105 W，+255 时约 102 W（我们此前最好的手动测量：相对 +225 时的 105.5 W，TH/W 提高 3.6%）。每颗芯片的极限不同，
+也随温度变化；在我们的测试卡上，比手动测试更严格的内置检查在 +210 到 +240 之间停止，调校结果约为 +195…+210。
+相比常规偏移，预计每块显卡节省约 5–10 W；不要照搬别人的数值。
+
+**手动调校（不使用 `--auto-uv`）**，适合喜欢用 HiveOS 超频页或 Afterburner 的用户：
+1. 按第 7 节锁定核心频率并降低显存频率，让显卡预热几分钟。
+2. 将核心频率**偏移**（V/F 偏移：HiveOS Overclock 标签、Afterburner 或 `--uv-offset N`）提高 15 MHz。
+3. 至少运行 30 分钟并观察：`bad` 必须保持为 0，`rej` 不应增长，日志中不应出现 `DEAD`，`dmesg` / HiveOS 消息中不应出现 `Xid`
+   （13、31、43、79 ...）。`freeforgempear --uv-offset N` 会应用 N，运行与 `--auto-uv` 相同的检查并用它挖矿，是测试候选值的快捷方式。
+4. 从第 2 步重复，直到第一次出现问题，然后从出现问题的偏移回退**两步（30 MHz）**并保留该值。
+5. 驱动更新、更换散热器或天气炎热后重新测试。

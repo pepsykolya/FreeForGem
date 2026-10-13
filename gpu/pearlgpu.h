@@ -60,6 +60,20 @@ PG_API int pg_wait(int slot, pg_hit* hits, int max_hits);
 // Debug: copy the GPU-generated A_L rows [row0, row0 + rows) as int8 (rows x 128) for comparison with the reference.
 PG_API int pg_debug_al(const uint8_t a_noise_seed[32], int m, int row0, int rows, int8_t* out);
 
+// ---- 1.4.0: device identity and the deterministic check used by the opt-in undervolt tuner (--auto-uv) ----
+// PCI bus id ("0000:0D:00.0") and UUID ("GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx") of CUDA device `device` (ordinal as seen by the
+// process, i.e. after CUDA_VISIBLE_DEVICES / CUDA_DEVICE_ORDER).  Used to map a CUDA device to its NVML handle.  0 on success.
+PG_API int pg_device_pci_bus_id(int device, char* out, int len);
+PG_API int pg_device_uuid(int device, char* out, int len);
+// Identifier of the embedded search kernel build ("<variant> <hash prefix>"); results saved by the tuner are keyed by it.
+PG_API const char* pg_kernel_label(void);
+// Deterministic check (needs pg_init + pg_set_job): `reps` full attempts of the same seed are run back to back with the kernel's
+// transcript output enabled (the 16 jackpot words of every tile before BLAKE3).  The first transcript is hashed into a 256-bit
+// digest (same job and seed -> same digest on every GPU and every run); each further run is compared word by word with the first
+// on the GPU and *diff_words receives the number of differing 32-bit words.  Any difference means the GPU computed something wrong
+// (e.g. too low a voltage).  The GPU is loaded like in mining while it runs.
+PG_API int pg_check_run(const uint8_t a_noise_seed[32], int m, int reps, uint64_t digest[4], uint64_t* diff_words);
+
 PG_API const char* pg_last_error(void);
 
 #ifdef __cplusplus

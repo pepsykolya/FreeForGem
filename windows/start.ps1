@@ -7,7 +7,8 @@ param(
     [string]$Wallet,
     [string]$Pool = 'pearl-eu2.luckypool.io:3360',
     [string]$Worker = $env:COMPUTERNAME,
-    [string]$Devices = ''
+    [string]$Devices = '',
+    [string]$AutoUv = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -47,6 +48,11 @@ Get-ChildItem -LiteralPath $logs -Filter 'miner-*.log' | Sort-Object LastWriteTi
 $exe = Join-Path $root 'freeforgempear.exe'
 $cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
 if ($Devices) { $cmdLine += " --devices $Devices" }
+if ($AutoUv -eq '1') {
+    $cmdLine += ' --auto-uv'
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) { Write-Host 'WARNING: AUTO_UV is on but start.bat is not run as Administrator: the miner cannot change the GPU voltage offset and will mine normally.' -ForegroundColor Yellow }
+}
 $log = Join-Path $logs ("miner-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $writer = New-Object IO.StreamWriter($log, $true, (New-Object Text.UTF8Encoding($false)))
 $writer.AutoFlush = $true

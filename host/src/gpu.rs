@@ -22,6 +22,10 @@ unsafe extern "C" {
     fn pg_wait(slot: i32, hits: *mut Hit, max_hits: i32) -> i32;
     fn pg_debug_al(seed: *const u8, m: i32, row0: i32, rows: i32, out: *mut i8) -> i32;
     fn pg_last_error() -> *const std::os::raw::c_char;
+    fn pg_device_pci_bus_id(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
+    fn pg_device_uuid(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
+    fn pg_kernel_label() -> *const std::os::raw::c_char;
+    fn pg_check_run(seed: *const u8, m: i32, reps: i32, digest: *mut u64, diff_words: *mut u64) -> i32;
 }
 
 fn last_error() -> String {
@@ -100,4 +104,40 @@ pub fn debug_al(seed: &[u8; 32], m: usize, row0: usize, rows: usize) -> Result<V
         bail!("pg_debug_al: {}", last_error());
     }
     Ok(out)
+}
+
+/// PCI bus id ("0000:0D:00.0") of CUDA device `device` (ordinal as seen by the process).
+pub fn device_pci_bus_id(device: i32) -> Result<String> {
+    let mut buf = [0 as std::os::raw::c_char; 64];
+    if unsafe { pg_device_pci_bus_id(device, buf.as_mut_ptr(), buf.len() as i32) } != 0 {
+        bail!("pg_device_pci_bus_id({device}): {}", last_error());
+    }
+    Ok(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+}
+
+/// UUID ("GPU-xxxxxxxx-...") of CUDA device `device`.
+pub fn device_uuid(device: i32) -> Result<String> {
+    let mut buf = [0 as std::os::raw::c_char; 64];
+    if unsafe { pg_device_uuid(device, buf.as_mut_ptr(), buf.len() as i32) } != 0 {
+        bail!("pg_device_uuid({device}): {}", last_error());
+    }
+    Ok(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+}
+
+/// Identifier of the embedded search kernel build.
+pub fn kernel_label() -> String {
+    unsafe {
+        let p = pg_kernel_label();
+        if p.is_null() { "?".into() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+    }
+}
+
+/// `reps` back-to-back attempts of one seed in check mode (see pearlgpu.h): returns the 256-bit digest of the first run's tile
+/// transcripts (deterministic for a given job and seed) and the number of 32-bit words in which the other runs differ from it.
+pub fn check_run(seed: &[u8; 32], m: usize, reps: u32) -> Result<([u64; 4], u64)> {
+    let (mut d, mut diff) = ([0u64; 4], 0u64);
+    if unsafe { pg_check_run(seed.as_ptr(), m as i32, reps as i32, d.as_mut_ptr(), &mut diff) } != 0 {
+        bail!("pg_check_run: {}", last_error());
+    }
+    Ok((d, diff))
 }

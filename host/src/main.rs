@@ -6,7 +6,9 @@
 mod devfee;
 mod gpu;
 mod mining;
+mod nvml;
 mod stratum;
+mod uv;
 mod worker;
 
 use anyhow::{Result, bail, ensure};
@@ -176,6 +178,7 @@ struct Args {
     minutes: Option<f64>,
     devices: Option<Vec<i32>>,
     mode: TargetMode,
+    uv: uv::Opts,
 }
 
 type Prepared = (Src, PoolJob, Result<Job>, Duration);
@@ -234,6 +237,7 @@ fn mine(a: Args) -> Result<()> {
         ctrlc::set_handler(move || {
             if stop.swap(true, Ordering::SeqCst) {
                 eprintln!("second interrupt: exiting at once");
+                uv::restore_all();
                 std::process::exit(130);
             }
             eprintln!("shutting down (finishing in-flight work)...");
@@ -251,6 +255,9 @@ fn mine(a: Args) -> Result<()> {
         None => (0..count as i32).collect(),
     };
     println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s)", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len());
+    // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
+    uv::recover(&a.uv);
+    let uv_state = uv::start(&a.uv, &devices, &stop);
     println!("devfee: {}% (one {}s slot per {} min cycle, random position) on the same pool", devfee::FEE_PERCENT, devfee::Params::from_env().slot.as_secs(), devfee::Params::from_env().cycle.as_secs() / 60);
 
     let stats = [Arc::new(Stats::default()), Arc::new(Stats::default())];
@@ -284,7 +291,7 @@ fn mine(a: Args) -> Result<()> {
     let mut gstats = Vec::new();
     let mut handles = Vec::new();
     for &dev in &devices {
-        let gs = Arc::new(GpuStat { dev, name: gpu::device_name(dev), attempts: AtomicU64::new(0), alive: AtomicBool::new(true) });
+        let gs = Arc::new(GpuStat { dev, name: gpu::device_name(dev), attempts: AtomicU64::new(0), alive: AtomicBool::new(true), pause: AtomicBool::new(false), paused: AtomicBool::new(false), uv_bad: AtomicU64::new(0) });
         let (rtx, rrx) = mpsc::channel();
         handles.push(worker::spawn(dev, sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
         rrx.recv()??; // GPU initialised (or the error that stopped it)
@@ -311,6 +318,9 @@ fn mine(a: Args) -> Result<()> {
         if gstats.iter().all(|g| !g.alive.load(Ordering::Relaxed)) {
             stop.store(true, Ordering::SeqCst);
             anyhow::bail!("all GPU workers have stopped");
+        }
+        if let Some((m, _)) = &uv_state {
+            m.tick(&gstats, &stats[0]);
         }
         // pool events: jobs go to the prep thread, the GPUs keep mining the old job meanwhile
         while let Ok((src, ev)) = ev_rx.try_recv() {
@@ -479,6 +489,13 @@ OPTIONS:
     --devices 0,1,...    CUDA devices to mine on (default: all visible; honours CUDA_VISIBLE_DEVICES)
     --minutes N          stop after N minutes (default: run until interrupted)
     --self-test          verify the GPU kernel against the CPU reference and exit
+    --auto-uv            opt-in: find and apply a safe GPU undervolt (V/F offset, needs root/admin); see MANUAL.md
+    --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
+    --uv-reset           forget the saved undervolt results
+    --uv-max N           highest offset the tuner tries (default 300)
+    --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
+    --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
+    --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
     --help               show this text
     --version            show the version
 
@@ -513,8 +530,11 @@ fn main() -> Result<()> {
         minutes: None,
         devices: None,
         mode: TargetMode::Base,
+        uv: uv::Opts::default(),
     };
     let mut test = false;
+    let mut child: Option<uv::ChildArgs> = None;
+    let mut uv_given = false;
     while let Some(arg) = args.next() {
         let mut val = || args.next().ok_or_else(|| anyhow::anyhow!("missing value for {arg}"));
         match arg.as_str() {
@@ -536,8 +556,52 @@ fn main() -> Result<()> {
                 a.minutes = Some(m);
             }
             "--devices" | "--device" => a.devices = Some(parse_devices(&val()?)?),
+            "--auto-uv" => a.uv.auto = true,
+            "--auto-uv-dry-run" => {
+                a.uv.auto = true;
+                a.uv.dry_run = true;
+            }
+            "--uv-reset" => a.uv.reset = true,
+            "--uv-offset" => a.uv.fixed = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-offset needs an integer (MHz)"))?),
+            "--uv-max" => a.uv.max_offset = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-max needs an integer (MHz)"))?,
+            "--uv-dir" => a.uv.dir = Some(val()?.into()),
+            "--uv-reval-hours" => a.uv.reval_hours = val()?.parse()?,
+            "--uv-warmup" => a.uv.warmup_secs = val()?.parse()?,
+            "--uv-step-secs" => a.uv.step_secs = val()?.parse()?,
+            "--uv-confirm-secs" => a.uv.confirm_secs = val()?.parse()?,
+            // internal: the check process started by the tuner
+            "--uv-check" => {
+                child = Some(uv::ChildArgs { dev: 0, secs: 20, min_reruns: 30, cpu: 2, measure: 0, refs: vec![], expect_bus: String::new() });
+                uv_given = true;
+            }
+            "--uv-secs" | "--uv-min-reruns" | "--uv-cpu" | "--uv-measure" | "--uv-ref" | "--uv-expect-bus" => {
+                let v = val()?;
+                let c = child.as_mut().ok_or_else(|| anyhow::anyhow!("{arg} is internal (use --uv-check first)"))?;
+                match arg.as_str() {
+                    "--uv-secs" => c.secs = v.parse()?,
+                    "--uv-min-reruns" => c.min_reruns = v.parse()?,
+                    "--uv-cpu" => c.cpu = v.parse()?,
+                    "--uv-measure" => c.measure = v.parse()?,
+                    "--uv-ref" => c.refs = v.split(',').map(String::from).collect(),
+                    _ => c.expect_bus = v,
+                }
+            }
             "--target-mode" => a.mode = if val()? == "jackpot" { TargetMode::Jackpot } else { TargetMode::Base },
             _ => bail!("unknown argument {arg} (see --help)"),
+        }
+    }
+    let _ = uv_given;
+    if let Some(mut c) = child {
+        c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
+        std::process::exit(uv::check_child(&c));
+    }
+    ensure!(!(a.uv.auto && a.uv.fixed.is_some()), "--auto-uv and --uv-offset exclude each other");
+    ensure!(a.uv.max_offset >= uv::STEP, "--uv-max must be at least {}", uv::STEP);
+    ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
+    if a.uv.reset {
+        uv::reset(&a.uv);
+        if a.wallet.is_empty() && !test && !a.uv.enabled() {
+            return Ok(());
         }
     }
     if test {

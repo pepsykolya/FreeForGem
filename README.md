@@ -13,6 +13,7 @@ RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
 
 | | Hashrate | Power |
 |---|---|---|
+| FreeForGemPear 1.4.0 | 70.2 TH/s | ~107 W (optional `--auto-uv`: see below) |
 | FreeForGemPear 1.3.1 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.3.0 | 70.2 TH/s | ~107 W |
 | FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
@@ -35,8 +36,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.3.1-linux-x86_64.tar.gz
-cd freeforgempear-1.3.1
+tar xzf freeforgempear-1.4.0-linux-x86_64.tar.gz
+cd freeforgempear-1.4.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -49,20 +50,24 @@ cd freeforgempear-1.3.1
 | `--devices 0,1,...` | GPUs to use (default: all visible; honours `CUDA_VISIBLE_DEVICES`) |
 | `--minutes N` | stop after N minutes (default: run until Ctrl-C / SIGTERM) |
 | `--self-test` | verify the kernel and exit |
+| `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
+| `--uv-offset N` / `--uv-reset` | apply a fixed undervolt offset after a check / forget the saved undervolt results |
 
 The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per GPU and in total,
 plus the submitted, accepted and rejected shares.
 
 **Tuning.** For best efficiency on a 3070, lock the core clock (for example
 `nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
-works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W.
+works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W. With the optional `--auto-uv` (new in 1.4.0) the miner also finds the lowest safe core voltage
+of each GPU, checking every step bit-for-bit on the GPU and on the CPU, and restores your settings on exit
+(roughly 5-10 W less per card at the same hashrate).
 
 **CPU.** The host needs well under 10% of one CPU core per GPU (GPU waits sleep instead of spinning), so
 multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.3.1-windows-x64.zip`, unpack it to a folder without spaces, edit the settings at the top of
+Download `freeforgempear-1.4.0-windows-x64.zip`, unpack it to a folder without spaces, edit the settings at the top of
 `start.bat` (`WALLET`, `POOL`, `WORKER`, `DEVICES`) and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
 `README-WINDOWS.txt`.
@@ -73,7 +78,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.3.1/freeforgempear-1.3.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.0/freeforgempear-1.4.0.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`. The step-by-step guide,
