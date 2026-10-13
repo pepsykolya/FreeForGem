@@ -36,7 +36,7 @@ if ($Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6
 }
 if ($Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
 if ($Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
-    Write-Host 'WARNING: WALLET has a +NOCK part, but PRL+NOCK merge mining works on LuckyPool only; this pool may refuse the login.' -ForegroundColor Yellow
+    Write-Host 'NOTE: PRL+NOCK merge mining works on LuckyPool only: on this pool the miner mines PRL to the prl1... part and ignores +NOCK.' -ForegroundColor Yellow
 }
 if ([string]::IsNullOrWhiteSpace($Worker)) { $Worker = 'rig' }
 $Worker = ($Worker.Trim() -replace '[^A-Za-z0-9._-]', '-')

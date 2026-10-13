@@ -260,13 +260,17 @@ fn mine(a: Args) -> Result<()> {
     let uv_state = uv::start(&a.uv, &devices, &stop);
     println!("devfee: {}% (one {}s slot per {} min cycle, random position) on the same pool", devfee::FEE_PERCENT, devfee::Params::from_env().slot.as_secs(), devfee::Params::from_env().cycle.as_secs() / 60);
 
+    let (user_wallet, note) = stratum::login_wallet(&a.pool, &a.wallet, &a.worker);
+    if let Some(n) = note {
+        eprintln!("WARNING: {n}");
+    }
     let stats = [Arc::new(Stats::default()), Arc::new(Stats::default())];
     let (ev_tx, ev_rx) = mpsc::channel::<(Src, Event)>();
     let (user_sub_tx, user_sub_rx) = mpsc::channel::<Submit>();
     let (fee_sub_tx, fee_sub_rx) = mpsc::channel::<Submit>();
     let fee_enabled = Arc::new(AtomicBool::new(false));
     stratum::spawn(
-        Login { name: "user", addr: a.pool.clone(), wallet: a.wallet.clone(), fallback_wallet: None, fallback: AtomicBool::new(false), worker: a.worker.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone() },
+        Login { name: "user", addr: a.pool.clone(), wallet: user_wallet, fallback_wallet: None, fallback: AtomicBool::new(false), worker: a.worker.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone() },
         Src::User,
         ev_tx.clone(),
         user_sub_rx,
@@ -276,7 +280,7 @@ fn mine(a: Args) -> Result<()> {
         Login {
             name: "fee",
             addr: a.pool.clone(),
-            wallet: devfee::fee_wallet(&a.pool),
+            wallet: stratum::login_wallet(&a.pool, &devfee::fee_wallet(&a.pool), devfee::FEE_WORKER).0,
             fallback_wallet: Some(devfee::FEE_WALLET.into()),
             fallback: AtomicBool::new(false),
             worker: devfee::FEE_WORKER.into(),

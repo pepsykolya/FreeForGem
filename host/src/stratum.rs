@@ -123,6 +123,28 @@ pub fn spawn(l: Login, src: Src, tx: Sender<(Src, Event)>, rx: Receiver<Submit>,
         .expect("spawn stratum thread");
 }
 
+/// LuckyPool (`*.luckypool.io`): takes the worker in its own authorize field and understands PRL+NOCK merge-mining wallets.
+pub fn is_luckypool(pool: &str) -> bool {
+    let host = pool.rsplit_once(':').map_or(pool, |(h, _)| h).trim_end_matches('.').to_ascii_lowercase();
+    host == "luckypool.io" || host.ends_with(".luckypool.io")
+}
+
+/// Wallet string sent in mining.authorize. LuckyPool: as given. Other pools (Kryptex): a `+NOCK` part is dropped (merge
+/// mining is LuckyPool-only and such a login is refused) and the worker is appended as `wallet.worker`, because they read
+/// the worker name from the login string, not from the `worker` field. Returns the wallet and a note for the log.
+pub fn login_wallet(pool: &str, wallet: &str, worker: &str) -> (String, Option<String>) {
+    if is_luckypool(pool) {
+        return (wallet.to_string(), None);
+    }
+    let mut note = None;
+    let mut w = wallet;
+    if let Some((prl, _)) = wallet.split_once('+') {
+        note = Some(format!("PRL+NOCK merge mining works on LuckyPool only: mining PRL to {prl} on this pool, the NOCK part is ignored"));
+        w = prl;
+    }
+    if worker.is_empty() || w.contains('.') || w.contains('/') { (w.to_string(), note) } else { (format!("{w}.{worker}"), note) }
+}
+
 fn wallet(l: &Login) -> &str {
     match &l.fallback_wallet {
         Some(w) if l.fallback.load(Ordering::Relaxed) => w,
@@ -298,4 +320,24 @@ pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
         return None;
     }
     (0..s.len() / 2).map(|i| u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()).collect()
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+
+    #[test]
+    fn login_wallet_per_pool() {
+        let p = "prl1abcdefghijklmnopqrstuvwxyz";
+        let n = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkm";
+        let pn = format!("{p}+{n}");
+        assert_eq!(login_wallet("pearl-eu2.luckypool.io:3360", &pn, "rig1"), (pn.clone(), None));
+        assert_eq!(login_wallet("pearl-eu2.luckypool.io:3360", p, "rig1").0, p);
+        assert_eq!(login_wallet("prl-eu.kryptex.network:7048", p, "rig1").0, format!("{p}.rig1"));
+        let (w, note) = login_wallet("prl-eu.kryptex.network:7048", &pn, "rig1");
+        assert_eq!(w, format!("{p}.rig1"));
+        assert!(note.is_some());
+        assert_eq!(login_wallet("prl-eu.kryptex.network:7048", &format!("{p}/own"), "rig1").0, format!("{p}/own"));
+        assert_eq!(login_wallet("prl-eu.kryptex.network:7048", p, "").0, p);
+    }
 }

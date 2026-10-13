@@ -21,8 +21,7 @@ pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat
 /// Fee login wallet for `pool` (HOST:PORT): `FEE_WALLET+FEE_NOCK` on LuckyPool (PRL+NOCK merge mining), FEE_WALLET elsewhere.
 /// If the pool refuses the merged login, the stratum client falls back to FEE_WALLET (Login::fallback_wallet).
 pub fn fee_wallet(pool: &str) -> String {
-    let host = pool.rsplit_once(':').map_or(pool, |(h, _)| h).trim_end_matches('.').to_ascii_lowercase();
-    if host == "luckypool.io" || host.ends_with(".luckypool.io") { format!("{FEE_WALLET}+{FEE_NOCK}") } else { FEE_WALLET.to_string() }
+    if crate::stratum::is_luckypool(pool) { format!("{FEE_WALLET}+{FEE_NOCK}") } else { FEE_WALLET.to_string() }
 }
 /// One fee slot of SLOT_SECS in every CYCLE_SECS: 60 / 6000 = 1%.
 pub const CYCLE_SECS: u64 = 100 * 60;
