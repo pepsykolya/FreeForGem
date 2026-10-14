@@ -88,7 +88,7 @@ fn self_test(device: i32) -> Result<()> {
     println!("== self-test ==");
     let t0 = Instant::now();
     let job = Job::new(&test_header(7), 3)?;
-    println!("[ok] public_params_sanity_check for m={M} n={N} k={} rank={RANK}; job built in {:?}", k(), t0.elapsed());
+    println!("[ok] public_params_sanity_check for m={} n={N} k={} rank={RANK}; job built in {:?}", m(), k(), t0.elapsed());
     println!("     job_key={}", hex(&job.job_key));
 
     // item 3: incremental BLAKE3 root == full hash
@@ -104,8 +104,8 @@ fn self_test(device: i32) -> Result<()> {
     // item 5: GPU A_L == reference
     let row0 = job.nonce_row(0);
     let seed = job.a_noise_seed(&row0);
-    for first in [0usize, M - 4] {
-        let g = gpu::debug_al(&seed, M, first, 4)?;
+    for first in [0usize, m() - 4] {
+        let g = gpu::debug_al(&seed, m(), first, 4)?;
         let rows: Vec<usize> = (first..first + 4).collect();
         let r: Vec<i8> = zk_pow::circuit::pearl_noise::generate_uniform_random_matrix(&LABEL_A, &seed, &rows, RANK).concat();
         ensure!(g == r, "A_L mismatch for rows {first}..{}", first + 4);
@@ -134,7 +134,7 @@ fn self_test(device: i32) -> Result<()> {
     let tgt = U256::from_little_endian(&target_words_bytes(&target));
     let mut hits = vec![gpu::Hit::default(); 256];
     let t = Instant::now();
-    let (total, stored) = gpu::attempt(&seed, &p1, &p2, M, &target, &mut hits)?;
+    let (total, stored) = gpu::attempt(&seed, &p1, &p2, m(), &target, &mut hits)?;
     println!("attempt: {total} hits reported ({stored} stored) in {:?}", t.elapsed());
     let hits = &hits[..stored];
     let row0_hits = hits.iter().filter(|h| h.row == 0).count();
@@ -255,7 +255,13 @@ fn mine(a: Args) -> Result<()> {
         }
         None => (0..count as i32).collect(),
     };
-    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s)", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len());
+    // rows of A from the devices' SM count (even persistent-grid split); FFGP_M overrides
+    let sms: Vec<usize> = devices.iter().map(|&d| gpu::sm_count(d)).collect();
+    mining::set_auto_m(&sms);
+    if sms.iter().any(|&s| s != sms[0]) {
+        println!("note: mixed SM counts {sms:?}: keeping default m={} (per-device balancing is not implemented)", m());
+    }
+    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) | m={} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), m(), k());
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
     uv::recover(&a.uv);
     let uv_state = uv::start(&a.uv, &devices, &stop);
@@ -431,7 +437,7 @@ fn mine(a: Args) -> Result<()> {
                 let n = g.attempts.load(Ordering::Relaxed);
                 let rate = (n - last_attempts[i]) as f64 / el.as_secs_f64();
                 last_attempts[i] = n;
-                let ths = rate * (M * N * k()) as f64 / 1e12;
+                let ths = rate * (m() * N * k()) as f64 / 1e12;
                 total_att += rate;
                 total_ths += ths;
                 parts.push(format!("GPU{} {:.3}{}", g.dev, ths, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));

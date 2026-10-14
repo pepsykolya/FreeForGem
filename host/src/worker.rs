@@ -188,7 +188,7 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
         let row0 = c.job.nonce_row(counter);
         let a_seed = c.job.a_noise_seed(&row0);
         // the kernel derives P_A and A_L from a_seed itself: no host-side permutation (a_perm = 512 hashes per attempt)
-        gpu::launch(slot, &a_seed, &[], &[], M, &target_words(c.target))?;
+        gpu::launch(slot, &a_seed, &[], &[], m(), &target_words(c.target))?;
         let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: c.job.clone(), row0, a_seed, target: c.target, counter };
         counter += 1;
         slot ^= 1;

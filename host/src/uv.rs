@@ -152,13 +152,14 @@ struct Entry {
     verified_at: u64,
     disabled_until: u64,
     refs: Vec<String>,
+    m: usize, // rows of A per attempt the transcript digests were taken at
 }
 
 impl Entry {
     fn to_json(&self) -> Value {
         json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
                "offset": self.offset, "clk_mhz": self.clk, "watts_before": self.w_before, "watts_after": self.w_after,
-               "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until, "refs": self.refs})
+               "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until, "refs": self.refs, "m": self.m})
     }
 
     fn from_json(v: &Value) -> Option<Entry> {
@@ -176,6 +177,7 @@ impl Entry {
             verified_at: v["verified_at"].as_u64().unwrap_or(0),
             disabled_until: v["disabled_until"].as_u64().unwrap_or(0),
             refs: v["refs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
+            m: v["m"].as_u64().unwrap_or(0) as usize,
         })
     }
 }
@@ -655,7 +657,9 @@ impl Manager {
             return Ok(());
         }
         lg(format!("{} tuning: {} s warm-up at {}, then +{STEP} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(orig), signed(cap), self.opts.step_secs));
-        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel).map(|e| e.refs.clone()).unwrap_or_default();
+        // the transcript digests depend on m too: a reference saved at another m must not seed the check
+        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel && e.m == crate::mining::m())
+            .map(|e| e.refs.clone()).unwrap_or_default();
         let base = self.run_check(c, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
         if self.stopped() {
             return Ok(());
@@ -722,6 +726,7 @@ impl Manager {
         let mut e = self.new_entry(c);
         e.offset = fin;
         e.refs = refs;
+        e.m = crate::mining::m();
         e.clk = base.clk.unwrap_or(0);
         e.w_before = base_w.unwrap_or(0.0);
         e.w_after = conf_w.unwrap_or(0.0);
@@ -1100,7 +1105,7 @@ fn cpu_round(job: &Job, counter: u64, n: u32) -> Result<u32> {
     target[7] = 0x00ff_ffff;
     let tgt = U256::from_little_endian(&crate::target_words_bytes(&target));
     let mut hits = vec![gpu::Hit::default(); 64];
-    let (_, stored) = gpu::attempt(&seed, &[], &[], M, &target, &mut hits)?;
+    let (_, stored) = gpu::attempt(&seed, &[], &[], m(), &target, &mut hits)?;
     let usable: Vec<&gpu::Hit> = hits[..stored].iter().filter(|h| h.row != 0).collect();
     ensure!(!usable.is_empty(), "no usable hit with the easy target");
     let mut ok = 0;
@@ -1122,7 +1127,7 @@ fn burst(seed: &[u8; 32], n: u32, target: &[u32; 8]) -> Result<Vec<usize>> {
         if i >= 2 {
             totals.push(gpu::wait(slot, &mut [])?.0);
         }
-        gpu::launch(slot, seed, &[], &[], M, target)?;
+        gpu::launch(slot, seed, &[], &[], m(), target)?;
     }
     for i in n - 2..n {
         totals.push(gpu::wait((i & 1) as i32, &mut [])?.0);
@@ -1180,7 +1185,7 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
             break;
         }
         let s = ((reruns / CHECK_REPS as u64) % 4) as usize;
-        let (dg, diff) = gpu::check_run(&seeds[s], M, CHECK_REPS)?;
+        let (dg, diff) = gpu::check_run(&seeds[s], m(), CHECK_REPS)?;
         if diff != 0 {
             return Ok(fail(format!("rerun_diff: {diff} transcript word(s) differ between reruns of seed {s} (after {reruns} reruns)"), reruns, cpu_ok));
         }

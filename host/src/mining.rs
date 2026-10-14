@@ -12,8 +12,45 @@ use zk_pow::circuit::chip::compute_jackpot;
 use zk_pow::circuit::pearl_noise::{compute_noise, generate_permutation_matrix, generate_uniform_random_matrix, get_random_hash, mul_hi_u32};
 use zk_pow::ffi::plain_proof::{CertificateVersion, MatrixMerkleProof, PlainProof};
 
-pub const M: usize = 23552;
 pub const N: usize = 512;
+/// Default rows of A per attempt (production); overridable with `FFGP_M`.
+const DEFAULT_M: usize = 47104;
+/// Rows of A per attempt, common to every GPU.  Larger m amortizes the per-attempt prologue (P_A build,
+/// pipeline fill, jackpot epilogue frequency) over more row-blocks, at the cost of host RAM (m*k bytes of
+/// `a_base` per job) and a larger Merkle tree per proof.  `FFGP_M` overrides (a multiple of 128, 1024..=2^20).
+pub fn m() -> usize {
+    static MV: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MV.get_or_init(|| match std::env::var("FFGP_M") {
+        Ok(v) => match v.trim().parse::<usize>() {
+            Ok(x) if x % 128 == 0 && (1024..=1_048_576).contains(&x) => x,
+            _ => panic!("FFGP_M={v}: want a multiple of 128 in 1024..=1048576"),
+        },
+        Err(_) => AUTO_M.get().copied().unwrap_or(DEFAULT_M),
+    })
+}
+
+/// Rows of A picked from the SM counts of the devices about to be mined.  The library launches a persistent
+/// grid of min(m/128, SM) CTAs and the row-blocks divide evenly only when (m/128) % grid == 0; with one
+/// common m that holds on every device only on a homogeneous rig, where m = 128 * SM * r row-blocks per CTA
+/// (r = 8 while a_base stays within 512 MB at k = 8192, else 4 or 2).  Must run before the first m(); FFGP_M
+/// overrides it.  Mixed-SM rigs keep DEFAULT_M (balancing those needs a per-device job; not done).
+static AUTO_M: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+pub fn set_auto_m(sms: &[usize]) {
+    if std::env::var_os("FFGP_M").is_some() || sms.is_empty() {
+        return;
+    }
+    let sm = sms[0];
+    if sm == 0 || sms.iter().any(|&s| s != sm) {
+        return;
+    }
+    for r in [8usize, 4, 2] {
+        let v = 128 * sm * r;
+        if v <= 65536 {
+            AUTO_M.set(v).ok();
+            return;
+        }
+    }
+}
 /// Common dimension k: the k the loaded libpearlgpu was built for (production 8192), overridable with `PEARL_K` for
 /// tests (pg_set_job refuses a mismatch).  Everything else (config, adjustment factor, commitment, proof size) follows
 /// from it.
@@ -66,7 +103,7 @@ pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation) -> Re
         hash_a: [0; 32],
         hash_b: [0; 32],
         hash_jackpot: [0; 32],
-        m: M as u32,
+        m: m() as u32,
         n: N as u32,
         t_rows: 0,
         t_cols: 0,
@@ -121,11 +158,11 @@ impl Job {
         let job_key = blake3_digest(&data, None);
 
         let kk = k();
-        let a_base = vec![64u8; M * kk];
+        let a_base = vec![64u8; m() * kk];
         let b_col = vec![64u8; N * kk];
         ensure!(a_base.len() % CHUNK == 0 && b_col.len() % CHUNK == 0 && kk % CHUNK == 0 && (kk / CHUNK).is_power_of_two());
         let hash_b = blake3_digest(&b_col, Some(job_key));
-        let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, M as u32, N as u32);
+        let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, m() as u32, N as u32);
         let b_noise_seed = blake3_digest(&[&job_key[..], &bound_b[..]].concat(), None);
 
         // Subtrees right of the left path (everything not containing the chunks of row 0).
@@ -186,7 +223,7 @@ impl Job {
     }
 
     pub fn a_noise_seed(&self, row0: &[u8]) -> [u8; 32] {
-        let (bound_a, _) = self.deriv.bind_roots(&self.hash_a(row0), &[0; 32], M as u32, N as u32);
+        let (bound_a, _) = self.deriv.bind_roots(&self.hash_a(row0), &[0; 32], m() as u32, N as u32);
         blake3_digest(&[&self.b_noise_seed[..], &bound_a[..]].concat(), None)
     }
 
@@ -198,11 +235,11 @@ impl Job {
         let mut a = self.a_base.clone();
         a[..k()].copy_from_slice(row0);
         PlainProof {
-            m: M,
+            m: m(),
             n: N,
             k: k(),
             noise_rank: RANK,
-            a: matrix_proof(&a, &self.job_key, &a_rows, M),
+            a: matrix_proof(&a, &self.job_key, &a_rows, m()),
             bt: matrix_proof(&self.b_col, &self.job_key, &b_cols, N),
             moe: None,
         }

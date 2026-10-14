@@ -13,6 +13,7 @@ pub struct Hit {
 
 unsafe extern "C" {
     fn pg_device_count() -> i32;
+    fn pg_sm_count(device: i32) -> i32;
     fn pg_kdim() -> i32;
     fn pg_device_name(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_init(device: i32) -> i32;
@@ -43,6 +44,11 @@ pub fn kdim() -> usize {
 
 pub fn device_count() -> usize {
     unsafe { pg_device_count().max(0) as usize }
+}
+
+/// Number of SMs of CUDA device `device` (0 on error).
+pub fn sm_count(device: i32) -> usize {
+    unsafe { pg_sm_count(device).max(0) as usize }
 }
 
 pub fn device_name(device: i32) -> String {
