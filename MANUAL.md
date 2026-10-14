@@ -33,10 +33,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.4.7):**
+**Installation URL (1.4.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -66,8 +66,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
-cd freeforgempear-1.4.7
+tar xzf freeforgempear-1.4.8-linux-x86_64.tar.gz
+cd freeforgempear-1.4.8
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -88,8 +88,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.4.7-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
+1. Download **`freeforgempear-1.4.8-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -193,7 +193,7 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 | Line | Meaning |
 |---|---|
-| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | start banner |
+| `FreeForGemPear 1.4.8 \| pool ... \| worker ... \| N GPU(s)` | start banner |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | the tuned kernel is loaded. `embedded search kernel could not be loaded (reason)` = the miner stops with an error (driver older than 525 or an unsupported GPU) |
 | `new job ... prepared in ...` | a new pool job is ready |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | every 10 s: hashrate per GPU and in total; shares submitted / accepted / rejected for you and for the dev fee; `[DEVFEE]` while a fee slot runs |
@@ -205,9 +205,9 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.8-linux-x86_64.tar.gz freeforgempear-1.4.8.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.8-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.4.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -288,6 +288,9 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--uv-offset N` | apply the fixed offset N MHz after a quick check, no tuning (if the check fails, your offset stays) |
 | `--uv-reset` | forget the saved results; with `--auto-uv` the GPUs are tuned again; without a wallet the miner just exits |
 | `--uv-max N` | highest offset the tuner tries (default 300) |
+| `--uv-min N` | offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120) |
+| `--uv-step N` | MHz per tuning step (default 15) |
+| `--uv-keep-last` | after a failed step keep the last good step (default: the last good step minus one step) |
 | `--uv-reval-hours H` | re-validation interval while mining (default 6, `0` = never) |
 | `--uv-dir DIR` | where `uv.json` and `uv-restore.json` are kept (also `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id); changes nothing |
@@ -348,10 +351,10 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.4.7):**
+**Ссылка для установки (1.4.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -381,8 +384,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
-cd freeforgempear-1.4.7
+tar xzf freeforgempear-1.4.8-linux-x86_64.tar.gz
+cd freeforgempear-1.4.8
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -403,8 +406,8 @@ cd freeforgempear-1.4.7
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.4.7-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.4.8-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -506,7 +509,7 @@ cd freeforgempear-1.4.7
 
 | Строка | Значение |
 |---|---|
-| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
+| `FreeForGemPear 1.4.8 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | загружено настроенное ядро. `embedded search kernel could not be loaded (причина)` = майнер останавливается с ошибкой (драйвер старше 525 или неподдерживаемая карта) |
 | `new job ... prepared in ...` | готово новое задание пула |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | каждые 10 с: хэшрейт по картам и общий; отправленные / принятые / отклонённые шары ваши и комиссии; `[DEVFEE]` пока идёт слот комиссии |
@@ -518,9 +521,9 @@ cd freeforgempear-1.4.7
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.8-linux-x86_64.tar.gz freeforgempear-1.4.8.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.8-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.4.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -603,6 +606,9 @@ PCI-адресу (шине) и UUID; в логе у каждого измене�
 | `--uv-offset N` | применить фиксированный offset N МГц после быстрой проверки, без подбора (если проверка не прошла, остаётся ваш offset) |
 | `--uv-reset` | забыть сохранённые результаты; вместе с `--auto-uv` карты подбираются заново; без кошелька майнер просто завершается |
 | `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию 300) |
+| `--uv-min N` | offset, с которого начинается подбор и ниже которого не опускается (по умолчанию offset из HiveOS/драйвера, иначе 120) |
+| `--uv-step N` | шаг подбора в МГц (по умолчанию 15) |
+| `--uv-keep-last` | после неудачного шага оставить последний удачный шаг (по умолчанию — последний удачный минус один шаг) |
 | `--uv-reval-hours H` | интервал перепроверки во время майнинга (по умолчанию 6, `0` — не перепроверять) |
 | `--uv-dir DIR` | где лежат `uv.json` и `uv-restore.json` (также `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | только пишет в лог, какие карты были бы изменены (устройство CUDA → устройство NVML, шина); ничего не меняет |
@@ -662,10 +668,10 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 
 FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.4.7)：**
+**安装链接 (1.4.8)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -695,8 +701,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
-cd freeforgempear-1.4.7
+tar xzf freeforgempear-1.4.8-linux-x86_64.tar.gz
+cd freeforgempear-1.4.8
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -717,8 +723,8 @@ cd freeforgempear-1.4.7
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.4.7-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.4.8-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.8/freeforgempear-1.4.8-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -810,7 +816,7 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 | 行 | 含义 |
 |---|---|
-| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
+| `FreeForGemPear 1.4.8 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | 已加载调优内核。`embedded search kernel could not be loaded (原因)` = 矿工报错退出（驱动低于 525 或显卡不受支持） |
 | `new job ... prepared in ...` | 新的矿池任务已就绪 |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | 每 10 秒：每块显卡和总算力；你和抽水的已提交 / 已接受 / 已拒绝份额；抽水时段显示 `[DEVFEE]` |
@@ -822,9 +828,9 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.4.8-linux-x86_64.tar.gz freeforgempear-1.4.8.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.4.8-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.4.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -896,6 +902,9 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
 | `--uv-offset N` | 快速检查后应用固定偏移 N MHz，不做调校（检查失败则保持你的偏移） |
 | `--uv-reset` | 忘记已保存的结果；与 `--auto-uv` 一起使用时重新调校；没有钱包地址时矿工直接退出 |
 | `--uv-max N` | 调校尝试的最高偏移（默认 300） |
+| `--uv-min N` | 调校的起始偏移，且不会低于该值（默认：HiveOS/驱动中的偏移，否则 120） |
+| `--uv-step N` | 每步调校的 MHz（默认 15） |
+| `--uv-keep-last` | 某一步失败后保留最后一个通过的步（默认：最后通过的步再减一步） |
 | `--uv-reval-hours H` | 挖矿期间的复查间隔（默认 6，`0` 表示不复查） |
 | `--uv-dir DIR` | `uv.json` 和 `uv-restore.json` 的存放位置（也可用 `FFGP_STATE_DIR`） |
 | `--auto-uv-dry-run` | 只在日志中说明会改动哪些显卡（CUDA 设备 → NVML 设备、总线地址），不做任何改动 |

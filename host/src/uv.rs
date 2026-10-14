@@ -36,6 +36,9 @@ pub struct Opts {
     pub dry_run: bool,
     pub reset: bool,
     pub max_offset: i32,
+    pub min_offset: Option<i32>, // --uv-min: start/floor of the search (default: the HiveOS/NVML offset, else 120)
+    pub step: i32,               // --uv-step: MHz per step (default 15)
+    pub keep_last_good: bool,    // --uv-keep-last: after a failed step keep the last good step (not last good - one step)
     pub dir: Option<PathBuf>,
     pub reval_hours: f64,
     pub warmup_secs: u32,
@@ -45,7 +48,7 @@ pub struct Opts {
 
 impl Default for Opts {
     fn default() -> Opts {
-        Opts { auto: false, fixed: None, dry_run: false, reset: false, max_offset: 300, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
+        Opts { auto: false, fixed: None, dry_run: false, reset: false, max_offset: 300, min_offset: None, step: STEP, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
     }
 }
 
@@ -402,8 +405,9 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     }
     if o.dry_run {
         for c in &cards {
-            let first = c.orig + STEP;
-            lg(format!("DRY RUN: would change {} (NVML handle of PCI {}): offset {} -> {} ... up to {}; nothing is changed", c.label(), c.bus, signed(c.orig), signed(first), signed(o.max_offset.min(c.hi))));
+            let start = o.min_offset.unwrap_or(if c.orig != 0 { c.orig } else { 120 });
+            let first = start + o.step;
+            lg(format!("DRY RUN: would change {} (NVML handle of PCI {}): start {}, {} -> {} ... up to {}; nothing is changed", c.label(), c.bus, signed(start), signed(start), signed(first), signed(o.max_offset.min(c.hi))));
         }
         return None;
     }
@@ -652,32 +656,40 @@ impl Manager {
     }
 
     fn tune(&self, c: &Arc<Card>, prev: Option<Entry>) -> Result<()> {
-        let orig = c.orig;
+        let step = self.opts.step;
         let cap = self.opts.max_offset.min(HARD_CAP).min(c.hi);
-        if orig + STEP > cap {
-            lg(format!("{} starting offset {} leaves no room below the cap {}; nothing to do", c.label(), signed(orig), signed(cap)));
+        // search base/floor: --uv-min, else the offset HiveOS/NVML already has, else 120; never above the cap
+        let start = self.opts.min_offset.unwrap_or(if c.orig != 0 { c.orig } else { 120 }).clamp(0, cap);
+        if start + step > cap {
+            lg(format!("{} start offset {} leaves no room below the cap {}; nothing to do", c.label(), signed(start), signed(cap)));
             return Ok(());
         }
-        lg(format!("{} tuning: {} s warm-up at {}, then +{STEP} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(orig), signed(cap), self.opts.step_secs));
+        lg(format!("{} tuning: {} s warm-up at {}, then +{step} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(start), signed(cap), self.opts.step_secs));
         // the transcript digests depend on m too: a reference saved at another m must not seed the check
         let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel && e.m == c.m)
             .map(|e| e.refs.clone()).unwrap_or_default();
+        // the baseline is measured at the start offset, which may differ from the card's current one
+        if start != c.cur.load(Ordering::Relaxed) {
+            self.set_checked(c, start).context("GPU does not accept the start offset (--uv-min)")?;
+            std::thread::sleep(Duration::from_secs(3));
+        }
         let base = self.run_check(c, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
         if self.stopped() {
             return Ok(());
         }
         if !base.ok {
-            lg(format!("{} the starting offset {} fails the self-check ({}); not tuning. This offset is already beyond what the GPU computes reliably (lower it by 15-30 MHz, or set one with --uv-offset N); if the saved reference is stale: --uv-reset", c.label(), signed(orig), base.reason));
+            lg(format!("{} the start offset {} fails the self-check ({}); not tuning, restoring {}. Lower the start with --uv-min N (or --uv-offset N for a fixed one); if the saved reference is stale: --uv-reset", c.label(), signed(start), base.reason, signed(c.orig)));
+            let _ = self.set_checked(c, c.orig);
             return Ok(());
         }
         let refs = if golden.is_empty() { base.refs.clone() } else { golden };
         let base_w = base.watts;
-        lg(format!("{} baseline {}: ok, {}, {} MHz, {} C", c.label(), signed(orig), fmt_w(base_w), base.clk.unwrap_or(0), base.temp.unwrap_or(0)));
-        let mut good = orig;
+        lg(format!("{} baseline {}: ok, {}, {} MHz, {} C", c.label(), signed(start), fmt_w(base_w), base.clk.unwrap_or(0), base.temp.unwrap_or(0)));
+        let mut good = start;
         let mut good_w = base_w;
         let mut failed: Option<(i32, String)> = None;
-        while good + STEP <= cap {
-            let cand = good + STEP;
+        while good + step <= cap {
+            let cand = good + step;
             self.set_checked(c, cand)?;
             std::thread::sleep(Duration::from_secs(3));
             let r = self.run_check(c, &Spec { secs: self.opts.step_secs, min_reruns: 30, cpu: 2, measure: 12, refs: refs.clone() });
@@ -694,19 +706,24 @@ impl Manager {
                 break;
             }
         }
-        // result = last good step minus one step of margin (when a failure was found); at the cap: the cap itself
-        let mut fin = if failed.is_some() { good - STEP } else { good };
+        // result when a failure was found: the last good step, minus one step of margin by default
+        // (--uv-keep-last keeps the last good step itself); at the cap with no failure: the cap
+        let mut fin = if failed.is_some() {
+            if self.opts.keep_last_good { good } else { good - step }
+        } else {
+            good
+        };
         if let Some((fo, _)) = &failed {
             // the GPU may need a moment (and must still answer) after a failed step
             std::thread::sleep(Duration::from_secs(5));
-            let t = fin.max(orig);
+            let t = fin.max(start);
             self.set_checked(c, t).context("GPU does not accept the safe offset after the failed step")?;
             lg(format!("{} edge found at {}: stepping back to {}", c.label(), signed(*fo), signed(t)));
         }
-        fin = fin.max(orig);
+        fin = fin.max(start);
         // confirmation with a longer check; on failure one more step down
         let mut conf_w = good_w;
-        while fin > orig {
+        while fin > start {
             self.set_checked(c, fin)?;
             std::thread::sleep(Duration::from_secs(3));
             let r = self.run_check(c, &Spec { secs: self.opts.confirm_secs, min_reruns: 150, cpu: 4, measure: 20, refs: refs.clone() });
@@ -719,10 +736,10 @@ impl Manager {
                 break;
             }
             lg(format!("{} confirmation at {}: FAILED ({}); one step lower", c.label(), signed(fin), r.reason));
-            fin = (fin - STEP).max(orig);
+            fin = (fin - step).max(start);
         }
-        if fin == orig {
-            self.set_checked(c, orig)?;
+        if fin == start {
+            self.set_checked(c, start)?;
             conf_w = base_w;
         }
         let mut e = self.new_entry(c);
@@ -735,7 +752,7 @@ impl Manager {
         e.tested_at = now();
         e.verified_at = now();
         self.save_entry(c, &e);
-        lg(format!("{} offset {} -> {}, {} -> {}, saved", c.label(), signed(orig), signed(fin), fmt_w(base_w), fmt_w(conf_w)));
+        lg(format!("{} offset {} -> {}, {} -> {}, saved", c.label(), signed(start), signed(fin), fmt_w(base_w), fmt_w(conf_w)));
         Ok(())
     }
 
@@ -955,7 +972,7 @@ impl Manager {
     /// One step down (never below the owner's offset); below that: give up and restore.
     fn step_back(&self, c: &Card, why: &str) {
         let cur = c.cur.load(Ordering::Relaxed);
-        let new = (cur - STEP).max(c.orig);
+        let new = (cur - self.opts.step).max(c.orig);
         let mut e = self.entry(c).unwrap_or_else(|| self.new_entry(c));
         if new == cur {
             return;

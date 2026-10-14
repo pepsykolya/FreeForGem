@@ -519,6 +519,9 @@ OPTIONS:
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
     --uv-max N           highest offset the tuner tries (default 300)
+    --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120)
+    --uv-step N          MHz per tuning step (default 15)
+    --uv-keep-last       after a failed step keep the last good step (default: last good step minus one step)
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
@@ -592,6 +595,9 @@ fn main() -> Result<()> {
             "--uv-reset" => a.uv.reset = true,
             "--uv-offset" => a.uv.fixed = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-offset needs an integer (MHz)"))?),
             "--uv-max" => a.uv.max_offset = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-max needs an integer (MHz)"))?,
+            "--uv-min" => a.uv.min_offset = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-min needs an integer (MHz)"))?),
+            "--uv-step" => a.uv.step = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-step needs a positive integer (MHz)"))?,
+            "--uv-keep-last" => a.uv.keep_last_good = true,
             "--uv-dir" => a.uv.dir = Some(val()?.into()),
             "--uv-reval-hours" => a.uv.reval_hours = val()?.parse()?,
             "--uv-warmup" => a.uv.warmup_secs = val()?.parse()?,
@@ -624,7 +630,11 @@ fn main() -> Result<()> {
         std::process::exit(uv::check_child(&c));
     }
     ensure!(!(a.uv.auto && a.uv.fixed.is_some()), "--auto-uv and --uv-offset exclude each other");
-    ensure!(a.uv.max_offset >= uv::STEP, "--uv-max must be at least {}", uv::STEP);
+    ensure!(a.uv.step >= 1, "--uv-step must be at least 1 MHz");
+    ensure!(a.uv.max_offset >= a.uv.step, "--uv-max must be at least one step (--uv-step {})", a.uv.step);
+    if let Some(mn) = a.uv.min_offset {
+        ensure!(mn >= 0 && mn <= a.uv.max_offset, "--uv-min must be between 0 and --uv-max ({})", a.uv.max_offset);
+    }
     ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
     if a.uv.reset {
         uv::reset(&a.uv);
