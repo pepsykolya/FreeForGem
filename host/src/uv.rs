@@ -282,6 +282,7 @@ pub struct Card {
     orig: i32,
     lo: i32,
     hi: i32,
+    m: usize, // rows of A this card mines (its SM group); the undervolt check must stress it at this m
     cur: AtomicI32,
     owned: AtomicBool, // we still own the setting (false after tuning gave up or somebody else changed it)
     bad_seen: Mutex<u64>,
@@ -492,6 +493,7 @@ fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
         orig: cur,
         lo,
         hi,
+        m: crate::mining::device_m(gpu::sm_count(dev)),
         cur: AtomicI32::new(cur),
         owned: AtomicBool::new(true),
         bad_seen: Mutex::new(0),
@@ -658,7 +660,7 @@ impl Manager {
         }
         lg(format!("{} tuning: {} s warm-up at {}, then +{STEP} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(orig), signed(cap), self.opts.step_secs));
         // the transcript digests depend on m too: a reference saved at another m must not seed the check
-        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel && e.m == crate::mining::m())
+        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel && e.m == c.m)
             .map(|e| e.refs.clone()).unwrap_or_default();
         let base = self.run_check(c, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
         if self.stopped() {
@@ -726,7 +728,7 @@ impl Manager {
         let mut e = self.new_entry(c);
         e.offset = fin;
         e.refs = refs;
-        e.m = crate::mining::m();
+        e.m = c.m;
         e.clk = base.clk.unwrap_or(0);
         e.w_before = base_w.unwrap_or(0.0);
         e.w_after = conf_w.unwrap_or(0.0);
@@ -1098,14 +1100,14 @@ pub fn check_child(a: &ChildArgs) -> i32 {
 }
 
 /// CPU verification of a few hits of an easy-target attempt (the same path the miner uses for every share).
-fn cpu_round(job: &Job, counter: u64, n: u32) -> Result<u32> {
+fn cpu_round(job: &Job, counter: u64, n: u32, m: usize) -> Result<u32> {
     let row0 = job.nonce_row(counter);
     let seed = job.a_noise_seed(&row0);
     let mut target = [0xffff_ffffu32; 8];
     target[7] = 0x00ff_ffff;
     let tgt = U256::from_little_endian(&crate::target_words_bytes(&target));
     let mut hits = vec![gpu::Hit::default(); 64];
-    let (_, stored) = gpu::attempt(&seed, &[], &[], m(), &target, &mut hits)?;
+    let (_, stored) = gpu::attempt(&seed, &[], &[], m, &target, &mut hits)?;
     let usable: Vec<&gpu::Hit> = hits[..stored].iter().filter(|h| h.row != 0).collect();
     ensure!(!usable.is_empty(), "no usable hit with the easy target");
     let mut ok = 0;
@@ -1119,7 +1121,7 @@ fn cpu_round(job: &Job, counter: u64, n: u32) -> Result<u32> {
 
 /// `n` mining-mode attempts of one seed through the two-slot pipeline (what the miner does all day); returns the total hit count
 /// reported by each attempt, which is deterministic for a given job and seed.
-fn burst(seed: &[u8; 32], n: u32, target: &[u32; 8]) -> Result<Vec<usize>> {
+fn burst(seed: &[u8; 32], n: u32, target: &[u32; 8], m: usize) -> Result<Vec<usize>> {
     ensure!(n >= 2, "burst needs at least 2 attempts");
     let mut totals = Vec::with_capacity(n as usize);
     for i in 0..n {
@@ -1127,7 +1129,7 @@ fn burst(seed: &[u8; 32], n: u32, target: &[u32; 8]) -> Result<Vec<usize>> {
         if i >= 2 {
             totals.push(gpu::wait(slot, &mut [])?.0);
         }
-        gpu::launch(slot, seed, &[], &[], m(), target)?;
+        gpu::launch(slot, seed, &[], &[], m, target)?;
     }
     for i in n - 2..n {
         totals.push(gpu::wait((i & 1) as i32, &mut [])?.0);
@@ -1140,7 +1142,8 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     ensure!((a.dev as usize) < count && a.dev >= 0, "device {} does not exist", a.dev);
     let bus = gpu::device_pci_bus_id(a.dev)?;
     ensure!(bus.eq_ignore_ascii_case(&a.expect_bus), "CUDA device {} is at {bus}, expected {}: refusing to run", a.dev, a.expect_bus);
-    let job = Job::new(&test_header(7), 3)?;
+    let cm = crate::mining::device_m(gpu::sm_count(a.dev)); // this card's m (its SM group); FFGP_M env inherited from the parent
+    let job = Job::new(&test_header(7), 3, cm)?;
     gpu::init(a.dev)?;
     gpu::set_job(&job.br_t, &job.q1, &job.q2, N, k())?;
     // fixed seeds: the digests depend only on the job (from the fixed test header), the seed and the kernel, never on the process
@@ -1157,7 +1160,7 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     let fail = |msg: String, reruns: u64, cpu_ok: u32| (false, format!("UVRESULT ok=0 reruns={reruns} cpu_ok={cpu_ok} secs={:.1} reason={msg}", t0.elapsed().as_secs_f64()));
     macro_rules! cpu {
         ($c:expr) => {
-            match cpu_round(&job, $c, a.cpu) {
+            match cpu_round(&job, $c, a.cpu, cm) {
                 Ok(n) => cpu_ok += n,
                 Err(e) => return Ok(fail(format!("{e:#}"), reruns, cpu_ok)),
             }
@@ -1165,7 +1168,7 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     }
     macro_rules! mine_burst {
         ($s:expr, $n:expr) => {{
-            let totals = burst(&seeds[$s], $n, &target)?;
+            let totals = burst(&seeds[$s], $n, &target, cm)?;
             mined += totals.len() as u64;
             for t in totals {
                 match hit_refs[$s] {
@@ -1185,7 +1188,7 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
             break;
         }
         let s = ((reruns / CHECK_REPS as u64) % 4) as usize;
-        let (dg, diff) = gpu::check_run(&seeds[s], m(), CHECK_REPS)?;
+        let (dg, diff) = gpu::check_run(&seeds[s], cm, CHECK_REPS)?;
         if diff != 0 {
             return Ok(fail(format!("rerun_diff: {diff} transcript word(s) differ between reruns of seed {s} (after {reruns} reruns)"), reruns, cpu_ok));
         }

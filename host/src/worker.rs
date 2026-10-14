@@ -10,6 +10,7 @@ use base64::Engine;
 use primitive_types::U256;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -18,11 +19,12 @@ const MAX_HITS: usize = 64;
 /// Max queued attempts with hits per GPU; each one pins its Job (~100 MB for an old job), so keep it small.
 const WORK_QUEUE: usize = 8;
 
-/// What the GPUs mine right now.
+/// What the GPUs mine right now.  `jobs` holds one prepared Job per distinct device `m` (SM group): a
+/// homogeneous rig has one entry, a mixed-SM rig one per SM count.  Each worker picks the Job for its own m.
 pub struct Assignment {
     pub src: Src,
     pub pj: PoolJob,
-    pub job: Arc<Job>,
+    pub jobs: Arc<BTreeMap<usize, Arc<Job>>>,
     pub target: U256,
 }
 
@@ -108,6 +110,7 @@ pub fn src_name(s: Src) -> &'static str {
 /// Starts the worker thread of GPU `dev`. `ready` receives the device name once the GPU is initialised.
 pub fn spawn(
     dev: i32,
+    m_dev: usize,
     sh: Arc<Shared>,
     gs: Arc<GpuStat>,
     sinks: [Sender<Submit>; 2],
@@ -125,7 +128,7 @@ pub fn spawn(
             let gs = gs.clone();
             std::thread::Builder::new().name(format!("prover{dev}")).spawn(move || prover_loop(work_rx, sh, sinks, gs)).expect("spawn prover")
         };
-        if let Err(e) = run(dev, &sh, &gs, &work_tx) {
+        if let Err(e) = run(dev, m_dev, &sh, &gs, &work_tx) {
             eprintln!("!! GPU {dev} worker stopped: {e:#}");
         }
         gs.alive.store(false, Ordering::Relaxed);
@@ -134,10 +137,10 @@ pub fn spawn(
     })
 }
 
-fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Result<()> {
+fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Result<()> {
     let mut my_gen = 0u64;
     let mut cur: Option<Arc<Assignment>> = None;
-    let mut loaded: Option<Arc<Job>> = None; // job whose B side is in this GPU's memory
+    let mut loaded: Option<Arc<Job>> = None; // the Job (for this device's m) whose B side is in this GPU's memory
     // two-slot pipeline: attempt i+1 is prepared and enqueued before waiting for attempt i
     let mut pending: Option<Pending> = None;
     let mut slot = 0i32;
@@ -160,8 +163,10 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
         if g != my_gen {
             my_gen = g;
             let a = sh.assign.lock().unwrap().clone();
-            let job_changed = match (&a, &loaded) {
-                (Some(n), Some(l)) => !Arc::ptr_eq(&n.job, l),
+            // the Job this device mines = the one built for its own m (SM group)
+            let newjob = a.as_ref().map(|n| n.jobs.get(&m_dev).expect("no prepared Job for this device's m").clone());
+            let job_changed = match (&newjob, &loaded) {
+                (Some(n), Some(l)) => !Arc::ptr_eq(n, l),
                 (Some(_), None) => true,
                 _ => false,
             };
@@ -172,11 +177,11 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
                     finish(p, &mut hit_buf, sh, gs, work_tx)?;
                 }
             }
-            if let (true, Some(n)) = (job_changed, &a) {
+            if let (true, Some(n), Some(nj)) = (job_changed, &a, &newjob) {
                 let t = Instant::now();
-                gpu::set_job(&n.job.br_t, &n.job.q1, &n.job.q2, N, k())?;
-                loaded = Some(n.job.clone());
-                println!("GPU {dev}: [{}] job {} (cert {}) loaded in {:?}", src_name(n.src), n.pj.job_id, n.pj.cert_version, t.elapsed());
+                gpu::set_job(&nj.br_t, &nj.q1, &nj.q2, N, k())?;
+                loaded = Some(nj.clone());
+                println!("GPU {dev}: [{}] job {} (cert {}) m={m_dev} loaded in {:?}", src_name(n.src), n.pj.job_id, n.pj.cert_version, t.elapsed());
             }
             cur = a;
         }
@@ -184,12 +189,13 @@ fn run(dev: i32, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Resul
             std::thread::sleep(std::time::Duration::from_millis(20));
             continue;
         };
+        let job = loaded.as_ref().expect("job loaded whenever an assignment is current");
         // prepare and enqueue the next attempt, then collect the previous one
-        let row0 = c.job.nonce_row(counter);
-        let a_seed = c.job.a_noise_seed(&row0);
+        let row0 = job.nonce_row(counter);
+        let a_seed = job.a_noise_seed(&row0);
         // the kernel derives P_A and A_L from a_seed itself: no host-side permutation (a_perm = 512 hashes per attempt)
-        gpu::launch(slot, &a_seed, &[], &[], m(), &target_words(c.target))?;
-        let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: c.job.clone(), row0, a_seed, target: c.target, counter };
+        gpu::launch(slot, &a_seed, &[], &[], m_dev, &target_words(c.target))?;
+        let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: job.clone(), row0, a_seed, target: c.target, counter };
         counter += 1;
         slot ^= 1;
         if let Some(p) = pending.replace(next) {

@@ -33,10 +33,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.4.6):**
+**Installation URL (1.4.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -66,8 +66,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.4.6-linux-x86_64.tar.gz
-cd freeforgempear-1.4.6
+tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
+cd freeforgempear-1.4.7
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -88,8 +88,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.4.6-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6-windows-x64.zip`
+1. Download **`freeforgempear-1.4.7-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -193,7 +193,7 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 | Line | Meaning |
 |---|---|
-| `FreeForGemPear 1.4.6 \| pool ... \| worker ... \| N GPU(s)` | start banner |
+| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | start banner |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | the tuned kernel is loaded. `embedded search kernel could not be loaded (reason)` = the miner stops with an error (driver older than 525 or an unsupported GPU) |
 | `new job ... prepared in ...` | a new pool job is ready |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | every 10 s: hashrate per GPU and in total; shares submitted / accepted / rejected for you and for the dev fee; `[DEVFEE]` while a fee slot runs |
@@ -205,9 +205,9 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.4.6-linux-x86_64.tar.gz freeforgempear-1.4.6.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.6-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.4.6-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -234,7 +234,7 @@ The fee is a condition of the license: removing, reducing or redirecting it is n
 | Windows: `.exe` blocked by Defender / SmartScreen | *More info → Run anyway*, or add the folder to the exclusions; check the SHA-256 |
 
 Environment variables (set before starting the miner): `PEARL_SPIN=1` (spin-wait instead of sleeping).
-`FFGP_M=N` sets the rows of A per attempt (a multiple of 128). The default `m` is 47104; on a homogeneous rig the miner auto-picks it from the GPUs' SM count (an RTX 3070 resolves to 47104). Set `FFGP_M` only to experiment: a larger `m` gives slightly higher throughput at the cost of more host RAM.
+`FFGP_M=N` sets the rows of A per attempt (a multiple of 128). By default `m` is 47104 and the miner picks `m` for each GPU from its SM count (`m = 128 * SM * r`), so a mixed-SM rig balances every card — one job per SM group, each card mines its own (new in 1.4.7). Set `FFGP_M` only to experiment: it forces one `m` on every device, and a larger `m` gives slightly higher throughput at the cost of more host RAM.
 On Windows: `set PEARL_SPIN=1` in a `cmd` window, then run `start.bat` from that window.
 
 ### 12. Undervolt / `--auto-uv` (optional, new in 1.4.0)
@@ -348,10 +348,10 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.4.6):**
+**Ссылка для установки (1.4.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -381,8 +381,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.4.6-linux-x86_64.tar.gz
-cd freeforgempear-1.4.6
+tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
+cd freeforgempear-1.4.7
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -403,8 +403,8 @@ cd freeforgempear-1.4.6
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.4.6-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.4.7-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -506,7 +506,7 @@ cd freeforgempear-1.4.6
 
 | Строка | Значение |
 |---|---|
-| `FreeForGemPear 1.4.6 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
+| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | загружено настроенное ядро. `embedded search kernel could not be loaded (причина)` = майнер останавливается с ошибкой (драйвер старше 525 или неподдерживаемая карта) |
 | `new job ... prepared in ...` | готово новое задание пула |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | каждые 10 с: хэшрейт по картам и общий; отправленные / принятые / отклонённые шары ваши и комиссии; `[DEVFEE]` пока идёт слот комиссии |
@@ -518,9 +518,9 @@ cd freeforgempear-1.4.6
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.4.6-linux-x86_64.tar.gz freeforgempear-1.4.6.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.6-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.4.6-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -546,7 +546,7 @@ cd freeforgempear-1.4.6
 | Windows: `.exe` блокирует Defender / SmartScreen | *Подробнее → Выполнить в любом случае* или добавьте папку в исключения; сверьте SHA-256 |
 
 Переменные окружения (задаются до запуска майнера): `PEARL_SPIN=1` (активное ожидание вместо сна).
-`FFGP_M=N` задаёт число строк A за попытку (кратно 128). По умолчанию `m` равно 47104; на однородном риге майнер сам выбирает его по числу SM видеокарт (для RTX 3070 получается 47104). Задавайте `FFGP_M` только для экспериментов: чем больше `m`, тем немного выше производительность, но тем больше расход оперативной памяти хоста.
+`FFGP_M=N` задаёт число строк A за попытку (кратно 128). По умолчанию `m` равен 47104, и майнер сам подбирает `m` для каждой GPU по числу её SM (`m = 128 * SM * r`), поэтому на риге с разным числом SM каждая карта работает со своим `m` — по одному заданию на группу SM (с 1.4.7). Задавайте `FFGP_M` только для экспериментов: он задаёт один `m` на всех устройствах, а чем больше `m`, тем немного выше производительность, но тем больше расход оперативной памяти хоста.
 В Windows: `set PEARL_SPIN=1` в окне `cmd`, затем запустите `start.bat` из этого же окна.
 
 ### 12. Андервольт / `--auto-uv` (необязательно, новое в 1.4.0)
@@ -662,10 +662,10 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 
 FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.4.6)：**
+**安装链接 (1.4.7)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -695,8 +695,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.4.6-linux-x86_64.tar.gz
-cd freeforgempear-1.4.6
+tar xzf freeforgempear-1.4.7-linux-x86_64.tar.gz
+cd freeforgempear-1.4.7
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -717,8 +717,8 @@ cd freeforgempear-1.4.6
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.4.6-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.6/freeforgempear-1.4.6-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.4.7-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.7/freeforgempear-1.4.7-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -810,7 +810,7 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 | 行 | 含义 |
 |---|---|
-| `FreeForGemPear 1.4.6 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
+| `FreeForGemPear 1.4.7 \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | 已加载调优内核。`embedded search kernel could not be loaded (原因)` = 矿工报错退出（驱动低于 525 或显卡不受支持） |
 | `new job ... prepared in ...` | 新的矿池任务已就绪 |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | 每 10 秒：每块显卡和总算力；你和抽水的已提交 / 已接受 / 已拒绝份额；抽水时段显示 `[DEVFEE]` |
@@ -822,9 +822,9 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.4.6-linux-x86_64.tar.gz freeforgempear-1.4.6.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.4.6-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.4.6-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.4.7-linux-x86_64.tar.gz freeforgempear-1.4.7.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.4.7-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.4.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -849,7 +849,7 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | Windows：`.exe` 被 Defender / SmartScreen 拦截 | 点击"更多信息 → 仍要运行"，或将文件夹加入排除项；核对 SHA-256 |
 
 环境变量（启动矿工前设置）：`PEARL_SPIN=1`（忙等代替休眠）。
-`FFGP_M=N` 设置每次尝试的 A 行数（须为 128 的倍数）。`m` 默认值为 47104；在同型号显卡组成的矿机上，矿工会根据显卡的 SM 数量自动选取（RTX 3070 即为 47104）。仅在需要实验时才设置 `FFGP_M`：`m` 越大，算力略有提升，但会占用更多主机内存。
+`FFGP_M=N` 设置每次尝试的 A 行数（须为 128 的倍数）。`m` 默认值为 47104，矿工会根据每块 GPU 的 SM 数自动选取 `m`（`m = 128 * SM * r`），因此混合 SM 的矿机能让每张显卡各取所需——按 SM 分组各建一个任务（1.4.7 起）。仅在实验时才设置 `FFGP_M`：它对所有设备统一 `m`；`m` 越大算力略高，但会占用更多主机内存。
 Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运行 `start.bat`。
 
 ### 12. 降压 / `--auto-uv`（可选，1.4.0 新增）

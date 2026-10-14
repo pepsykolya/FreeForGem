@@ -13,43 +13,44 @@ use zk_pow::circuit::pearl_noise::{compute_noise, generate_permutation_matrix, g
 use zk_pow::ffi::plain_proof::{CertificateVersion, MatrixMerkleProof, PlainProof};
 
 pub const N: usize = 512;
-/// Default rows of A per attempt (production); overridable with `FFGP_M`.
+/// Default rows of A per attempt (display / self-test / fallback); overridable with `FFGP_M`.
 const DEFAULT_M: usize = 47104;
-/// Rows of A per attempt, common to every GPU.  Larger m amortizes the per-attempt prologue (P_A build,
-/// pipeline fill, jackpot epilogue frequency) over more row-blocks, at the cost of host RAM (m*k bytes of
-/// `a_base` per job) and a larger Merkle tree per proof.  `FFGP_M` overrides (a multiple of 128, 1024..=2^20).
-pub fn m() -> usize {
-    static MV: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+/// `FFGP_M` if set and valid (a multiple of 128 in 1024..=2^20), else None.  Panics on an invalid value.
+fn ffgp_m_override() -> Option<usize> {
+    static MV: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
     *MV.get_or_init(|| match std::env::var("FFGP_M") {
         Ok(v) => match v.trim().parse::<usize>() {
-            Ok(x) if x % 128 == 0 && (1024..=1_048_576).contains(&x) => x,
+            Ok(x) if x % 128 == 0 && (1024..=1_048_576).contains(&x) => Some(x),
             _ => panic!("FFGP_M={v}: want a multiple of 128 in 1024..=1048576"),
         },
-        Err(_) => AUTO_M.get().copied().unwrap_or(DEFAULT_M),
+        Err(_) => None,
     })
 }
 
-/// Rows of A picked from the SM counts of the devices about to be mined.  The library launches a persistent
-/// grid of min(m/128, SM) CTAs and the row-blocks divide evenly only when (m/128) % grid == 0; with one
-/// common m that holds on every device only on a homogeneous rig, where m = 128 * SM * r row-blocks per CTA
-/// (r = 8 while a_base stays within 512 MB at k = 8192, else 4 or 2).  Must run before the first m(); FFGP_M
-/// overrides it.  Mixed-SM rigs keep DEFAULT_M (balancing those needs a per-device job; not done).
-static AUTO_M: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-pub fn set_auto_m(sms: &[usize]) {
-    if std::env::var_os("FFGP_M").is_some() || sms.is_empty() {
-        return;
-    }
-    let sm = sms[0];
-    if sm == 0 || sms.iter().any(|&s| s != sm) {
-        return;
+/// Default rows of A per attempt: `FFGP_M` or DEFAULT_M.  Used for the banner, the rate display and the
+/// self-test; each mining device uses `device_m` for its own SM count.
+pub fn m() -> usize {
+    ffgp_m_override().unwrap_or(DEFAULT_M)
+}
+
+/// Rows of A for a device with `sm` streaming multiprocessors.  Larger m amortizes the per-attempt prologue
+/// (P_A build, pipeline fill, jackpot epilogue) over more row-blocks, at the cost of host RAM (m*k bytes of
+/// `a_base` per job) and a larger Merkle tree per proof.  The library launches a persistent grid of
+/// min(m/128, SM) CTAs and the row-blocks divide evenly only when (m/128) % grid == 0, i.e. m = 128 * SM * r;
+/// r is the largest of 8,4,2 that keeps a_base within 512 MB at k = 8192.  `FFGP_M` overrides it (same m on
+/// every device).  A mixed-SM rig gets the right m per device (new in 1.4.7): each SM group mines its own Job.
+pub fn device_m(sm: usize) -> usize {
+    if let Some(v) = ffgp_m_override() {
+        return v;
     }
     for r in [8usize, 4, 2] {
         let v = 128 * sm * r;
-        if v <= 65536 {
-            AUTO_M.set(v).ok();
-            return;
+        if sm > 0 && v <= 65536 {
+            return v;
         }
     }
+    DEFAULT_M
 }
 /// Common dimension k: the k the loaded libpearlgpu was built for (production 8192), overridable with `PEARL_K` for
 /// tests (pg_set_job refuses a mismatch).  Everything else (config, adjustment factor, commitment, proof size) follows
@@ -95,7 +96,7 @@ pub fn mining_config() -> MiningConfiguration {
 }
 
 /// Official sanity check of the (config, m, n) combination.
-pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation) -> Result<()> {
+pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation, m: usize) -> Result<()> {
     let p = PublicProofParams {
         block_header: header,
         seed_derivation: deriv,
@@ -103,7 +104,7 @@ pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation) -> Re
         hash_a: [0; 32],
         hash_b: [0; 32],
         hash_jackpot: [0; 32],
-        m: m() as u32,
+        m: m as u32,
         n: N as u32,
         t_rows: 0,
         t_cols: 0,
@@ -134,6 +135,7 @@ pub struct Job {
     pub header: IncompleteBlockHeader,
     #[allow(dead_code)]
     pub cert_version: u32,
+    pub m: usize, // rows of A this job was built for (per device / SM group)
     pub deriv: SeedDerivation,
     pub job_key: [u8; 32],
     pub b_noise_seed: [u8; 32],
@@ -149,20 +151,20 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn new(header_bytes: &[u8], cert_version: u32) -> Result<Job> {
+    pub fn new(header_bytes: &[u8], cert_version: u32, m: usize) -> Result<Job> {
         let header = IncompleteBlockHeader::from_bytes(header_bytes)?;
         let deriv = CertificateVersion::try_from(cert_version)?.seed_derivation();
-        config_sanity(header, deriv).context("public_params_sanity_check")?;
+        config_sanity(header, deriv, m).context("public_params_sanity_check")?;
         let mut data = header.to_bytes().to_vec();
         data.extend_from_slice(&mining_config().to_bytes());
         let job_key = blake3_digest(&data, None);
 
         let kk = k();
-        let a_base = vec![64u8; m() * kk];
+        let a_base = vec![64u8; m * kk];
         let b_col = vec![64u8; N * kk];
         ensure!(a_base.len() % CHUNK == 0 && b_col.len() % CHUNK == 0 && kk % CHUNK == 0 && (kk / CHUNK).is_power_of_two());
         let hash_b = blake3_digest(&b_col, Some(job_key));
-        let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, m() as u32, N as u32);
+        let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, m as u32, N as u32);
         let b_noise_seed = blake3_digest(&[&job_key[..], &bound_b[..]].concat(), None);
 
         // Subtrees right of the left path (everything not containing the chunks of row 0).
@@ -183,7 +185,7 @@ impl Job {
         let br_t: Vec<i8> = generate_uniform_random_matrix(&LABEL_B, &b_noise_seed, &all_cols, RANK).concat();
         let (q1, q2) = split_pairs(&generate_permutation_matrix(&LABEL_B, &b_noise_seed, kk, RANK));
 
-        Ok(Job { header, cert_version, deriv, job_key, b_noise_seed, a_base, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
+        Ok(Job { header, cert_version, m, deriv, job_key, b_noise_seed, a_base, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
     }
 
     /// Nonce row (A row 0): K int8 values in [-64, 63] derived from (job_key, counter).
@@ -223,7 +225,7 @@ impl Job {
     }
 
     pub fn a_noise_seed(&self, row0: &[u8]) -> [u8; 32] {
-        let (bound_a, _) = self.deriv.bind_roots(&self.hash_a(row0), &[0; 32], m() as u32, N as u32);
+        let (bound_a, _) = self.deriv.bind_roots(&self.hash_a(row0), &[0; 32], self.m as u32, N as u32);
         blake3_digest(&[&self.b_noise_seed[..], &bound_a[..]].concat(), None)
     }
 
@@ -235,11 +237,11 @@ impl Job {
         let mut a = self.a_base.clone();
         a[..k()].copy_from_slice(row0);
         PlainProof {
-            m: m(),
+            m: self.m,
             n: N,
             k: k(),
             noise_rank: RANK,
-            a: matrix_proof(&a, &self.job_key, &a_rows, m()),
+            a: matrix_proof(&a, &self.job_key, &a_rows, self.m),
             bt: matrix_proof(&self.b_col, &self.job_key, &b_cols, N),
             moe: None,
         }

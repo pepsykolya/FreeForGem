@@ -16,6 +16,7 @@ use devfee::{Change, DevFee};
 use mining::*;
 use primitive_types::U256;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -87,7 +88,7 @@ fn set_job_gpu(job: &Job) -> Result<()> {
 fn self_test(device: i32) -> Result<()> {
     println!("== self-test ==");
     let t0 = Instant::now();
-    let job = Job::new(&test_header(7), 3)?;
+    let job = Job::new(&test_header(7), 3, m())?;
     println!("[ok] public_params_sanity_check for m={} n={N} k={} rank={RANK}; job built in {:?}", m(), k(), t0.elapsed());
     println!("     job_key={}", hex(&job.job_key));
 
@@ -182,11 +183,11 @@ struct Args {
     uv: uv::Opts,
 }
 
-type Prepared = (Src, PoolJob, Result<Job>, Duration);
+type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
 
-/// Job preparation worker: builds `Job` (CPU only) for the newest pool job of each login; obsolete queued jobs
-/// are dropped. The fee login's job is prepared here too, ahead of its slot.
-fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>) {
+/// Job preparation worker: builds one `Job` per distinct device `m` (SM group) for the newest pool job of each
+/// login; obsolete queued jobs are dropped. The fee login's job is prepared here too, ahead of its slot.
+fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>, ms: Arc<Vec<usize>>) {
     let mut queue: [Option<PoolJob>; 2] = [None, None];
     loop {
         if queue.iter().all(Option::is_none) {
@@ -204,7 +205,8 @@ fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>) {
         let s = if queue[Src::Fee.idx()].is_some() { Src::Fee } else { Src::User };
         let Some(pj) = queue[s.idx()].take() else { continue };
         let t = Instant::now();
-        let res = Job::new(&pj.header, pj.cert_version);
+        let res: Result<BTreeMap<usize, Arc<Job>>> =
+            ms.iter().map(|&mm| Ok((mm, Arc::new(Job::new(&pj.header, pj.cert_version, mm)?)))).collect();
         let el = t.elapsed();
         // a newer job of the same login arrived while this one was being built: this one is obsolete
         while let Ok((s2, n)) = rx.try_recv() {
@@ -223,7 +225,7 @@ fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>) {
 #[derive(Default)]
 struct SrcState {
     pool_diff: Option<f64>,
-    cur: Option<(PoolJob, Arc<Job>)>,
+    cur: Option<(PoolJob, Arc<BTreeMap<usize, Arc<Job>>>)>,
     target: U256,
 }
 
@@ -255,13 +257,21 @@ fn mine(a: Args) -> Result<()> {
         }
         None => (0..count as i32).collect(),
     };
-    // rows of A from the devices' SM count (even persistent-grid split); FFGP_M overrides
+    // rows of A per device from its SM count (even persistent-grid split, no wave tail); FFGP_M overrides all
     let sms: Vec<usize> = devices.iter().map(|&d| gpu::sm_count(d)).collect();
-    mining::set_auto_m(&sms);
-    if sms.iter().any(|&s| s != sms[0]) {
-        println!("note: mixed SM counts {sms:?}: keeping default m={} (per-device balancing is not implemented)", m());
-    }
-    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) | m={} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), m(), k());
+    let device_ms: Vec<usize> = sms.iter().map(|&s| mining::device_m(s)).collect();
+    let distinct_ms: Arc<Vec<usize>> = Arc::new({
+        let mut v = device_ms.clone();
+        v.sort_unstable();
+        v.dedup();
+        v
+    });
+    let m_desc = if distinct_ms.len() == 1 {
+        format!("m={}", distinct_ms[0])
+    } else {
+        format!("m per device {device_ms:?} (SM {sms:?})")
+    };
+    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), k());
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
     uv::recover(&a.uv);
     let uv_state = uv::start(&a.uv, &devices, &stop);
@@ -304,10 +314,10 @@ fn mine(a: Args) -> Result<()> {
     let sh = Arc::new(Shared::new(stop.clone(), stats.clone()));
     let mut gstats = Vec::new();
     let mut handles = Vec::new();
-    for &dev in &devices {
+    for (i, &dev) in devices.iter().enumerate() {
         let gs = Arc::new(GpuStat { dev, name: gpu::device_name(dev), attempts: AtomicU64::new(0), alive: AtomicBool::new(true), pause: AtomicBool::new(false), paused: AtomicBool::new(false), uv_bad: AtomicU64::new(0) });
         let (rtx, rrx) = mpsc::channel();
-        handles.push(worker::spawn(dev, sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
+        handles.push(worker::spawn(dev, device_ms[i], sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
         rrx.recv()??; // GPU initialised (or the error that stopped it)
         println!("GPU {dev}: {}", gs.name);
         gstats.push(gs);
@@ -316,7 +326,8 @@ fn mine(a: Args) -> Result<()> {
 
     let (prep_tx, prep_rx) = mpsc::channel::<(Src, PoolJob)>();
     let (ready_tx, ready_rx) = mpsc::channel::<Prepared>();
-    std::thread::Builder::new().name("jobprep".into()).spawn(move || prep_loop(prep_rx, ready_tx))?;
+    let prep_ms = distinct_ms.clone();
+    std::thread::Builder::new().name("jobprep".into()).spawn(move || prep_loop(prep_rx, ready_tx, prep_ms))?;
 
     let (start, deadline) = (Instant::now(), a.minutes.map(|m| Duration::from_secs_f64(m * 60.0)));
     let mut mode = a.mode;
@@ -421,11 +432,11 @@ fn mine(a: Args) -> Result<()> {
         };
         let same = match (&published, &desired) {
             (None, None) => true,
-            (Some(p), Some((pj, job, t))) => p.src == src && Arc::ptr_eq(&p.job, job) && p.target == *t && p.pj.job_id == pj.job_id,
+            (Some(p), Some((pj, job, t))) => p.src == src && Arc::ptr_eq(&p.jobs, job) && p.target == *t && p.pj.job_id == pj.job_id,
             _ => false,
         };
         if !same {
-            published = desired.map(|(pj, job, target)| Arc::new(Assignment { src, pj, job, target }));
+            published = desired.map(|(pj, job, target)| Arc::new(Assignment { src, pj, jobs: job, target }));
             sh.publish(published.clone());
         }
 
@@ -437,7 +448,7 @@ fn mine(a: Args) -> Result<()> {
                 let n = g.attempts.load(Ordering::Relaxed);
                 let rate = (n - last_attempts[i]) as f64 / el.as_secs_f64();
                 last_attempts[i] = n;
-                let ths = rate * (m() * N * k()) as f64 / 1e12;
+                let ths = rate * (device_ms[i] * N * k()) as f64 / 1e12;
                 total_att += rate;
                 total_ths += ths;
                 parts.push(format!("GPU{} {:.3}{}", g.dev, ths, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));
