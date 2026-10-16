@@ -281,7 +281,8 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
    Wrong results without any driver error do happen near the limit, which is why the checks are done on the GPU *and* the CPU.
 3. The first mismatch, CUDA error, Xid error or hang ends the climb. The result is the **last good step minus one step (15 MHz
    margin)**, confirmed by a longer check (about 2 minutes); if the confirmation fails it goes one step lower. The highest
-   value tried is +300 (`--uv-max`).
+   value tried is +495 (`--uv-max`, at most +600; before 1.5.1 it was +300 with a hard cap of +400). RTX 40/50 cards often
+   hold +450..480.
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version and kernel build. Later starts apply it after a
    quick check (about 30 s). If the driver, the kernel build or your starting offset changed, the GPU is tuned again.
 5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
@@ -317,7 +318,7 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--auto-uv` | find, apply and supervise the undervolt (as described above) |
 | `--uv-offset N` | apply the fixed offset N MHz after a quick check, no tuning (if the check fails, your offset stays) |
 | `--uv-reset` | forget the saved results; with `--auto-uv` the GPUs are tuned again; without a wallet the miner just exits |
-| `--uv-max N` | highest offset the tuner tries (default 300) |
+| `--uv-max N` | highest offset the tuner tries (default 495, at most 600; on Windows: `set "UV_MAX=480"` in `start.bat`) |
 | `--uv-min N` | offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120) |
 | `--uv-step N` | MHz per tuning step (default 15) |
 | `--uv-keep-last` | after a failed step keep the last good step (default: the last good step minus one step) |
@@ -629,7 +630,8 @@ goto loop
    У предела бывают неверные результаты без всякой ошибки драйвера, поэтому проверка идёт и на GPU, и на CPU.
 3. Первое расхождение, ошибка CUDA, Xid или зависание останавливают подъём. Итог — **последний успешный шаг минус один шаг
    (запас 15 МГц)**, подтверждённый более длинной проверкой (около 2 минут); если подтверждение не прошло, берётся шагом ниже.
-   Выше +300 не поднимается (`--uv-max`).
+   Выше +495 не поднимается (`--uv-max`, максимум +600; до 1.5.1 было +300 с жёстким потолком +400). Карты RTX 40/50
+   часто держат +450..480.
 4. Результат сохраняется в `uv.json` с ключом: UUID карты, версия драйвера, сборка ядра. При следующих запусках он
    применяется после быстрой проверки (около 30 с). Если изменились драйвер, сборка ядра или ваш начальный offset,
    карта подбирается заново.
@@ -667,7 +669,7 @@ PCI-адресу (шине) и UUID; в логе у каждого измене�
 | `--auto-uv` | подобрать, применить и сопровождать андервольт (как описано выше) |
 | `--uv-offset N` | применить фиксированный offset N МГц после быстрой проверки, без подбора (если проверка не прошла, остаётся ваш offset) |
 | `--uv-reset` | забыть сохранённые результаты; вместе с `--auto-uv` карты подбираются заново; без кошелька майнер просто завершается |
-| `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию 300) |
+| `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию 495, максимум 600; в Windows: `set "UV_MAX=480"` в `start.bat`) |
 | `--uv-min N` | offset, с которого начинается подбор и ниже которого не опускается (по умолчанию offset из HiveOS/драйвера, иначе 120) |
 | `--uv-step N` | шаг подбора в МГц (по умолчанию 15) |
 | `--uv-keep-last` | после неудачного шага оставить последний удачный шаг (по умолчанию — последний удачный минус один шаг) |
@@ -953,7 +955,7 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
    每个结果的每个 tile 逐位比较；比较正常挖矿尝试的命中计数；找到的结果由官方验证器在 CPU 上验证。接近极限时会出现
    驱动不报任何错误的错误结果，因此检查同时在 GPU 和 CPU 上进行。
 3. 第一次不一致、CUDA 错误、Xid 错误或卡死就结束爬升。结果为**最后一个正常步长再减一步（15 MHz 余量）**，并用更长的
-   检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +300（`--uv-max`）。
+   检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +495（`--uv-max`，最多 +600；1.5.1 之前为 +300，硬上限 +400）。RTX 40/50 显卡常能稳定在 +450..480。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本和内核版本为键。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动、内核版本或你的起始偏移发生变化，则重新调校。
 5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
@@ -985,7 +987,7 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
 | `--auto-uv` | 查找、应用并监控降压（如上所述） |
 | `--uv-offset N` | 快速检查后应用固定偏移 N MHz，不做调校（检查失败则保持你的偏移） |
 | `--uv-reset` | 忘记已保存的结果；与 `--auto-uv` 一起使用时重新调校；没有钱包地址时矿工直接退出 |
-| `--uv-max N` | 调校尝试的最高偏移（默认 300） |
+| `--uv-max N` | 调校尝试的最高偏移（默认 495，最多 600；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
 | `--uv-min N` | 调校的起始偏移，且不会低于该值（默认：HiveOS/驱动中的偏移，否则 120） |
 | `--uv-step N` | 每步调校的 MHz（默认 15） |
 | `--uv-keep-last` | 某一步失败后保留最后一个通过的步（默认：最后通过的步再减一步） |

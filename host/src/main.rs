@@ -537,7 +537,7 @@ OPTIONS:
     --auto-uv            opt-in: find and apply a safe GPU undervolt (V/F offset, needs root/admin); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
-    --uv-max N           highest offset the tuner tries (default 300)
+    --uv-max N           highest offset the tuner tries (default 495, at most 600)
     --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120)
     --uv-step N          MHz per tuning step (default 15)
     --uv-keep-last       after a failed step keep the last good step (default: last good step minus one step)
@@ -660,6 +660,7 @@ fn main() -> Result<()> {
     ensure!(!(a.uv.auto && a.uv.fixed.is_some()), "--auto-uv and --uv-offset exclude each other");
     ensure!(a.uv.step >= 1, "--uv-step must be at least 1 MHz");
     ensure!(a.uv.max_offset >= a.uv.step, "--uv-max must be at least one step (--uv-step {})", a.uv.step);
+    ensure!(a.uv.max_offset <= uv::HARD_CAP, "--uv-max must not exceed {}", uv::HARD_CAP);
     if let Some(mn) = a.uv.min_offset {
         ensure!(mn >= 0 && mn <= a.uv.max_offset, "--uv-min must be between 0 and --uv-max ({})", a.uv.max_offset);
     }

@@ -9,6 +9,7 @@ param(
     [string]$Worker = $env:COMPUTERNAME,
     [string]$Devices = '',
     [string]$AutoUv = '',
+    [string]$UvMax = '',
     [string]$Password = '',
     [string]$LockCclock = '',
     [string]$LockMclock = '',
@@ -70,6 +71,7 @@ if ($LockMclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-mclock $Lock
 if ($Moffset -match '^[+-]?[0-9]+(,[+-]?[0-9]*)*$') { $cmdLine += " --moffset $Moffset" }
 if ($AutoUv -eq '1') {
     $cmdLine += ' --auto-uv'
+    if ($UvMax -match '^[+]?[0-9]+$') { $cmdLine += " --uv-max $UvMax" }
 }
 if ($AutoUv -eq '1' -or $LockCclock -or $LockMclock -or $Moffset) {
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const STEP: i32 = 15;
-const HARD_CAP: i32 = 400; // never above this, whatever --uv-max / --uv-offset say
+pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-offset say (the driver range c.hi caps it too)
 const DISABLE_SECS: u64 = 24 * 3600;
 
 #[derive(Clone, Debug)]
@@ -48,7 +48,7 @@ pub struct Opts {
 
 impl Default for Opts {
     fn default() -> Opts {
-        Opts { auto: false, fixed: None, dry_run: false, reset: false, max_offset: 300, min_offset: None, step: STEP, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
+        Opts { auto: false, fixed: None, dry_run: false, reset: false, max_offset: 495, min_offset: None, step: STEP, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
     }
 }
 
