@@ -9,7 +9,10 @@ param(
     [string]$Worker = $env:COMPUTERNAME,
     [string]$Devices = '',
     [string]$AutoUv = '',
-    [string]$Password = ''
+    [string]$Password = '',
+    [string]$LockCclock = '',
+    [string]$LockMclock = '',
+    [string]$Moffset = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -62,10 +65,15 @@ $exe = Join-Path $root 'freeforgempear.exe'
 $cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
 if ($Devices) { $cmdLine += " --devices $Devices" }
 if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " --password $Password" }
+if ($LockCclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-cclock $LockCclock" }
+if ($LockMclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-mclock $LockMclock" }
+if ($Moffset -match '^[+-]?[0-9]+(,[+-]?[0-9]*)*$') { $cmdLine += " --moffset $Moffset" }
 if ($AutoUv -eq '1') {
     $cmdLine += ' --auto-uv'
+}
+if ($AutoUv -eq '1' -or $LockCclock -or $LockMclock -or $Moffset) {
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $admin) { Write-Host 'WARNING: AUTO_UV is on but start.bat is not run as Administrator: the miner cannot change the GPU voltage offset and will mine normally.' -ForegroundColor Yellow }
+    if (-not $admin) { Write-Host 'WARNING: AUTO_UV / clock settings need Administrator: run start.bat as Administrator, otherwise the miner cannot change the GPU and will mine at the current clocks.' -ForegroundColor Yellow }
 }
 $log = Join-Path $logs ("miner-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $writer = New-Object IO.StreamWriter($log, $true, (New-Object Text.UTF8Encoding($false)))

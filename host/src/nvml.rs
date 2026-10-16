@@ -103,6 +103,10 @@ pub struct Nvml {
     gpc_minmax: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> c_int>,
     co_get: Option<unsafe extern "C" fn(*mut c_void, *mut ClockOffset) -> c_int>,
     co_set: Option<unsafe extern "C" fn(*mut c_void, *mut ClockOffset) -> c_int>,
+    lgc_set: Option<unsafe extern "C" fn(*mut c_void, c_uint, c_uint) -> c_int>,
+    lgc_reset: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+    lmc_set: Option<unsafe extern "C" fn(*mut c_void, c_uint, c_uint) -> c_int>,
+    lmc_reset: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
     ev_create: Option<unsafe extern "C" fn(*mut *mut c_void) -> c_int>,
     ev_register: Option<unsafe extern "C" fn(*mut c_void, u64, *mut c_void) -> c_int>,
     ev_wait: Option<unsafe extern "C" fn(*mut c_void, *mut EventData, c_uint) -> c_int>,
@@ -168,6 +172,10 @@ impl Nvml {
             gpc_minmax: opt!("nvmlDeviceGetGpcClkMinMaxVfOffset"),
             co_get: opt!("nvmlDeviceGetClockOffsets"),
             co_set: opt!("nvmlDeviceSetClockOffsets"),
+            lgc_set: opt!("nvmlDeviceSetGpuLockedClocks"),
+            lgc_reset: opt!("nvmlDeviceResetGpuLockedClocks"),
+            lmc_set: opt!("nvmlDeviceSetMemoryLockedClocks"),
+            lmc_reset: opt!("nvmlDeviceResetMemoryLockedClocks"),
             ev_create: opt!("nvmlEventSetCreate"),
             ev_register: opt!("nvmlDeviceRegisterEvents"),
             ev_wait: opt!("nvmlEventSetWait_v2"),
@@ -310,6 +318,31 @@ impl Nvml {
                 self.ck(unsafe { self.co_set.unwrap()(d.0, &mut o) }, "nvmlDeviceSetClockOffsets")
             }
         }
+    }
+
+    /// Lock the core (graphics) clock to a fixed MHz (nvmlDeviceSetGpuLockedClocks, like `nvidia-smi -lgc N,N`).
+    pub fn set_core_locked(&self, d: Dev, mhz: u32) -> Result<()> {
+        let f = self.lgc_set.ok_or_else(|| anyhow!("nvmlDeviceSetGpuLockedClocks not in this driver"))?;
+        self.ck(unsafe { f(d.0, mhz, mhz) }, "nvmlDeviceSetGpuLockedClocks")
+    }
+    pub fn reset_core_locked(&self, d: Dev) -> Result<()> {
+        let f = self.lgc_reset.ok_or_else(|| anyhow!("nvmlDeviceResetGpuLockedClocks not in this driver"))?;
+        self.ck(unsafe { f(d.0) }, "nvmlDeviceResetGpuLockedClocks")
+    }
+    /// Lock the memory clock to a fixed MHz (nvmlDeviceSetMemoryLockedClocks, like `nvidia-smi -lmc N,N`).
+    pub fn set_mem_locked(&self, d: Dev, mhz: u32) -> Result<()> {
+        let f = self.lmc_set.ok_or_else(|| anyhow!("nvmlDeviceSetMemoryLockedClocks not in this driver"))?;
+        self.ck(unsafe { f(d.0, mhz, mhz) }, "nvmlDeviceSetMemoryLockedClocks")
+    }
+    pub fn reset_mem_locked(&self, d: Dev) -> Result<()> {
+        let f = self.lmc_reset.ok_or_else(|| anyhow!("nvmlDeviceResetMemoryLockedClocks not in this driver"))?;
+        self.ck(unsafe { f(d.0) }, "nvmlDeviceResetMemoryLockedClocks")
+    }
+    /// Memory-clock V/F offset in MHz (nvmlDeviceSetClockOffsets with NVML_CLOCK_MEM; needs driver 555+).
+    pub fn set_mem_offset(&self, d: Dev, v: i32) -> Result<()> {
+        let f = self.co_set.ok_or_else(|| anyhow!("nvmlDeviceSetClockOffsets not in this driver (memory offset needs driver 555+)"))?;
+        let mut o = ClockOffset { version: CLOCK_OFFSET_V1, clock_type: 2, pstate: 0, offset: v, min: 0, max: 0 }; // NVML_CLOCK_MEM = 2
+        self.ck(unsafe { f(d.0, &mut o) }, "nvmlDeviceSetClockOffsets(MEM)")
     }
 
     /// Subscribes to critical Xid events of `d` (best effort).

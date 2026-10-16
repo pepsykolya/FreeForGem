@@ -3,6 +3,7 @@
 //!
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
+mod clocks;
 mod devfee;
 mod gpu;
 mod mining;
@@ -181,6 +182,9 @@ struct Args {
     devices: Option<Vec<i32>>,
     mode: TargetMode,
     uv: uv::Opts,
+    lock_cclock: Option<String>, // --lock-cclock: core clock MHz (one value, or one per device)
+    lock_mclock: Option<String>, // --lock-mclock: memory clock MHz
+    moffset: Option<String>,     // --moffset: memory clock offset MHz (may be negative)
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -241,6 +245,7 @@ fn mine(a: Args) -> Result<()> {
             if stop.swap(true, Ordering::SeqCst) {
                 eprintln!("second interrupt: exiting at once");
                 uv::restore_all();
+                clocks::restore_all();
                 std::process::exit(130);
             }
             eprintln!("shutting down (finishing in-flight work)...");
@@ -272,6 +277,20 @@ fn mine(a: Args) -> Result<()> {
         format!("m per device {device_ms:?} (SM {sms:?})")
     };
     println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), k());
+    // optional clock control (lock core/memory clock, memory offset): applied now, restored on any exit
+    let clock_dir = a
+        .uv
+        .dir
+        .clone()
+        .or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    clocks::recover(&clock_dir);
+    let clock_opts = clocks::ClockOpts {
+        core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
+        mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
+        mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
+    };
+    let _clock_guard = clocks::apply(&devices, &clock_opts, &clock_dir);
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
     uv::recover(&a.uv);
     let uv_state = uv::start(&a.uv, &devices, &stop);
@@ -525,6 +544,9 @@ OPTIONS:
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
+    --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
+    --lock-mclock N      lock the memory clock to N MHz (same syntax)
+    --moffset N          memory clock offset in MHz, may be negative (same syntax; needs driver 555+)
     --help               show this text
     --version            show the version
 
@@ -561,6 +583,9 @@ fn main() -> Result<()> {
         devices: None,
         mode: TargetMode::Base,
         uv: uv::Opts::default(),
+        lock_cclock: None,
+        lock_mclock: None,
+        moffset: None,
     };
     let mut test = false;
     let mut child: Option<uv::ChildArgs> = None;
@@ -598,6 +623,9 @@ fn main() -> Result<()> {
             "--uv-min" => a.uv.min_offset = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-min needs an integer (MHz)"))?),
             "--uv-step" => a.uv.step = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-step needs a positive integer (MHz)"))?,
             "--uv-keep-last" => a.uv.keep_last_good = true,
+            "--lock-cclock" => a.lock_cclock = Some(val()?),
+            "--lock-mclock" => a.lock_mclock = Some(val()?),
+            "--moffset" => a.moffset = Some(val()?),
             "--uv-dir" => a.uv.dir = Some(val()?.into()),
             "--uv-reval-hours" => a.uv.reval_hours = val()?.parse()?,
             "--uv-warmup" => a.uv.warmup_secs = val()?.parse()?,

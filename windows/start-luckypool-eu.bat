@@ -22,11 +22,18 @@ set "PASSWORD="
 rem Optional undervolt auto-tuner (saves watts at the same hashrate). Needs a start.bat run as Administrator.
 rem EXPERIMENTAL on Windows - read MANUAL.md, section 12, first. To enable it, remove "rem" from the next line:
 rem set "AUTO_UV=1"
+rem Optional GPU clock control (needs start.bat run as Administrator; empty = leave as is).
+rem One value for all GPUs, or a comma list in DEVICES order. Example: 1500  or  1500,1500,1815
+set "LOCK_CCLOCK="
+rem Lock memory clock (MHz):
+set "LOCK_MCLOCK="
+rem Memory clock offset (MHz, may be negative; needs NVIDIA driver 555+):
+set "MOFFSET="
 rem ================================================================
 
 set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -Password "%PASSWORD%"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%"
 echo.
 echo FreeForGemPear stopped (exit code %ERRORLEVEL%).
 pause
