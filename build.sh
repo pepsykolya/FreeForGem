@@ -16,7 +16,9 @@ D=dist/freeforgempear-$VERSION
 rm -rf "$D"; mkdir -p "$D"
 cp host/target/release/freeforgempear "$LIB" LICENSE NOTICE README.md HIVEOS.md "$D/"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgempear-$VERSION"
-# HiveOS custom miner package: freeforgempear-<version>.tar.gz with a top-level freeforgempear/ folder
+# HiveOS custom miner package: freeforgempear-<version>.tar.gz with a top-level freeforgempear/ folder.
+# HiveOS splits the file name at its LAST '-' into miner name / version, so <version> must contain no '-'
+# (1.5.0rc1, not 1.5.0-rc1) and the folder must be exactly the miner name.
 H=dist/hive/freeforgempear
 rm -rf dist/hive; mkdir -p "$H"
 cp host/target/release/freeforgempear "$LIB" LICENSE NOTICE README.md HIVEOS.md hiveos/h-*.sh "$H/"

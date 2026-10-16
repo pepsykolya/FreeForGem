@@ -28,8 +28,9 @@ is emitted directly as SASS by our own generator.
 
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **Should run untuned:** RTX 40xx (sm_89 runs sm_86 code), not tested yet.
+* **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
 * **Not supported:** older GPUs, A100 (sm_80), AMD.
-* **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer. The Linux binary is built on
+* **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer (RTX 50xx: 570 or newer). The Linux binary is built on
   Ubuntu 20.04 (glibc 2.31), so it runs on Ubuntu 20.04+ and HiveOS.
 
 Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS, Linux, Windows, pools, overclocking, troubleshooting).
@@ -37,8 +38,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.4.9-linux-x86_64.tar.gz
-cd freeforgempear-1.4.9
+tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
+cd freeforgempear-1.5.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -71,7 +72,7 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.4.9-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+Download `freeforgempear-1.5.0-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
 (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
 `WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -83,7 +84,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.

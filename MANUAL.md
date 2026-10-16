@@ -20,11 +20,12 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 |---|---|
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **main target, tuned: ~70 TH/s on an RTX 3070 at ~107 W** |
 | RTX 40xx (Ada, sm_89) | runs the sm_86 code, untuned |
+| RTX 50xx (Blackwell, sm_120) | supported since 1.5.0 with a compiled kernel (untuned); needs driver 570+ |
 | Older GPUs, A100 (sm_80), AMD | not supported |
 
 ### 2. Requirements
 
-* NVIDIA GPU of the RTX 30 series (RTX 40 runs untuned) and NVIDIA driver **525 or newer**.
+* NVIDIA GPU of the RTX 30 series (RTX 40 runs untuned, RTX 50 since 1.5.0) and NVIDIA driver **525 or newer** (RTX 50xx: **570+**).
 * HiveOS, Linux x86_64 (glibc 2.31+, Ubuntu 20.04+), or Windows 10/11 x64. No CUDA toolkit, no Python, no WSL.
 * A PRL wallet address (`prl1...`) and an internet connection to a Pearl stratum pool.
 * Video memory: the kernel works from the L2 cache and needs little VRAM.
@@ -36,7 +37,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -66,8 +67,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.4.9-linux-x86_64.tar.gz
-cd freeforgempear-1.4.9
+tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
+cd freeforgempear-1.5.0
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -88,8 +89,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.4.9-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9-windows-x64.zip`
+1. Download **`freeforgempear-1.5.0-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -117,12 +118,41 @@ Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA d
 
 * **Autostart:** put a shortcut to `start.bat` into `shell:startup` (Win+R, `shell:startup`), or create a Task Scheduler
   task "At log on" that runs `start.bat`.
-* **Overclocking:** MSI Afterburner (core lock in the curve editor, memory down) with the values from section 7.
-  Laptops: plug in the charger and choose the maximum performance mode.
-* **Undervolt (optional, experimental on Windows):** remove `rem` before `set "AUTO_UV=1"` in `start.bat` and run it as Administrator; see section 12.
+* **Overclocking:** MSI Afterburner (core lock in the curve editor, memory down) with the values from section 7, **or**
+  the miner's built-in clock control (next bullet). Laptops: plug in the charger and choose the maximum performance mode.
+* **Built-in clock control (new in 1.4.9):** set `LOCK_CCLOCK`, `LOCK_MCLOCK` and/or `MOFFSET` in the `.bat` file (section 12),
+  e.g. `set "LOCK_CCLOCK=1560"` and `set "LOCK_MCLOCK=810"`. The miner locks the clocks at start and restores them on exit.
+* **Undervolt (optional, experimental on Windows):** remove `rem` before `set "AUTO_UV=1"` in `start.bat`; see section 12.
+* **Run as Administrator for any GPU tuning.** `AUTO_UV`, `LOCK_CCLOCK`, `LOCK_MCLOCK` and `MOFFSET` change the GPU through the
+  driver, which needs admin rights: right-click the `.bat` → **Run as administrator** (for autostart, tick *Run with highest
+  privileges* in the Task Scheduler task). Without it the miner keeps running but mines at the current clocks and prints a
+  warning. Plain mining (wallet / pool only) does **not** need Administrator.
 * Defender / SmartScreen may flag a new unsigned `.exe`: *More info → Run anyway*, or add the folder to the exclusions.
 * Without `start.bat`: `freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1`
 * Build it yourself: `.\build-windows.ps1` (see the README).
+
+**Advanced: your own `.bat` with `nvidia-smi` clock lock + power limit.** If you also want a **power limit** (the built-in
+clock control does not set one), or prefer your own restart loop and log file, write a `.bat` like the one below and start it
+**as Administrator** (right-click → *Run as administrator*; `nvidia-smi -lgc/-lmc/-pl` and `--auto-uv` all need admin):
+
+```bat
+@echo off
+rem Lock clocks and power limit through the driver (Administrator; reset on reboot). See section 7 for values.
+nvidia-smi -lgc 1665
+nvidia-smi -lmc 810
+nvidia-smi -pl 165
+cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+:loop
+powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
+timeout /t 10
+goto loop
+```
+
+Replace `YOUR_PRL_ADDRESS` with your `prl1...` address (for LuckyPool PRL+NOCK merge mining append `+YOUR_NOCK_ADDRESS`).
+`-lgc` locks the core clock, `-lmc` the memory clock, `-pl` the power limit in watts; `timeout /t 10` + `goto loop` restart the
+miner 10 s after any exit, and `Tee-Object` writes a log while still showing the output. To release the locks without a reboot:
+`nvidia-smi -rgc` and `nvidia-smi -rmc`. (The shipped `start.bat` does the clock lock and restart loop for you via `LOCK_CCLOCK` /
+`LOCK_MCLOCK` and `MOFFSET`; use a custom `.bat` like this only when you need `-pl` or your own logging.)
 
 ### 6. Pools
 
@@ -205,9 +235,9 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.4.9-linux-x86_64.tar.gz freeforgempear-1.4.9.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.9-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.4.9-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -224,7 +254,7 @@ The fee is a condition of the license: removing, reducing or redirecting it is n
 | Symptom | Fix |
 |---|---|
 | Check that everything works | `freeforgempear --self-test` (Windows: `freeforgempear.exe --self-test`) must end with `== self-test PASSED ==` |
-| `embedded search kernel could not be loaded` at start | update the NVIDIA driver (525+) and check that the GPU is Ampere (RTX 30xx) or newer |
+| `embedded search kernel could not be loaded` at start | update the NVIDIA driver (525+; **RTX 50xx needs 570+**) and check that the GPU is Ampere (RTX 30xx) or newer |
 | High CPU load | by default GPU waits sleep (well under 10% of a core per GPU). `PEARL_SPIN=1` makes them spin (a full core per GPU): make sure it is not set |
 | `pg_init(...)` or out-of-memory errors | another program holds the GPU (games, local AI models). Close it or choose GPUs with `--devices` |
 | `[DISCONNECTED]` for a long time | check the pool host/port and the firewall (outgoing TCP); try another region from section 6 |
@@ -340,11 +370,12 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 |---|---|
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **основная цель, оптимизировано: ~70 TH/s на RTX 3070 при ~107 Вт** |
 | RTX 40xx (Ada, sm_89) | запускает код sm_86, без оптимизации |
+| RTX 50xx (Blackwell, sm_120) | поддержка с 1.5.0, компилированное ядро (без оптимизации); нужен драйвер 570+ |
 | Старые карты, A100 (sm_80), AMD | не поддерживаются |
 
 ### 2. Требования
 
-* Видеокарта NVIDIA серии RTX 30 (RTX 40 — без оптимизации), драйвер NVIDIA **525 или новее**.
+* Видеокарта NVIDIA серии RTX 30 (RTX 40 — без оптимизации, RTX 50 — с 1.5.0), драйвер NVIDIA **525 или новее** (RTX 50xx: **570+**).
 * HiveOS, Linux x86_64 (glibc 2.31+, Ubuntu 20.04+) или Windows 10/11 x64. CUDA toolkit, Python и WSL не нужны.
 * Адрес кошелька PRL (`prl1...`) и интернет до stratum-пула Pearl.
 * Видеопамять: ядро работает из L2-кэша и почти не использует VRAM.
@@ -356,7 +387,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -386,8 +417,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.4.9-linux-x86_64.tar.gz
-cd freeforgempear-1.4.9
+tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
+cd freeforgempear-1.5.0
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -408,8 +439,8 @@ cd freeforgempear-1.4.9
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.4.9-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.5.0-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -437,12 +468,41 @@ cd freeforgempear-1.4.9
 
 * **Автозапуск:** положите ярлык `start.bat` в `shell:startup` (Win+R, `shell:startup`) или создайте задачу в Планировщике
   «При входе в систему», запускающую `start.bat`.
-* **Разгон:** MSI Afterburner (фиксация ядра в редакторе кривой, память вниз) со значениями из раздела 7.
-  Ноутбуки: подключите зарядку и выберите режим максимальной производительности.
-* **Андервольт (необязательно, в Windows экспериментально):** уберите `rem` перед `set "AUTO_UV=1"` в `start.bat` и запускайте его от администратора; см. раздел 12.
+* **Разгон:** MSI Afterburner (фиксация ядра в редакторе кривой, память вниз) со значениями из раздела 7 **или** встроенное
+  управление частотами (следующий пункт). Ноутбуки: подключите зарядку и выберите режим максимальной производительности.
+* **Встроенное управление частотами (с 1.4.9):** задайте `LOCK_CCLOCK`, `LOCK_MCLOCK` и/или `MOFFSET` в `.bat`-файле (раздел 12),
+  например `set "LOCK_CCLOCK=1560"` и `set "LOCK_MCLOCK=810"`. Майнер фиксирует частоты при старте и возвращает их при выходе.
+* **Андервольт (необязательно, в Windows экспериментально):** уберите `rem` перед `set "AUTO_UV=1"` в `start.bat`; см. раздел 12.
+* **Запуск от администратора для любой настройки GPU.** `AUTO_UV`, `LOCK_CCLOCK`, `LOCK_MCLOCK` и `MOFFSET` меняют GPU через
+  драйвер, а для этого нужны права администратора: правой кнопкой по `.bat` → **Запуск от имени администратора** (для
+  автозапуска включите *Выполнять с наивысшими правами* в задаче Планировщика). Без этого майнер продолжит работать, но на
+  текущих частотах и с предупреждением в логе. Для обычного майнинга (только кошелёк/пул) администратор **не** нужен.
 * Defender / SmartScreen может ругаться на новый неподписанный `.exe`: *Подробнее → Выполнить в любом случае* или добавьте папку в исключения.
 * Без `start.bat`: `freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1`
 * Собрать самому: `.\build-windows.ps1` (см. README).
+
+**Продвинутый вариант: свой `.bat` с фиксацией частот и лимитом мощности через `nvidia-smi`.** Если нужен ещё и **лимит
+мощности** (встроенное управление частотами его не задаёт) или свой цикл перезапуска и файл лога — сделайте `.bat` как ниже и
+запускайте его **от администратора** (`nvidia-smi -lgc/-lmc/-pl` и `--auto-uv` требуют прав администратора):
+
+```bat
+@echo off
+rem Фиксируем частоты и лимит мощности через драйвер (администратор; сбрасывается при перезагрузке). Значения — раздел 7.
+nvidia-smi -lgc 1665
+nvidia-smi -lmc 810
+nvidia-smi -pl 165
+cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+:loop
+powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
+timeout /t 10
+goto loop
+```
+
+Замените `ВАШ_АДРЕС_PRL` на свой адрес `prl1...` (для объединённого майнинга PRL+NOCK на LuckyPool допишите `+ВАШ_АДРЕС_NOCK`).
+`-lgc` фиксирует частоту ядра, `-lmc` — памяти, `-pl` — лимит мощности в ваттах; `timeout /t 10` + `goto loop` перезапускают
+майнер через 10 с после любого выхода, а `Tee-Object` пишет лог, не скрывая вывод. Снять фиксацию без перезагрузки:
+`nvidia-smi -rgc` и `nvidia-smi -rmc`. (Штатный `start.bat` делает фиксацию частот и цикл перезапуска за вас через `LOCK_CCLOCK` /
+`LOCK_MCLOCK` и `MOFFSET`; свой `.bat` нужен только ради `-pl` или собственного лога.)
 
 ### 6. Пулы
 
@@ -523,9 +583,9 @@ cd freeforgempear-1.4.9
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.4.9-linux-x86_64.tar.gz freeforgempear-1.4.9.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.4.9-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.4.9-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -541,7 +601,7 @@ cd freeforgempear-1.4.9
 | Симптом | Решение |
 |---|---|
 | Проверить, что всё работает | `freeforgempear --self-test` (Windows: `freeforgempear.exe --self-test`) должен закончиться строкой `== self-test PASSED ==` |
-| При старте `embedded search kernel could not be loaded` | обновите драйвер NVIDIA (525+) и проверьте, что карта Ampere (RTX 30xx) или новее |
+| При старте `embedded search kernel could not be loaded` | обновите драйвер NVIDIA (525+; **для RTX 50xx нужен 570+**) и проверьте, что карта Ampere (RTX 30xx) или новее |
 | Высокая загрузка CPU | по умолчанию ожидание GPU спит (заметно меньше 10% ядра на карту). `PEARL_SPIN=1` включает активное ожидание (ядро CPU на карту): убедитесь, что она не задана |
 | Ошибки `pg_init(...)` или нехватка памяти | видеокарту занимает другая программа (игры, локальные нейросети). Закройте её или выберите карты через `--devices` |
 | Долго `[DISCONNECTED]` | проверьте хост/порт пула и брандмауэр (исходящий TCP); попробуйте другой регион из раздела 6 |
@@ -659,11 +719,12 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 |---|---|
 | RTX 30xx（Ampere，sm_86）：3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **主要目标，已调优：RTX 3070 约 70 TH/s，约 107 W** |
 | RTX 40xx（Ada，sm_89） | 运行 sm_86 代码，未调优 |
+| RTX 50xx（Blackwell，sm_120） | 自 1.5.0 起支持，使用编译内核（未调优）；需要驱动 570+ |
 | 更老的显卡、A100（sm_80）、AMD | 不支持 |
 
 ### 2. 系统要求
 
-* RTX 30 系列 NVIDIA 显卡（RTX 40 未调优可运行），NVIDIA 驱动 **525 或更新**。
+* RTX 30 系列 NVIDIA 显卡（RTX 40 未调优可运行，RTX 50 自 1.5.0 起支持），NVIDIA 驱动 **525 或更新**（RTX 50xx：**570+**）。
 * HiveOS、Linux x86_64（glibc 2.31+，Ubuntu 20.04+）或 Windows 10/11 x64。不需要 CUDA toolkit、Python 或 WSL。
 * PRL 钱包地址（`prl1...`）以及到 Pearl stratum 矿池的网络连接。
 * 显存：内核从 L2 缓存工作，几乎不占用显存。
@@ -675,7 +736,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -705,8 +766,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.4.9-linux-x86_64.tar.gz
-cd freeforgempear-1.4.9
+tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
+cd freeforgempear-1.5.0
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -727,8 +788,8 @@ cd freeforgempear-1.4.9
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.4.9-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.4.9/freeforgempear-1.4.9-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.5.0-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -754,11 +815,30 @@ cd freeforgempear-1.4.9
    `logs\miner-<日期>.log`（保留最近 10 个日志）。矿工退出或崩溃后会在 15 秒后自动重启。`Ctrl+C` 停止。
 
 * **开机自启：** 把 `start.bat` 的快捷方式放进 `shell:startup`（Win+R，输入 `shell:startup`），或在任务计划程序中创建"登录时"运行 `start.bat` 的任务。
-* **超频：** 使用 MSI Afterburner（在曲线编辑器中锁定核心频率，降低显存频率），数值见第 7 节。笔记本：接上充电器并选择最高性能模式。
-* **降压（可选，Windows 上为实验性）：**删除 `start.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`，并以管理员身份运行；见第 12 节。
+* **超频：** 使用 MSI Afterburner（在曲线编辑器中锁定核心频率，降低显存频率），数值见第 7 节，**或**使用矿工内置的频率控制（下一条）。笔记本：接上充电器并选择最高性能模式。
+* **内置频率控制（1.4.9 新增）：** 在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK` 和/或 `MOFFSET`（第 12 节），例如 `set "LOCK_CCLOCK=1560"` 和 `set "LOCK_MCLOCK=810"`。矿工在启动时锁定频率，退出时恢复。
+* **降压（可选，Windows 上为实验性）：**删除 `start.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`；见第 12 节。
+* **任何 GPU 调节都需以管理员身份运行。** `AUTO_UV`、`LOCK_CCLOCK`、`LOCK_MCLOCK` 和 `MOFFSET` 通过驱动修改 GPU，需要管理员权限：右键 `.bat` →**以管理员身份运行**（开机自启时，在计划任务中勾选*使用最高权限运行*）。否则矿工仍会运行，但使用当前频率并在日志中给出警告。纯挖矿（仅钱包/矿池）**不**需要管理员。
 * Defender / SmartScreen 可能拦截新的未签名 `.exe`：点击"更多信息 → 仍要运行"，或将该文件夹加入排除项。
 * 不使用 `start.bat`：`freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1`
 * 自行编译：`.\build-windows.ps1`（见 README）。
+
+**进阶：使用 `nvidia-smi` 锁频 + 功耗限制的自定义 `.bat`。** 如果你还需要**功耗限制**（内置频率控制不设置功耗限制），或想要自己的重启循环和日志文件，可以写一个如下的 `.bat`，并**以管理员身份**运行（`nvidia-smi -lgc/-lmc/-pl` 和 `--auto-uv` 都需要管理员权限）：
+
+```bat
+@echo off
+rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）。数值见第 7 节。
+nvidia-smi -lgc 1665
+nvidia-smi -lmc 810
+nvidia-smi -pl 165
+cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+:loop
+powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
+timeout /t 10
+goto loop
+```
+
+把 `你的PRL地址` 换成你的 `prl1...` 地址（在 LuckyPool 上进行 PRL+NOCK 合并挖矿时追加 `+你的NOCK地址`）。`-lgc` 锁定核心频率，`-lmc` 锁定显存频率，`-pl` 设置功耗限制（瓦）；`timeout /t 10` + `goto loop` 在任何退出后 10 秒重启矿工，`Tee-Object` 在显示输出的同时写入日志。不重启即可解除锁定：`nvidia-smi -rgc` 和 `nvidia-smi -rmc`。（自带的 `start.bat` 已通过 `LOCK_CCLOCK` / `LOCK_MCLOCK` 和 `MOFFSET` 为你完成锁频和重启循环；仅当你需要 `-pl` 或自定义日志时才用这种自定义 `.bat`。）
 
 ### 6. 矿池
 
@@ -832,9 +912,9 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.4.9-linux-x86_64.tar.gz freeforgempear-1.4.9.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.4.9-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.4.9-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -849,7 +929,7 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | 症状 | 解决办法 |
 |---|---|
 | 检查一切是否正常 | `freeforgempear --self-test`（Windows：`freeforgempear.exe --self-test`）应以 `== self-test PASSED ==` 结束 |
-| 启动时出现 `embedded search kernel could not be loaded` | 更新 NVIDIA 驱动（525+），并确认显卡为 Ampere（RTX 30xx）或更新 |
+| 启动时出现 `embedded search kernel could not be loaded` | 更新 NVIDIA 驱动（525+；**RTX 50xx 需要 570+**），并确认显卡为 Ampere（RTX 30xx）或更新 |
 | CPU 占用高 | 默认 GPU 等待为休眠（每块显卡远低于一个核心的 10%）。`PEARL_SPIN=1` 会改为忙等（每块显卡占满一个核心）：确认没有设置 |
 | `pg_init(...)` 或显存不足错误 | 其他程序占用了显卡（游戏、本地 AI 模型）。关闭它，或用 `--devices` 选择显卡 |
 | 长时间 `[DISCONNECTED]` | 检查矿池主机/端口和防火墙（出站 TCP）；试试第 6 节的其他区域 |
