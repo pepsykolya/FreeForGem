@@ -19,7 +19,7 @@ Needs only the NVIDIA driver 525 or newer (no CUDA, no Python, no WSL). One proc
 Self-test (optional): open cmd in this folder and run  freeforgempear.exe --self-test
 If the log says "embedded search kernel could not be loaded", update the NVIDIA driver (525+); the GPU must be Ampere (RTX 30xx) or newer.
 If Defender/SmartScreen blocks the start: "More info -> Run anyway", or add the folder to the exclusions.
-Check the archive SHA-256 against the release page:  certutil -hashfile freeforgempear-1.5.1-windows-x64.zip SHA256
+Check the archive SHA-256 against the release page:  certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256
 
 POOLS (POOL=HOST:PORT; ports 3360 / 3361 / 3362 = share difficulty 2M / 4M / 8M)
 pearl-eu2.luckypool.io:3360 (default, Europe); Kryptex prl-eu.kryptex.network:7048; see MANUAL.md for the other regions.
@@ -51,7 +51,7 @@ FreeForGemPear для Windows 10/11 (x64)
 Нужен только драйвер NVIDIA 525 или новее (CUDA, Python и WSL не нужны). Один процесс работает со всеми картами.
 Проверка (по желанию): в cmd в этой папке выполните  freeforgempear.exe --self-test
 Если Defender/SmartScreen блокирует запуск: "Подробнее -> Выполнить в любом случае" или добавьте папку в исключения.
-Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgempear-1.5.1-windows-x64.zip SHA256
+Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256
 
 ------------------------------------------------------------------------------------------------
 FreeForGemPear Windows 10/11 (x64) 版
