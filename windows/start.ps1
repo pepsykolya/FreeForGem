@@ -96,6 +96,9 @@ if ($AutoUv -eq '1' -or $UvOffset -or $LockCclock -or $LockMclock -or $Moffset) 
     if (-not $admin) { Write-Host 'WARNING: AUTO_UV / clock settings need Administrator: run start.bat as Administrator, otherwise the miner cannot change the GPU and will mine at the current clocks.' -ForegroundColor Yellow }
 }
 $log = Join-Path $logs ("miner-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+# the miner writes UTF-8 (also Windows error texts such as "connection reset" in the system language):
+# read its output as UTF-8, otherwise non-English text turns into garbage in the window
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $writer = New-Object IO.StreamWriter($log, $true, (New-Object Text.UTF8Encoding($false)))
 $writer.AutoFlush = $true
 Write-Host "Mining. Press Ctrl+C to stop. Log: $log"

@@ -295,6 +295,11 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                         log(l, "the pool refused the merged wallet: logging in with the PRL wallet only from now on");
                     }
                     return Err(std::io::Error::new(ErrorKind::PermissionDenied, format!("authorize failed: {line}")));
+                } else if id == 1 && !ok {
+                    // some pools (LuckyPool) do not implement mining.subscribe; the login goes on without it.
+                    // Logged without the raw reply: its "error" object would look like a failure in the Windows window.
+                    let msg = v["error"].get("message").or_else(|| v["error"].get("msg")).and_then(Value::as_str).unwrap_or("not supported");
+                    log(l, &format!("pool skips mining.subscribe ({msg}): normal for this pool, logging in"));
                 } else {
                     log(l, &format!("reply: {line}"));
                     if id == 2 {
