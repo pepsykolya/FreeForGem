@@ -352,7 +352,8 @@ auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
 8. **If the PC hangs or the driver resets** (black screen, "display driver stopped responding"): reboot and start the miner
    again; it first restores your offset from `uv-restore.json`. If the miner itself crashed during a tuning step (window shows
    `Miner exited (code -1073741819)`), the next start counts that step as failed and tunes only below it (since 1.5.2; before,
-   it started the whole search again and crashed at the same step). If a card keeps failing, lower `UV_MAX` or leave `AUTO_UV` off.
+   it started the whole search again and crashed at the same step). Since 1.5.3 it also skips the steps that already
+   passed: after the warm-up it goes straight to the confirmation (about 5 minutes instead of a full search). If a card keeps failing, lower `UV_MAX` or leave `AUTO_UV` off.
 
 **Windows: ready combinations.** Right-click `start.bat` → *Edit*, remove `rem` before `set "AUTO_UV=1"`, fill in the
 fields below, save, and start it **as Administrator**. Empty fields keep their defaults. Values are starting points from
@@ -788,7 +789,8 @@ auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
 8. **Если ПК завис или сбросился драйвер** (чёрный экран, «видеодрайвер перестал отвечать»): перезагрузитесь и запустите
    майнер снова — он сначала вернёт ваш offset из `uv-restore.json`. Если сам майнер упал на шаге подбора (в окне
    `Miner exited (code -1073741819)`), следующий запуск считает этот шаг провальным и подбирает только ниже него (с 1.5.2;
-   раньше подбор начинался заново и падал на том же шаге). Если карта сбоит снова и снова, уменьшите `UV_MAX` или
+   раньше подбор начинался заново и падал на том же шаге). С 1.5.3 он ещё и не проходит заново уже пройденные шаги:
+   после прогрева сразу подтверждение (около 5 минут вместо полного подбора). Если карта сбоит снова и снова, уменьшите `UV_MAX` или
    не включайте `AUTO_UV`.
 
 **Windows: готовые комбинации.** Правой кнопкой по `start.bat` → *Изменить*, уберите `rem` перед `set "AUTO_UV=1"`,
@@ -1184,7 +1186,7 @@ auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
    * `start offset ... leaves no room below the cap`：你的偏移已等于或高于 `UV_MAX`；请提高 `UV_MAX`。
    * `no safe offset above ... was found`：显卡承受不了比你的值更高的偏移；不做任何修改。
 8. **如果电脑卡死或驱动重置**（黑屏、“显示驱动程序已停止响应”）：重启后再次启动矿工——它会先从 `uv-restore.json`
-   恢复你的偏移。如果矿工本身在调校某一步时崩溃（窗口显示 `Miner exited (code -1073741819)`），下次启动会把这一步视为失败，只在其下方调校（自 1.5.2 起；之前会重新开始整个搜索并在同一步再次崩溃）。如果某块卡反复出错，请降低 `UV_MAX` 或不要开启 `AUTO_UV`。
+   恢复你的偏移。如果矿工本身在调校某一步时崩溃（窗口显示 `Miner exited (code -1073741819)`），下次启动会把这一步视为失败，只在其下方调校（自 1.5.2 起；之前会重新开始整个搜索并在同一步再次崩溃）。自 1.5.3 起还会跳过已经通过的步骤：预热后直接进行确认（约 5 分钟，而不是完整搜索）。如果某块卡反复出错，请降低 `UV_MAX` 或不要开启 `AUTO_UV`。
 
 **Windows 现成组合。** 右键 `start.bat` →*编辑*，删除 `set "AUTO_UV=1"` 前面的 `rem`，填写下面的字段，保存，并**以管理员身份**运行。
 留空的字段使用默认值。数值为起始值，取自第 7 节的表格。

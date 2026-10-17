@@ -294,6 +294,7 @@ pub struct Card {
     reval_busy: AtomicBool,
     next_reval: Mutex<Instant>,
     next_readback: Mutex<Instant>,
+    last_good: AtomicI32, // highest step that passed in the tuning now running (i32::MIN = none); goes into the crash marker
 }
 
 impl Card {
@@ -352,6 +353,13 @@ impl Drop for Guard {
     fn drop(&mut self) {
         restore_all();
     }
+}
+
+/// What a previous run left in the crash marker: the offset it died at, and the highest step that had passed before.
+#[derive(Clone, Copy)]
+struct Crash {
+    at: i32,
+    good: Option<i32>,
 }
 
 struct Spec {
@@ -520,6 +528,7 @@ fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
         reval_busy: AtomicBool::new(false),
         next_reval: Mutex::new(Instant::now()),
         next_readback: Mutex::new(Instant::now() + Duration::from_secs(30)),
+        last_good: AtomicI32::new(i32::MIN),
     })
 }
 
@@ -607,7 +616,8 @@ impl Manager {
         if !db["trying"].is_object() {
             db["trying"] = json!({});
         }
-        db["trying"][&c.uuid] = json!(v);
+        let good = c.last_good.load(Ordering::Relaxed);
+        db["trying"][&c.uuid] = if good == i32::MIN { json!({"offset": v}) } else { json!({"offset": v, "good": good}) };
         self.write_db(c, &db);
     }
 
@@ -619,13 +629,13 @@ impl Manager {
         }
     }
 
-    /// The offset a previous run was checking when it died, if any (the marker is removed).
-    fn take_trying(&self, c: &Card) -> Option<i32> {
-        let v = self.db.lock().unwrap()["trying"].get(&c.uuid).and_then(Value::as_i64).map(|v| v as i32);
-        if v.is_some() {
-            self.clear_trying(c);
-        }
-        v
+    /// What a previous run was checking when it died, if anything (the marker is removed).
+    /// 1.5.2 wrote a bare number; later versions write {"offset", "good"}.
+    fn take_trying(&self, c: &Card) -> Option<Crash> {
+        let v = self.db.lock().unwrap()["trying"].get(&c.uuid).cloned()?;
+        self.clear_trying(c);
+        let at = v.as_i64().or_else(|| v["offset"].as_i64())? as i32;
+        Some(Crash { at, good: v["good"].as_i64().map(|g| g as i32) })
     }
 
     fn new_entry(&self, c: &Card) -> Entry {
@@ -640,19 +650,19 @@ impl Manager {
 
     fn run_card(&self, c: &Arc<Card>) -> Result<()> {
         let crashed = self.take_trying(c);
-        if let Some(x) = crashed {
-            lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(x)));
+        if let Some(k) = crashed {
+            lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(k.at)));
         }
         if let Some(f) = self.opts.fixed {
-            if crashed.is_some_and(|x| x == f.min(HARD_CAP)) {
+            if crashed.is_some_and(|k| k.at == f.min(HARD_CAP)) {
                 lg(format!("{} not applying the fixed offset {} this time; keeping {} (lower --uv-offset)", c.label(), signed(f), signed(c.orig)));
                 return Ok(());
             }
             return self.apply_fixed(c, f);
         }
         let saved = self.entry(c);
-        if let Some(x) = crashed {
-            return self.tune(c, saved, Some(x));
+        if crashed.is_some() {
+            return self.tune(c, saved, crashed);
         }
         if let Some(e) = &saved {
             if e.driver != self.driver || e.kernel != self.kernel {
@@ -715,10 +725,10 @@ impl Manager {
         Ok(())
     }
 
-    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<i32>) -> Result<()> {
+    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<Crash>) -> Result<()> {
         let step = self.opts.step;
         let mut cap = self.opts.max_offset.min(HARD_CAP).min(c.hi);
-        if let Some(x) = crashed {
+        if let Some(x) = crashed.map(|k| k.at) {
             let want = self.opts.min_offset.unwrap_or(c.default_start()).clamp(0, cap);
             if x - step < want + step {
                 // it died at (or one step above) the start: nothing left to search; remember "nothing above your offset"
@@ -763,6 +773,13 @@ impl Manager {
         let mut good = start;
         let mut good_w = base_w;
         let mut failed: Option<(i32, String)> = None;
+        // after a crash: the steps up to the last good one already passed in the previous run, so do not climb them again
+        // (the result is still confirmed by the long check below)
+        if let Some(g) = crashed.and_then(|k| k.good).filter(|&g| g > start && g <= cap) {
+            lg(format!("{} steps up to {} passed before the crash: not climbing them again", c.label(), signed(g)));
+            good = g;
+        }
+        c.last_good.store(good, Ordering::Relaxed);
         while good + step <= cap {
             let cand = good + step;
             self.set_checked(c, cand)?;
@@ -775,13 +792,14 @@ impl Manager {
                 lg(format!("{} step {}: ok ({} reruns, cpu ok {}), {}, {} MHz, {} C", c.label(), signed(cand), r.reruns, r.cpu_ok, fmt_w(r.watts), r.clk.unwrap_or(0), r.temp.unwrap_or(0)));
                 good = cand;
                 good_w = r.watts.or(good_w);
+                c.last_good.store(good, Ordering::Relaxed);
             } else {
                 lg(format!("{} step {}: FAILED ({})", c.label(), signed(cand), r.reason));
                 failed = Some((cand, r.reason));
                 break;
             }
         }
-        if let Some(x) = crashed {
+        if let Some(x) = crashed.map(|k| k.at) {
             if failed.is_none() && good == cap {
                 failed = Some((x, "crashed in the previous run".into()));
             }
