@@ -20,7 +20,7 @@ set "DEVICES="
 rem Stratum password (normally empty)
 set "PASSWORD="
 rem Optional undervolt auto-tuner (saves watts at the same hashrate). Needs a start.bat run as Administrator.
-rem EXPERIMENTAL on Windows - read MANUAL.md, section 12, first. To enable it, remove "rem" from the next line:
+rem Read MANUAL.md, section 12 ("Windows: step by step") first; also lock the core clock (LOCK_CCLOCK). To enable it, remove "rem" from the next line:
 rem set "AUTO_UV=1"
 rem Highest offset the undervolt tuner tries, MHz (empty = 495; RTX 40/50 often hold +450..480, at most 600):
 set "UV_MAX="

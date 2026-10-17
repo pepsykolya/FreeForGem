@@ -37,7 +37,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -67,8 +67,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
-cd freeforgempear-1.5.0
+tar xzf freeforgempear-1.5.1-linux-x86_64.tar.gz
+cd freeforgempear-1.5.1
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -89,8 +89,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.5.0-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
+1. Download **`freeforgempear-1.5.1-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -122,7 +122,7 @@ Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA d
   the miner's built-in clock control (next bullet). Laptops: plug in the charger and choose the maximum performance mode.
 * **Built-in clock control (new in 1.4.9):** set `LOCK_CCLOCK`, `LOCK_MCLOCK` and/or `MOFFSET` in the `.bat` file (section 12),
   e.g. `set "LOCK_CCLOCK=1560"` and `set "LOCK_MCLOCK=810"`. The miner locks the clocks at start and restores them on exit.
-* **Undervolt (optional, experimental on Windows):** remove `rem` before `set "AUTO_UV=1"` in `start.bat`; see section 12.
+* **Undervolt (optional):** remove `rem` before `set "AUTO_UV=1"` in `start.bat` and run it as Administrator; see section 12, *Windows: step by step*.
 * **Run as Administrator for any GPU tuning.** `AUTO_UV`, `LOCK_CCLOCK`, `LOCK_MCLOCK` and `MOFFSET` change the GPU through the
   driver, which needs admin rights: right-click the `.bat` → **Run as administrator** (for autostart, tick *Run with highest
   privileges* in the Task Scheduler task). Without it the miner keeps running but mines at the current clocks and prints a
@@ -141,7 +141,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.5.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -153,6 +153,8 @@ Replace `YOUR_PRL_ADDRESS` with your `prl1...` address (for LuckyPool PRL+NOCK m
 miner 10 s after any exit, and `Tee-Object` writes a log while still showing the output. To release the locks without a reboot:
 `nvidia-smi -rgc` and `nvidia-smi -rmc`. (The shipped `start.bat` does the clock lock and restart loop for you via `LOCK_CCLOCK` /
 `LOCK_MCLOCK` and `MOFFSET`; use a custom `.bat` like this only when you need `-pl` or your own logging.)
+Since 1.5.1 the Windows archive ships this file ready to edit: **`start-nvidia-smi.bat`** (clock lock, power limit, undervolt
+range, restart loop and `logsfgp.log` in the miner folder; the shipped values are for an RTX 3070, change them for your card).
 
 ### 6. Pools
 
@@ -235,9 +237,9 @@ Optional, to save more watts at the same speed: lower the core voltage with `--a
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.5.1-linux-x86_64.tar.gz freeforgempear-1.5.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.5.1-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.5.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -301,8 +303,41 @@ runs as root there) or **Administrator** on Windows. Without NVML or permission 
 **Time:** the first tuning takes about **15 minutes per GPU** (10-25 depending on how many steps it takes; the GPUs of a rig are tuned in parallel and mining starts when
 it is done). Later starts add about 30 s.
 
-**Windows is experimental.** Reading the offset works through the Windows driver (we checked), but whether the driver lets
-a program change the offset on GeForce cards is not verified by us. If it refuses, the log says so and the miner mines normally.
+**Windows: step by step.** Checked on Windows 11 with a GeForce RTX 3070 and driver 581.80: the driver lets the miner read
+and change the offset (the log shows `allowed -1000..1000`), the tuner found +240 instead of +225 (98.4 W → 86.5 W at the
+same clock), and the safety net worked too (a found result failed the CPU check → back to +225, auto-uv paused for 24 h).
+1. **Administrator.** Right-click the `.bat` → *Run as administrator*. For autostart create a Task Scheduler task with
+   *Run with highest privileges*. Without it the log says that the offset cannot be changed, and the miner just mines.
+2. **Lock the core clock** (section 7): `set "LOCK_CCLOCK=1560"` in `start.bat` (one value, or a comma list per GPU), or
+   `nvidia-smi -lgc` in `start-nvidia-smi.bat`. With a locked clock a higher offset means a lower voltage at the same clock;
+   without the lock the card may boost higher instead and the saving is smaller.
+3. **Turn it on**, one of:
+   * `start.bat` (or any `start-luckypool-*` / `start-kryptex-*`): remove `rem` before `set "AUTO_UV=1"`. The upper limit is
+     `set "UV_MAX="` (empty = +495; RTX 40/50 often hold +450..480, RTX 30 usually +200..360).
+   * `start-nvidia-smi.bat`: `AUTO_UV=1`, the range in `UV_MIN` / `UV_MAX`, plus power limit and clock lock through `nvidia-smi`.
+   * your own command line: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
+4. **Starting point.** The tuner starts from the offset the card has now and never goes below it. The *Core Clock* offset of
+   MSI Afterburner (or a similar tool) is this same offset, so a value you set there is your starting point and is put back
+   on exit. Do not let Afterburner re-apply a profile while mining: auto-uv sees that somebody else changed the offset and
+   stands down on that GPU. With no offset set the tuner starts at +120 (or `--uv-min` / `UV_MIN`).
+5. **Wait.** The first start tunes for about 15 minutes per GPU (all GPUs in parallel) and only then starts mining. Later
+   starts apply the saved value after a ~30 s check.
+6. **Files** are in the miner folder: `uv.json` (results) and `uv-restore.json` (your original offset). The folder must be
+   writable, so do not put the miner into `C:\Program Files`. To tune again: close the miner, delete `uv.json` (or run
+   `freeforgempear.exe --uv-reset` in that folder) and start again. A new driver or a new miner kernel triggers a new tuning by itself.
+7. **Read the result:** `findstr auto-uv logs\*.log` (`start-nvidia-smi.bat`: `logs\ffgp.log`). Example from that RTX 3070:
+```
+auto-uv: GPU0 (bus 04, RTX 3070): CUDA device 0 -> NVML index 0, PCI 0000:04:00.0, ..., current offset +225 (allowed -1000..1000)
+auto-uv: GPU0 (bus 04, RTX 3070) step +255: ok (6560 reruns, cpu ok 6), 94.0 W, 1560 MHz, 58 C
+auto-uv: GPU0 (bus 04, RTX 3070) step +270: FAILED (rerun_diff: 256 transcript word(s) differ between reruns of seed 3 ...)
+auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
+```
+   * `auto-uv paused for this GPU for 24 h`: the card had an error at the found offset; it mines at your own offset and
+     the tuner tries again after 24 h (or after `--uv-reset`).
+   * `start offset ... leaves no room below the cap`: your offset is already at `UV_MAX` or higher; raise `UV_MAX`.
+   * `no safe offset above ... was found`: the card does not take more than your own value; nothing is changed.
+8. **If the PC hangs or the driver resets** (black screen, "display driver stopped responding"): reboot and start the miner
+   again; it first restores your offset from `uv-restore.json`. If a card keeps failing, lower `UV_MAX` or leave `AUTO_UV` off.
 
 **Risk.** Undervolting beyond what a card can take makes a driver reset or a hang possible (the tuner only goes where it
 has just checked, with a margin, but silicon, temperature and driver differ). After a hang, reboot: the next start restores your
@@ -388,7 +423,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -418,8 +453,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
-cd freeforgempear-1.5.0
+tar xzf freeforgempear-1.5.1-linux-x86_64.tar.gz
+cd freeforgempear-1.5.1
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -440,8 +475,8 @@ cd freeforgempear-1.5.0
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.5.0-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.5.1-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -473,7 +508,7 @@ cd freeforgempear-1.5.0
   управление частотами (следующий пункт). Ноутбуки: подключите зарядку и выберите режим максимальной производительности.
 * **Встроенное управление частотами (с 1.4.9):** задайте `LOCK_CCLOCK`, `LOCK_MCLOCK` и/или `MOFFSET` в `.bat`-файле (раздел 12),
   например `set "LOCK_CCLOCK=1560"` и `set "LOCK_MCLOCK=810"`. Майнер фиксирует частоты при старте и возвращает их при выходе.
-* **Андервольт (необязательно, в Windows экспериментально):** уберите `rem` перед `set "AUTO_UV=1"` в `start.bat`; см. раздел 12.
+* **Андервольт (необязательно):** уберите `rem` перед `set "AUTO_UV=1"` в `start.bat` и запускайте его от администратора; см. раздел 12, *Windows: по шагам*.
 * **Запуск от администратора для любой настройки GPU.** `AUTO_UV`, `LOCK_CCLOCK`, `LOCK_MCLOCK` и `MOFFSET` меняют GPU через
   драйвер, а для этого нужны права администратора: правой кнопкой по `.bat` → **Запуск от имени администратора** (для
   автозапуска включите *Выполнять с наивысшими правами* в задаче Планировщика). Без этого майнер продолжит работать, но на
@@ -492,7 +527,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.5.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -504,6 +539,8 @@ goto loop
 майнер через 10 с после любого выхода, а `Tee-Object` пишет лог, не скрывая вывод. Снять фиксацию без перезагрузки:
 `nvidia-smi -rgc` и `nvidia-smi -rmc`. (Штатный `start.bat` делает фиксацию частот и цикл перезапуска за вас через `LOCK_CCLOCK` /
 `LOCK_MCLOCK` и `MOFFSET`; свой `.bat` нужен только ради `-pl` или собственного лога.)
+С 1.5.1 такой файл лежит в Windows-архиве готовым: **`start-nvidia-smi.bat`** (фиксация частот, лимит мощности, диапазон
+андервольта, цикл перезапуска и лог `logsfgp.log` в папке майнера; значения в нём — для RTX 3070, поменяйте под свою карту).
 
 ### 6. Пулы
 
@@ -584,9 +621,9 @@ goto loop
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.5.1-linux-x86_64.tar.gz freeforgempear-1.5.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.5.1-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.5.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -652,8 +689,43 @@ PCI-адресу (шине) и UUID; в логе у каждого измене�
 майнит как обычно. **Время:** первый подбор занимает около **15 минут на карту** (10-25 в зависимости от числа шагов; карты рига подбираются параллельно,
 майнинг начинается после окончания). Последующие запуски добавляют около 30 с.
 
-**В Windows — экспериментально.** Чтение offset через драйвер Windows работает (проверено), но разрешит ли драйвер
-программе менять offset на GeForce — мы не проверяли. Если драйвер откажет, в логе будет сообщение, майнер продолжит работать как обычно.
+**Windows: по шагам.** Проверено на Windows 11, GeForce RTX 3070, драйвер 581.80: драйвер даёт майнеру читать и менять
+offset (в логе `allowed -1000..1000`), подбор нашёл +240 вместо +225 (98.4 Вт → 86.5 Вт на той же частоте), и защита тоже
+сработала (найденный результат не прошёл проверку на CPU → обратно на +225, auto-uv на паузе 24 ч).
+1. **Администратор.** Правой кнопкой по `.bat` → *Запуск от имени администратора*. Для автозапуска — задача в Планировщике
+   с галкой *Выполнить с наивысшими правами*. Без прав в логе будет сказано, что offset поменять нельзя, и майнер просто майнит.
+2. **Зафиксируйте частоту ядра** (раздел 7): `set "LOCK_CCLOCK=1560"` в `start.bat` (одно значение или список через запятую
+   по картам) или `nvidia-smi -lgc` в `start-nvidia-smi.bat`. С зафиксированной частотой больший offset = меньшее напряжение
+   на той же частоте; без фиксации карта может вместо этого буститься выше, и экономия меньше.
+3. **Включите**, любой из вариантов:
+   * `start.bat` (или любой `start-luckypool-*` / `start-kryptex-*`): уберите `rem` перед `set "AUTO_UV=1"`. Верхний предел —
+     `set "UV_MAX="` (пусто = +495; RTX 40/50 часто держат +450..480, RTX 30 обычно +200..360).
+   * `start-nvidia-smi.bat`: `AUTO_UV=1`, диапазон в `UV_MIN` / `UV_MAX`, плюс лимит мощности и фиксация частот через `nvidia-smi`.
+   * своя командная строка: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
+4. **Точка старта.** Подбор начинает с offset, который сейчас стоит на карте, и ниже него не опускается. Смещение *Core Clock*
+   в MSI Afterburner (и похожих программах) — это тот же самый offset: выставленное там значение станет точкой старта и
+   вернётся при выходе. Не давайте Afterburner заново применять профиль во время майнинга: auto-uv увидит, что offset
+   поменял кто-то другой, и отступит на этой карте. Если offset не задан, подбор стартует с +120 (или с `--uv-min` / `UV_MIN`).
+5. **Подождите.** При первом запуске подбор идёт около 15 минут на карту (все карты параллельно), майнинг начинается после
+   него. Следующие запуски применяют сохранённое значение после проверки ~30 с.
+6. **Файлы** лежат в папке майнера: `uv.json` (результаты) и `uv-restore.json` (ваш исходный offset). Папка должна быть
+   доступна на запись, поэтому не кладите майнер в `C:\Program Files`. Подобрать заново: закройте майнер, удалите `uv.json`
+   (или запустите в этой папке `freeforgempear.exe --uv-reset`) и запустите снова. Новый драйвер или новое ядро майнера
+   запускают подбор заново сами.
+7. **Результат смотрите так:** `findstr auto-uv logs\*.log` (у `start-nvidia-smi.bat` — `logs\ffgp.log`). Пример с той RTX 3070:
+```
+auto-uv: GPU0 (bus 04, RTX 3070): CUDA device 0 -> NVML index 0, PCI 0000:04:00.0, ..., current offset +225 (allowed -1000..1000)
+auto-uv: GPU0 (bus 04, RTX 3070) step +255: ok (6560 reruns, cpu ok 6), 94.0 W, 1560 MHz, 58 C
+auto-uv: GPU0 (bus 04, RTX 3070) step +270: FAILED (rerun_diff: 256 transcript word(s) differ between reruns of seed 3 ...)
+auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
+```
+   * `auto-uv paused for this GPU for 24 h` — на найденном offset у карты была ошибка; она майнит на вашем offset, подбор
+     повторится через 24 ч (или после `--uv-reset`).
+   * `start offset ... leaves no room below the cap` — ваш offset уже равен `UV_MAX` или выше; поднимите `UV_MAX`.
+   * `no safe offset above ... was found` — карта не держит больше вашего значения; ничего не меняется.
+8. **Если ПК завис или сбросился драйвер** (чёрный экран, «видеодрайвер перестал отвечать»): перезагрузитесь и запустите
+   майнер снова — он сначала вернёт ваш offset из `uv-restore.json`. Если карта сбоит снова и снова, уменьшите `UV_MAX` или
+   не включайте `AUTO_UV`.
 
 **Риск.** При слишком агрессивном андервольте возможен сброс драйвера или зависание (подбор идёт только по тем значениям, которые
 только что проверены, и с запасом, но кристаллы, температура и драйверы разные). После зависания перезагрузитесь: при следующем
@@ -738,7 +810,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -768,8 +840,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.5.0-linux-x86_64.tar.gz
-cd freeforgempear-1.5.0
+tar xzf freeforgempear-1.5.1-linux-x86_64.tar.gz
+cd freeforgempear-1.5.1
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -790,8 +862,8 @@ cd freeforgempear-1.5.0
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.5.0-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.0/freeforgempear-1.5.0-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.5.1-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.1/freeforgempear-1.5.1-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -819,7 +891,7 @@ cd freeforgempear-1.5.0
 * **开机自启：** 把 `start.bat` 的快捷方式放进 `shell:startup`（Win+R，输入 `shell:startup`），或在任务计划程序中创建"登录时"运行 `start.bat` 的任务。
 * **超频：** 使用 MSI Afterburner（在曲线编辑器中锁定核心频率，降低显存频率），数值见第 7 节，**或**使用矿工内置的频率控制（下一条）。笔记本：接上充电器并选择最高性能模式。
 * **内置频率控制（1.4.9 新增）：** 在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK` 和/或 `MOFFSET`（第 12 节），例如 `set "LOCK_CCLOCK=1560"` 和 `set "LOCK_MCLOCK=810"`。矿工在启动时锁定频率，退出时恢复。
-* **降压（可选，Windows 上为实验性）：**删除 `start.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`；见第 12 节。
+* **降压（可选）：**删除 `start.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`，并以管理员身份运行；见第 12 节 *Windows 分步说明*。
 * **任何 GPU 调节都需以管理员身份运行。** `AUTO_UV`、`LOCK_CCLOCK`、`LOCK_MCLOCK` 和 `MOFFSET` 通过驱动修改 GPU，需要管理员权限：右键 `.bat` →**以管理员身份运行**（开机自启时，在计划任务中勾选*使用最高权限运行*）。否则矿工仍会运行，但使用当前频率并在日志中给出警告。纯挖矿（仅钱包/矿池）**不**需要管理员。
 * Defender / SmartScreen 可能拦截新的未签名 `.exe`：点击"更多信息 → 仍要运行"，或将该文件夹加入排除项。
 * 不使用 `start.bat`：`freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1`
@@ -833,7 +905,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.5.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -841,6 +913,7 @@ goto loop
 ```
 
 把 `你的PRL地址` 换成你的 `prl1...` 地址（在 LuckyPool 上进行 PRL+NOCK 合并挖矿时追加 `+你的NOCK地址`）。`-lgc` 锁定核心频率，`-lmc` 锁定显存频率，`-pl` 设置功耗限制（瓦）；`timeout /t 10` + `goto loop` 在任何退出后 10 秒重启矿工，`Tee-Object` 在显示输出的同时写入日志。不重启即可解除锁定：`nvidia-smi -rgc` 和 `nvidia-smi -rmc`。（自带的 `start.bat` 已通过 `LOCK_CCLOCK` / `LOCK_MCLOCK` 和 `MOFFSET` 为你完成锁频和重启循环；仅当你需要 `-pl` 或自定义日志时才用这种自定义 `.bat`。）
+自 1.5.1 起 Windows 压缩包自带此文件，可直接编辑：**`start-nvidia-smi.bat`**（锁频、功耗限制、降压范围、重启循环，日志写入矿工目录下的 `logsfgp.log`；其中的数值针对 RTX 3070，请按你的显卡修改）。
 
 ### 6. 矿池
 
@@ -914,9 +987,9 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.5.0-linux-x86_64.tar.gz freeforgempear-1.5.0.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.5.0-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.5.0-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.5.1-linux-x86_64.tar.gz freeforgempear-1.5.1.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.5.1-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.5.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -971,8 +1044,37 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
 Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在日志中说明原因并照常挖矿。**耗时：**首次调校每块显卡约
 **15 分钟**（视步数而定，10-25 分钟；矿机上的各显卡并行调校，完成后才开始挖矿）。之后每次启动增加约 30 秒。
 
-**Windows 为实验性支持。** 通过 Windows 驱动读取偏移是可行的（已验证），但驱动是否允许程序修改 GeForce 的偏移我们没有验证。
-如果驱动拒绝，日志会说明，矿工照常挖矿。
+**Windows 分步说明。** 已在 Windows 11、GeForce RTX 3070、驱动 581.80 上验证：驱动允许矿工读取并修改偏移（日志显示
+`allowed -1000..1000`），调校找到 +240（原为 +225，同频下 98.4 W → 86.5 W），保护机制也生效了（一个找到的结果未通过 CPU
+校验 → 退回 +225，该卡 auto-uv 暂停 24 小时）。
+1. **管理员。** 右键 `.bat` →*以管理员身份运行*。开机自启时，在计划任务中勾选*使用最高权限运行*。没有权限时日志会说明
+   无法修改偏移，矿工照常挖矿。
+2. **锁定核心频率**（第 7 节）：在 `start.bat` 中 `set "LOCK_CCLOCK=1560"`（一个值，或按显卡用逗号分隔），或在
+   `start-nvidia-smi.bat` 中用 `nvidia-smi -lgc`。锁频后，更高的偏移意味着同频下更低的电压；不锁频时显卡可能改为提升频率，节省更少。
+3. **开启**，任选其一：
+   * `start.bat`（或任一 `start-luckypool-*` / `start-kryptex-*`）：删除 `set "AUTO_UV=1"` 前面的 `rem`。上限为
+     `set "UV_MAX="`（留空 = +495；RTX 40/50 常能稳定在 +450..480，RTX 30 通常 +200..360）。
+   * `start-nvidia-smi.bat`：`AUTO_UV=1`，范围在 `UV_MIN` / `UV_MAX`，并通过 `nvidia-smi` 设置功耗限制和锁频。
+   * 自己的命令行：`freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`。
+4. **起点。** 调校从显卡当前的偏移开始，且不会低于它。MSI Afterburner（或类似工具）中的 *Core Clock* 偏移就是同一个偏移：
+   你在那里设置的值就是起点，退出时会恢复。挖矿期间不要让 Afterburner 重新应用配置文件：auto-uv 发现偏移被别人修改后会在
+   该卡上退让。未设置偏移时，调校从 +120 开始（或 `--uv-min` / `UV_MIN`）。
+5. **等待。** 首次启动时每块显卡调校约 15 分钟（所有显卡并行），完成后才开始挖矿。之后的启动在约 30 秒检查后应用已保存的值。
+6. **文件**在矿工目录中：`uv.json`（结果）和 `uv-restore.json`（你原来的偏移）。该目录必须可写，所以不要把矿工放在
+   `C:\Program Files`。重新调校：关闭矿工，删除 `uv.json`（或在该目录运行 `freeforgempear.exe --uv-reset`），再启动。
+   新驱动或新的矿工内核会自动触发重新调校。
+7. **查看结果：**`findstr auto-uv logs\*.log`（`start-nvidia-smi.bat` 为 `logs\ffgp.log`）。那块 RTX 3070 的示例：
+```
+auto-uv: GPU0 (bus 04, RTX 3070): CUDA device 0 -> NVML index 0, PCI 0000:04:00.0, ..., current offset +225 (allowed -1000..1000)
+auto-uv: GPU0 (bus 04, RTX 3070) step +255: ok (6560 reruns, cpu ok 6), 94.0 W, 1560 MHz, 58 C
+auto-uv: GPU0 (bus 04, RTX 3070) step +270: FAILED (rerun_diff: 256 transcript word(s) differ between reruns of seed 3 ...)
+auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
+```
+   * `auto-uv paused for this GPU for 24 h`：显卡在找到的偏移上出错；它以你自己的偏移挖矿，24 小时后（或 `--uv-reset` 后）再次调校。
+   * `start offset ... leaves no room below the cap`：你的偏移已等于或高于 `UV_MAX`；请提高 `UV_MAX`。
+   * `no safe offset above ... was found`：显卡承受不了比你的值更高的偏移；不做任何修改。
+8. **如果电脑卡死或驱动重置**（黑屏、“显示驱动程序已停止响应”）：重启后再次启动矿工——它会先从 `uv-restore.json`
+   恢复你的偏移。如果某块卡反复出错，请降低 `UV_MAX` 或不要开启 `AUTO_UV`。
 
 **风险。** 降压超过显卡的承受能力可能导致驱动重置或卡死（调校只会走到刚刚检查通过的值并留有余量，但芯片、温度和驱动各不相同）。
 卡死后请重启：下次启动会首先恢复你的偏移。风险自负，与任何超频一样。
