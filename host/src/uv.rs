@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const STEP: i32 = 15;
+const NEWGEN_MIN: i32 = 200; // default --uv-min on RTX 40 / 50
 pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-offset say (the driver range c.hi caps it too)
 const DISABLE_SECS: u64 = 24 * 3600;
 
@@ -36,7 +37,7 @@ pub struct Opts {
     pub dry_run: bool,
     pub reset: bool,
     pub max_offset: i32,
-    pub min_offset: Option<i32>, // --uv-min: start/floor of the search (default: the HiveOS/NVML offset, else 120)
+    pub min_offset: Option<i32>, // --uv-min: start/floor of the search (default: see Card::default_start)
     pub step: i32,               // --uv-step: MHz per step (default 15)
     pub keep_last_good: bool,    // --uv-keep-last: after a failed step keep the last good step (not last good - one step)
     pub dir: Option<PathBuf>,
@@ -285,6 +286,7 @@ pub struct Card {
     orig: i32,
     lo: i32,
     hi: i32,
+    newgen: bool, // RTX 40 / 50 (compute capability 8.9 and newer): they hold higher offsets, so the search starts higher
     m: usize, // rows of A this card mines (its SM group); the undervolt check must stress it at this m
     cur: AtomicI32,
     owned: AtomicBool, // we still own the setting (false after tuning gave up or somebody else changed it)
@@ -297,6 +299,18 @@ pub struct Card {
 impl Card {
     fn label(&self) -> String {
         format!("GPU{} (bus {}, {})", self.dev, short_bus(&self.bus), short_name(&self.name))
+    }
+
+    /// search base/floor without --uv-min: the offset HiveOS/NVML already has, else 120;
+    /// on RTX 40 / 50 at least +200 (they hold +300..480, starting low only costs tuning time)
+    fn default_start(&self) -> i32 {
+        if self.newgen {
+            self.orig.max(NEWGEN_MIN)
+        } else if self.orig != 0 {
+            self.orig
+        } else {
+            120
+        }
     }
 }
 
@@ -405,7 +419,7 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     }
     if o.dry_run {
         for c in &cards {
-            let start = o.min_offset.unwrap_or(if c.orig != 0 { c.orig } else { 120 });
+            let start = o.min_offset.unwrap_or(c.default_start());
             let first = start + o.step;
             lg(format!("DRY RUN: would change {} (NVML handle of PCI {}): start {}, {} -> {} ... up to {}; nothing is changed", c.label(), c.bus, signed(start), signed(start), signed(first), signed(o.max_offset.min(c.hi))));
         }
@@ -487,6 +501,7 @@ fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
     let name = nv.name(h).unwrap_or_else(|_| cuda_name.clone());
     ensure!(name == cuda_name, "name mismatch: NVML {name:?}, CUDA {cuda_name:?}");
     let (mode, cur, lo, hi) = nv.probe_offset(h)?;
+    let newgen = nv.compute_capability(h).is_some_and(|cc| cc >= (8, 9));
     Ok(Card {
         dev,
         name,
@@ -497,6 +512,7 @@ fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
         orig: cur,
         lo,
         hi,
+        newgen,
         m: crate::mining::device_m(gpu::sm_count(dev)),
         cur: AtomicI32::new(cur),
         owned: AtomicBool::new(true),
@@ -574,9 +590,42 @@ impl Manager {
             db["gpus"] = json!({});
         }
         db["gpus"][&c.uuid] = e.to_json();
-        if let Err(err) = write_atomic(&results_path(&self.dir), &serde_json::to_string_pretty(&*db).unwrap()) {
+        self.write_db(c, &db);
+    }
+
+    fn write_db(&self, c: &Card, db: &Value) {
+        if let Err(err) = write_atomic(&results_path(&self.dir), &serde_json::to_string_pretty(db).unwrap()) {
             lg(format!("{} cannot save {}: {err:#}", c.label(), results_path(&self.dir).display()));
         }
+    }
+
+    // Crash marker: the offset under check is written to uv.json before the check and removed after it. A miner or
+    // driver crash during a check (seen on Windows: the whole miner exits with an access violation) leaves the marker
+    // behind, so the next start counts that offset as failed instead of climbing into the same crash again.
+    fn mark_trying(&self, c: &Card, v: i32) {
+        let mut db = self.db.lock().unwrap();
+        if !db["trying"].is_object() {
+            db["trying"] = json!({});
+        }
+        db["trying"][&c.uuid] = json!(v);
+        self.write_db(c, &db);
+    }
+
+    fn clear_trying(&self, c: &Card) {
+        let mut db = self.db.lock().unwrap();
+        let had = db["trying"].as_object_mut().is_some_and(|t| t.remove(&c.uuid).is_some());
+        if had {
+            self.write_db(c, &db);
+        }
+    }
+
+    /// The offset a previous run was checking when it died, if any (the marker is removed).
+    fn take_trying(&self, c: &Card) -> Option<i32> {
+        let v = self.db.lock().unwrap()["trying"].get(&c.uuid).and_then(Value::as_i64).map(|v| v as i32);
+        if v.is_some() {
+            self.clear_trying(c);
+        }
+        v
     }
 
     fn new_entry(&self, c: &Card) -> Entry {
@@ -590,10 +639,21 @@ impl Manager {
     // ----- per-card flow at start ---------------------------------------------------------------------------------
 
     fn run_card(&self, c: &Arc<Card>) -> Result<()> {
+        let crashed = self.take_trying(c);
+        if let Some(x) = crashed {
+            lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(x)));
+        }
         if let Some(f) = self.opts.fixed {
+            if crashed.is_some_and(|x| x == f.min(HARD_CAP)) {
+                lg(format!("{} not applying the fixed offset {} this time; keeping {} (lower --uv-offset)", c.label(), signed(f), signed(c.orig)));
+                return Ok(());
+            }
             return self.apply_fixed(c, f);
         }
         let saved = self.entry(c);
+        if let Some(x) = crashed {
+            return self.tune(c, saved, Some(x));
+        }
         if let Some(e) = &saved {
             if e.driver != self.driver || e.kernel != self.kernel {
                 lg(format!("{} saved result is for driver {} / kernel {}, now driver {} / kernel {}: tuning again", c.label(), e.driver, e.kernel, self.driver, self.kernel));
@@ -609,7 +669,7 @@ impl Manager {
                 return self.apply_saved(c, e);
             }
         }
-        self.tune(c, saved)
+        self.tune(c, saved, None)
     }
 
     fn quick_spec(&self, refs: Vec<String>) -> Spec {
@@ -655,11 +715,26 @@ impl Manager {
         Ok(())
     }
 
-    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>) -> Result<()> {
+    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<i32>) -> Result<()> {
         let step = self.opts.step;
-        let cap = self.opts.max_offset.min(HARD_CAP).min(c.hi);
-        // search base/floor: --uv-min, else the offset HiveOS/NVML already has, else 120; never above the cap
-        let start = self.opts.min_offset.unwrap_or(if c.orig != 0 { c.orig } else { 120 }).clamp(0, cap);
+        let mut cap = self.opts.max_offset.min(HARD_CAP).min(c.hi);
+        if let Some(x) = crashed {
+            let want = self.opts.min_offset.unwrap_or(c.default_start()).clamp(0, cap);
+            if x - step < want + step {
+                // it died at (or one step above) the start: nothing left to search; remember "nothing above your offset"
+                // so the next starts do not try again (--uv-reset to retry)
+                lg(format!("{} the crash was at or right above the start {}: not tuning, keeping {} (lower --uv-min, or --uv-reset later)", c.label(), signed(want), signed(c.orig)));
+                let mut e = self.new_entry(c);
+                e.offset = c.orig;
+                e.tested_at = now();
+                self.save_entry(c, &e);
+                return Ok(());
+            }
+            cap = cap.min(x - step);
+            lg(format!("{} tuning again below the crash: up to {}", c.label(), signed(cap)));
+        }
+        // search base/floor: --uv-min, else Card::default_start; never above the cap
+        let start = self.opts.min_offset.unwrap_or(c.default_start()).clamp(0, cap);
         if start + step > cap {
             lg(format!("{} start offset {} leaves no room below the cap {}; nothing to do", c.label(), signed(start), signed(cap)));
             return Ok(());
@@ -704,6 +779,11 @@ impl Manager {
                 lg(format!("{} step {}: FAILED ({})", c.label(), signed(cand), r.reason));
                 failed = Some((cand, r.reason));
                 break;
+            }
+        }
+        if let Some(x) = crashed {
+            if failed.is_none() && good == cap {
+                failed = Some((x, "crashed in the previous run".into()));
             }
         }
         // result when a failure was found: the last good step, minus one step of margin by default
@@ -760,10 +840,16 @@ impl Manager {
 
     /// Runs the deterministic GPU check + CPU verification of hits in a child process and samples NVML meanwhile.
     fn run_check(&self, c: &Card, sp: &Spec) -> Res {
-        match self.run_check_inner(c, sp) {
+        let cur = c.cur.load(Ordering::Relaxed);
+        if cur != c.orig {
+            self.mark_trying(c, cur);
+        }
+        let r = match self.run_check_inner(c, sp) {
             Ok(r) => r,
             Err(e) => Res { reason: format!("{e:#}"), ..Default::default() },
-        }
+        };
+        self.clear_trying(c);
+        r
     }
 
     fn run_check_inner(&self, c: &Card, sp: &Spec) -> Result<Res> {

@@ -22,8 +22,22 @@ set "PASSWORD="
 rem Optional undervolt auto-tuner (saves watts at the same hashrate). Needs a start.bat run as Administrator.
 rem Read MANUAL.md, section 12 ("Windows: step by step") first; also lock the core clock (LOCK_CCLOCK). To enable it, remove "rem" from the next line:
 rem set "AUTO_UV=1"
-rem Highest offset the undervolt tuner tries, MHz (empty = 495; RTX 40/50 often hold +450..480, at most 600):
+rem Undervolt tuner settings (used with AUTO_UV=1; empty = default). Examples per card: MANUAL.md, section 12.
+rem Lowest offset, MHz: the search starts here and never goes below (empty = the card's current offset, else +120;
+rem RTX 40/50: at least +200). RTX 50: a higher start, e.g. 300, makes the tuning shorter:
+set "UV_MIN="
+rem Highest offset the tuner tries, MHz (empty = 495; RTX 40/50 often hold +450..480, at most 600):
 set "UV_MAX="
+rem MHz per tuning step (empty = 15; 30 = about half the tuning time, coarser result):
+set "UV_STEP="
+rem 1 = after a failed step keep the last good step (empty = last good step minus one step, the safer margin):
+set "UV_KEEP_LAST="
+rem Re-check the offset every N hours while mining (empty = 6, 0 = never):
+set "UV_REVAL_HOURS="
+rem Fixed offset instead of tuning, MHz (checked once, no search; leave AUTO_UV off). Example: 240
+set "UV_OFFSET="
+rem Any other miner options, e.g. --uv-reset to forget the saved undervolt results once:
+set "EXTRA="
 rem Optional GPU clock control (needs start.bat run as Administrator; empty = leave as is).
 rem One value for all GPUs, or a comma list in DEVICES order. Example: 1500  or  1500,1500,1815
 set "LOCK_CCLOCK="
@@ -35,7 +49,7 @@ rem ================================================================
 
 set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -UvMin "%UV_MIN%" -UvStep "%UV_STEP%" -UvKeepLast "%UV_KEEP_LAST%" -UvRevalHours "%UV_REVAL_HOURS%" -UvOffset "%UV_OFFSET%" -Extra "%EXTRA%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%"
 echo.
 echo FreeForGemPear stopped (exit code %ERRORLEVEL%).
 pause

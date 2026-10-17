@@ -10,6 +10,12 @@ param(
     [string]$Devices = '',
     [string]$AutoUv = '',
     [string]$UvMax = '',
+    [string]$UvMin = '',
+    [string]$UvStep = '',
+    [string]$UvKeepLast = '',
+    [string]$UvRevalHours = '',
+    [string]$UvOffset = '',
+    [string]$Extra = '',
     [string]$Password = '',
     [string]$LockCclock = '',
     [string]$LockMclock = '',
@@ -69,11 +75,23 @@ if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " 
 if ($LockCclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-cclock $LockCclock" }
 if ($LockMclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-mclock $LockMclock" }
 if ($Moffset -match '^[+-]?[0-9]+(,[+-]?[0-9]*)*$') { $cmdLine += " --moffset $Moffset" }
-if ($AutoUv -eq '1') {
+if ($UvOffset -match '^[+-]?[0-9]+$') {
+    # a fixed offset excludes the tuner
+    $cmdLine += " --uv-offset $UvOffset"
+    if ($AutoUv -eq '1') { Write-Host 'UV_OFFSET is set: using the fixed offset, AUTO_UV is ignored.' -ForegroundColor Yellow }
+} elseif ($AutoUv -eq '1') {
     $cmdLine += ' --auto-uv'
+    if ($UvMin -match '^[+]?[0-9]+$') { $cmdLine += " --uv-min $UvMin" }
     if ($UvMax -match '^[+]?[0-9]+$') { $cmdLine += " --uv-max $UvMax" }
+    if ($UvStep -match '^[0-9]+$') { $cmdLine += " --uv-step $UvStep" }
+    if ($UvKeepLast -eq '1') { $cmdLine += ' --uv-keep-last' }
 }
-if ($AutoUv -eq '1' -or $LockCclock -or $LockMclock -or $Moffset) {
+if (($UvOffset -or $AutoUv -eq '1') -and $UvRevalHours -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --uv-reval-hours $UvRevalHours" }
+if ($Extra) {
+    if ($Extra -match '[&|<>^"]') { Fail 'EXTRA must not contain & | < > ^ or quotes' }
+    $cmdLine += " $Extra"
+}
+if ($AutoUv -eq '1' -or $UvOffset -or $LockCclock -or $LockMclock -or $Moffset) {
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $admin) { Write-Host 'WARNING: AUTO_UV / clock settings need Administrator: run start.bat as Administrator, otherwise the miner cannot change the GPU and will mine at the current clocks.' -ForegroundColor Yellow }
 }
@@ -88,7 +106,11 @@ try {
         & cmd.exe /d /c "$cmdLine 2>&1" | ForEach-Object {
             $line = "$_"
             $writer.WriteLine($line)
-            $color = if ($line -match 'ERROR|error|!!|panick|DISCONNECTED|rej [1-9]') { 'Red' } elseif ($line -match 'devfee') { 'DarkGray' } else { $null }
+            # pool replies carry "error":null even when all is well: that is not an error
+            $plain = $line -replace '"error"\s*:\s*null', ''
+            $color = if ($line -match 'share ACCEPTED|^SUBMIT ') { 'Green' }
+                elseif ($plain -match 'ERROR|error|!!|panick|DISCONNECTED|REJECTED|rej [1-9]') { 'Red' }
+                elseif ($line -match 'devfee') { 'DarkGray' } else { $null }
             if ($color) { Write-Host $line -ForegroundColor $color } else { Write-Host $line }
         }
         $code = $LASTEXITCODE

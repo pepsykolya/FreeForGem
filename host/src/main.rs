@@ -538,7 +538,8 @@ OPTIONS:
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
     --uv-max N           highest offset the tuner tries (default 495, at most 600)
-    --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120)
+    --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120;
+                         RTX 40/50: at least 200)
     --uv-step N          MHz per tuning step (default 15)
     --uv-keep-last       after a failed step keep the last good step (default: last good step minus one step)
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)

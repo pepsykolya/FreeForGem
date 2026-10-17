@@ -28,9 +28,11 @@ set "PLIMIT=165"
 rem Undervolt auto-tuner: 1 = on, empty = off
 set "AUTO_UV=1"
 rem Offset range the tuner tries, MHz. Empty = defaults (start from the current offset or +120, up to +495).
-rem RTX 3070 example: 135 and 360. RTX 40/50 often hold +450..480 (at most 600).
+rem RTX 3070 example: 135 and 360. RTX 40/50 often hold +450..480 (at most 600); RTX 50: start higher, e.g. UV_MIN=300.
 set "UV_MIN=135"
 set "UV_MAX=360"
+rem MHz per tuning step (empty = 15; 30 = about half the tuning time, coarser result):
+set "UV_STEP="
 rem Any other miner options, e.g. --devices 0,1
 set "EXTRA="
 rem ================================================================
@@ -47,6 +49,7 @@ set "ARGS=--pool %POOL% --wallet %WALLET% --worker %WORKER%"
 if "%AUTO_UV%"=="1" set "ARGS=%ARGS% --auto-uv"
 if "%AUTO_UV%"=="1" if defined UV_MIN set "ARGS=%ARGS% --uv-min %UV_MIN%"
 if "%AUTO_UV%"=="1" if defined UV_MAX set "ARGS=%ARGS% --uv-max %UV_MAX%"
+if "%AUTO_UV%"=="1" if defined UV_STEP set "ARGS=%ARGS% --uv-step %UV_STEP%"
 if defined EXTRA set "ARGS=%ARGS% %EXTRA%"
 
 :loop

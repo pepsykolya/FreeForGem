@@ -93,6 +93,7 @@ pub struct Nvml {
     by_bus: unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> c_int,
     get_uuid: unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int,
     get_name: unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int,
+    get_cc: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> c_int>,
     get_index: Option<FnDevU>,
     get_pci: unsafe extern "C" fn(*mut c_void, *mut PciInfo) -> c_int,
     get_power: FnDevU,
@@ -162,6 +163,7 @@ impl Nvml {
             by_bus: req!("nvmlDeviceGetHandleByPciBusId_v2"),
             get_uuid: req!("nvmlDeviceGetUUID"),
             get_name: req!("nvmlDeviceGetName"),
+            get_cc: opt!("nvmlDeviceGetCudaComputeCapability"),
             get_index: opt!("nvmlDeviceGetIndex"),
             get_pci: req!("nvmlDeviceGetPciInfo_v3"),
             get_power: req!("nvmlDeviceGetPowerUsage"),
@@ -234,6 +236,13 @@ impl Nvml {
         let mut b = [0 as c_char; 96];
         self.ck(unsafe { (self.get_name)(d.0, b.as_mut_ptr(), b.len() as c_uint) }, "nvmlDeviceGetName")?;
         Ok(unsafe { CStr::from_ptr(b.as_ptr()) }.to_string_lossy().into_owned())
+    }
+
+    /// CUDA compute capability (major, minor), e.g. (8, 6) for RTX 30, (8, 9) for RTX 40, (12, 0) for RTX 50.
+    pub fn compute_capability(&self, d: Dev) -> Option<(i32, i32)> {
+        let f = self.get_cc?;
+        let (mut ma, mut mi) = (0, 0);
+        (unsafe { f(d.0, &mut ma, &mut mi) } == 0).then_some((ma, mi))
     }
 
     pub fn index(&self, d: Dev) -> Option<u32> {
