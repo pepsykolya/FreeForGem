@@ -36,17 +36,20 @@ pub fn m() -> usize {
 
 /// Rows of A for a device with `sm` streaming multiprocessors.  Larger m amortizes the per-attempt prologue
 /// (P_A build, pipeline fill, jackpot epilogue) over more row-blocks, at the cost of host RAM (m*k bytes of
-/// `a_base` per job) and a larger Merkle tree per proof.  The library launches a persistent grid of
-/// min(m/128, SM) CTAs and the row-blocks divide evenly only when (m/128) % grid == 0, i.e. m = 128 * SM * r;
-/// r is the largest of 8,4,2 that keeps a_base within 512 MB at k = 8192.  `FFGP_M` overrides it (same m on
-/// every device).  A mixed-SM rig gets the right m per device (new in 1.4.7): each SM group mines its own Job.
+/// `a_base` per job) and a larger Merkle tree per proof.  Measured on a 3070 (k = 8192, same watts): r = 8 ->
+/// 70.57, r = 12 -> 70.67 (+0.14%), r = 16 -> 70.71 (+0.20%) TMAC/s, saturating above that.  The library
+/// launches a persistent grid of min(m/128, SM) CTAs and the row-blocks divide evenly only when
+/// (m/128) % grid == 0, i.e. m = 128 * SM * r; r is the largest of 16,12,8,4,2 that keeps a_base within
+/// 768 MiB.  `FFGP_M` overrides it (same m on every device).  A mixed-SM rig gets the right m per device
+/// (since 1.4.7): each SM group mines its own Job.
 pub fn device_m(sm: usize) -> usize {
     if let Some(v) = ffgp_m_override() {
         return v;
     }
-    for r in [8usize, 4, 2] {
+    let cap = (768 * 1024 * 1024) / k(); // a_base (m * k bytes per job) budget
+    for r in [16usize, 12, 8, 4, 2] {
         let v = 128 * sm * r;
-        if sm > 0 && v <= 65536 {
+        if sm > 0 && v <= cap {
             return v;
         }
     }
