@@ -373,6 +373,7 @@ struct Spec {
 #[derive(Default, Debug)]
 struct Res {
     ok: bool,
+    driver_fault: bool, // Xid or a hung check: the GPU may be lost until a reboot, so the crash marker stays
     reason: String,
     reruns: u64,
     cpu_ok: u32,
@@ -850,6 +851,7 @@ impl Manager {
         e.tested_at = now();
         e.verified_at = now();
         self.save_entry(c, &e);
+        self.clear_trying(c);
         lg(format!("{} offset {} -> {}, {} -> {}, saved", c.label(), signed(start), signed(fin), fmt_w(base_w), fmt_w(conf_w)));
         Ok(())
     }
@@ -866,7 +868,12 @@ impl Manager {
             Ok(r) => r,
             Err(e) => Res { reason: format!("{e:#}"), ..Default::default() },
         };
-        self.clear_trying(c);
+        // a driver fault (Xid, hang) often leaves the GPU unusable until a reboot ("GPU requires reset"), and then
+        // nothing after this point runs: keep the marker, so the next start tunes below this offset instead of
+        // climbing into the same fault again. tune() / apply_*() remove it once a result is saved.
+        if !r.driver_fault {
+            self.clear_trying(c);
+        }
         r
     }
 
@@ -961,10 +968,12 @@ impl Manager {
         }
         if let Some(k) = killed {
             res.ok = false;
+            res.driver_fault = k != "interrupted";
             res.reason = k.to_string();
         }
         if let Some(x) = xid {
             res.ok = false;
+            res.driver_fault = true;
             res.reason = format!("Xid {x} reported by the driver ({})", res.reason);
         }
         // power / clock / temperature: second half of the load window
