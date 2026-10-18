@@ -357,6 +357,12 @@ fn mine(a: Args) -> Result<()> {
     let mut published: Option<Arc<Assignment>> = None;
     let mut last_attempts = vec![0u64; gstats.len()];
     let mut win_start = Instant::now();
+    // board power per mining GPU (NVML, read-only) for the TH/W figures of the periodic line; absent NVML = no power shown
+    let power = nvml::Nvml::load().ok().map(|nv| {
+        let devs: Vec<Option<nvml::Dev>> =
+            gstats.iter().map(|g| gpu::device_pci_bus_id(g.dev).ok().and_then(|b| nv.by_bus(&b).ok())).collect();
+        (nv, devs)
+    });
 
     while !stop.load(Ordering::Relaxed) && deadline.map_or(true, |d| start.elapsed() < d) {
         if gstats.iter().all(|g| !g.alive.load(Ordering::Relaxed)) {
@@ -462,7 +468,7 @@ fn mine(a: Args) -> Result<()> {
         let el = win_start.elapsed();
         if el >= Duration::from_secs(10) {
             let mut parts = Vec::new();
-            let (mut total_att, mut total_ths) = (0.0, 0.0);
+            let (mut total_att, mut total_ths, mut total_w, mut all_w) = (0.0, 0.0, 0.0, true);
             for (i, g) in gstats.iter().enumerate() {
                 let n = g.attempts.load(Ordering::Relaxed);
                 let rate = (n - last_attempts[i]) as f64 / el.as_secs_f64();
@@ -470,15 +476,29 @@ fn mine(a: Args) -> Result<()> {
                 let ths = rate * (device_ms[i] * N * k()) as f64 / 1e12;
                 total_att += rate;
                 total_ths += ths;
-                parts.push(format!("GPU{} {:.3}{}", g.dev, ths, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));
+                // power after the number, in parentheses: the HiveOS stats parser reads "GPUn <TH/s>" only
+                let w = power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h)));
+                let pw = match w {
+                    Some(w) if w > 0.0 => {
+                        total_w += w;
+                        format!(" ({:.0} W, {:.3} TH/W)", w, ths / w)
+                    }
+                    _ => {
+                        all_w = false;
+                        String::new()
+                    }
+                };
+                parts.push(format!("GPU{} {:.3}{}{}", g.dev, ths, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));
             }
+            let power_part = if all_w && total_w > 0.0 { format!(" | {:.0} W, {:.3} TH/W", total_w, total_ths / total_w) } else { String::new() };
             let (u, f) = (&stats[0], &stats[1]);
             println!(
-                "[{:>4}s] {} | total {:.3} TH/s ({:.2} att/s) | hits {} (row0 dropped {}, bad {}, qdrop {}) | user sub {} acc {} rej {} | fee sub {} acc {} rej {}{}{}",
+                "[{:>4}s] {} | total {:.3} TH/s ({:.2} att/s){} | hits {} (row0 dropped {}, bad {}, qdrop {}) | user sub {} acc {} rej {} | fee sub {} acc {} rej {}{}{}",
                 start.elapsed().as_secs(),
                 parts.join("  "),
                 total_ths,
                 total_att,
+                power_part,
                 sh.hits_seen.load(Ordering::Relaxed),
                 sh.dropped0.load(Ordering::Relaxed),
                 sh.bad.load(Ordering::Relaxed),
