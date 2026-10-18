@@ -708,6 +708,16 @@ impl Manager {
 
     fn apply_saved(&self, c: &Card, e: &Entry) -> Result<()> {
         let before = c.cur.load(Ordering::Relaxed);
+        // verified recently (within the re-validation interval, same driver/kernel/m): apply it right away, so a restart
+        // does not cost ~30 s of mining per GPU; the periodic re-validation and the rejected-share guard still cover it
+        let fresh = self.opts.reval_hours > 0.0
+            && e.m == c.m
+            && now().saturating_sub(e.verified_at) < (self.opts.reval_hours * 3600.0) as u64;
+        if fresh {
+            self.set_checked(c, e.offset)?;
+            lg(format!("{} offset {} -> {}, verified {} ago ({:.1} W at tuning): applied without a start check", c.label(), signed(before), signed(e.offset), fmt_age(now().saturating_sub(e.verified_at)), e.w_after));
+            return Ok(());
+        }
         self.set_checked(c, e.offset)?;
         std::thread::sleep(Duration::from_secs(3));
         let r = self.run_check(c, &self.quick_spec(e.refs.clone()));
