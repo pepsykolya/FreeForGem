@@ -670,6 +670,16 @@ impl Manager {
                 lg(format!("{} saved result is for driver {} / kernel {}, now driver {} / kernel {}: tuning again", c.label(), e.driver, e.kernel, self.driver, self.kernel));
             } else if e.orig != c.orig {
                 lg(format!("{} the starting offset changed ({} when tuned, {} now): tuning again", c.label(), signed(e.orig), signed(c.orig)));
+            } else if e.m != 0 && e.m != c.m {
+                // the saved reference digests were taken at another m (rows per attempt, changed by the miner version):
+                // they cannot match now. Re-check the saved offset without them (reruns + CPU check) and store new ones.
+                // A pause set by a check against such stale references (1.5.3-rc3) is ignored here.
+                lg(format!("{} saved result was checked at m {}, now m {}: re-checking the saved offset {} with new references", c.label(), e.m, c.m, signed(e.offset)));
+                if e.offset > c.orig {
+                    return self.apply_saved(c, e);
+                }
+                lg(format!("{} no safe offset above {} was found when tuned; keeping it (--uv-reset to tune again)", c.label(), signed(c.orig)));
+                return Ok(());
             } else if e.disabled_until > now() {
                 lg(format!("{} auto-uv is paused for this GPU after a failure ({} h left); keeping {}", c.label(), (e.disabled_until - now()) / 3600 + 1, signed(c.orig)));
                 return Ok(());
@@ -720,16 +730,24 @@ impl Manager {
         }
         self.set_checked(c, e.offset)?;
         std::thread::sleep(Duration::from_secs(3));
-        let r = self.run_check(c, &self.quick_spec(e.refs.clone()));
+        // references are only valid for the m they were taken at; otherwise check without them and keep the new ones
+        let m_changed = e.m != c.m;
+        let r = self.run_check(c, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
         if r.ok {
             lg(format!("{} offset {} -> {}, saved {} ago ({:.1} W at tuning), quick check passed ({} reruns, cpu ok {})", c.label(), signed(before), signed(e.offset), fmt_age(now().saturating_sub(e.tested_at)), e.w_after, r.reruns, r.cpu_ok));
             let mut e2 = e.clone();
             e2.verified_at = now();
+            if m_changed && !r.refs.is_empty() {
+                e2.refs = r.refs.clone();
+                e2.m = c.m;
+                e2.disabled_until = 0;
+            }
             self.save_entry(c, &e2);
         } else {
             lg(format!("{} saved offset {} FAILED the quick check ({}); back to {}, auto-uv paused for 24 h", c.label(), signed(e.offset), r.reason, signed(c.orig)));
             self.restore_card(c);
             let mut e2 = e.clone();
+            e2.m = c.m; // the failure is a real one at the current m (refs were valid or not used)
             e2.disabled_until = now() + DISABLE_SECS;
             self.save_entry(c, &e2);
         }
