@@ -29,7 +29,8 @@ is emitted directly as SASS by our own generator.
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **Should run untuned:** RTX 40xx (sm_89 runs sm_86 code), not tested yet.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Not supported:** older GPUs, A100 (sm_80), AMD.
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810.
+* **Not supported:** older GPUs (Pascal and earlier), A100 (sm_80), AMD.
 * **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer (RTX 50xx: 570 or newer). The Linux binary is built on
   Ubuntu 20.04 (glibc 2.31), so it runs on Ubuntu 20.04+ and HiveOS.
 

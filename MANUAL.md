@@ -21,6 +21,7 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **main target, tuned: ~70 TH/s on an RTX 3070 at ~107 W** |
 | RTX 40xx (Ada, sm_89) | runs the sm_86 code, untuned |
 | RTX 50xx (Blackwell, sm_120) | supported since 1.5.0 with a compiled kernel (untuned); needs driver 570+ |
+| RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | supported since 1.5.3 with an own SASS kernel: ~49.9 TH/s on an RTX 2060 SUPER @1605 MHz; **memory must be locked at 5001, not 810** |
 | Older GPUs, A100 (sm_80), AMD | not supported |
 
 ### 2. Requirements
@@ -223,9 +224,11 @@ cards of the same generation and are not measured. Every card differs: let `--au
 | RTX 5070 Ti | 2445 | lock `810` | +480 | reference |
 | RTX 5070 | 2400 | lock `810` | checks pass up to +390, crash above | user report, FreeForGemPear 1.5.1, Windows, driver 617.14 |
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | lock `810` | +390..480 | estimate |
+| RTX 2060 SUPER, RTX 2070/2080 (incl. SUPER), GTX 1660/1650 | 1500–1650 | lock `5001` (**not 810**: Turing loses ~25% at 810) | +200..260; `--uv-max 225` recommended | reference (2060 SUPER: measured) |
+| CMP 40HX | 1400 | lock `5001` | +150 | user rigs; a CMP 40HX hit Xid at +255 |
 
 RTX 40 and 50 run at a much higher locked core clock (**1900–2500 MHz**) and hold a higher offset than RTX 30; that is why
-auto-uv starts their search at +200 (RTX 30: +120). Turing / CMP 30HX–50HX (sm_75) and CMP 170HX / A100 (sm_80) are not supported.
+auto-uv starts their search at +200 (RTX 30: +120). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
 * HiveOS: Overclock tab → core clock (absolute), memory clock (absolute), power limit; the V/F offset via `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root), or `--lock-cclock` / `--lock-mclock`.
@@ -458,6 +461,7 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **основная цель, оптимизировано: ~70 TH/s на RTX 3070 при ~107 Вт** |
 | RTX 40xx (Ada, sm_89) | запускает код sm_86, без оптимизации |
 | RTX 50xx (Blackwell, sm_120) | поддержка с 1.5.0, компилированное ядро (без оптимизации); нужен драйвер 570+ |
+| RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | поддержка с 1.5.3, собственное SASS-ядро: ~49,9 TH/s на RTX 2060 SUPER @1605 МГц; **память лочить на 5001, не 810** |
 | Старые карты, A100 (sm_80), AMD | не поддерживаются |
 
 ### 2. Требования
@@ -658,9 +662,11 @@ goto loop
 | RTX 5070 Ti | 2445 | лок `810` | +480 | опорные |
 | RTX 5070 | 2400 | лок `810` | проверки проходят до +390, выше — падение | отчёт пользователя, FreeForGemPear 1.5.1, Windows, драйвер 617.14 |
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | лок `810` | +390..480 | оценка |
+| RTX 2060 SUPER, RTX 2070/2080 (вкл. SUPER), GTX 1660/1650 | 1500–1650 | лок `5001` (**не 810**: на 810 Turing теряет ~25%) | +200..260; рекомендуется `--uv-max 225` | опорное (2060 SUPER: замер) |
+| CMP 40HX | 1400 | лок `5001` | +150 | риги пользователей; CMP 40HX ловила Xid на +255 |
 
 RTX 40 и 50 работают на гораздо более высоком локе ядра (**1900–2500 МГц**) и держат больший offset, чем RTX 30; поэтому
-auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Turing / CMP 30HX–50HX (sm_75) и CMP 170HX / A100 (sm_80) не поддерживаются.
+auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
 * HiveOS: вкладка Overclock → частота ядра (абсолютная), частота памяти (абсолютная), лимит мощности; V/F offset — через `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root) или `--lock-cclock` / `--lock-mclock`.
@@ -897,6 +903,7 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 | RTX 30xx（Ampere，sm_86）：3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **主要目标，已调优：RTX 3070 约 70 TH/s，约 107 W** |
 | RTX 40xx（Ada，sm_89） | 运行 sm_86 代码，未调优 |
 | RTX 50xx（Blackwell，sm_120） | 自 1.5.0 起支持，使用编译内核（未调优）；需要驱动 570+ |
+| RTX 20xx / GTX 16xx / CMP 30HX–50HX（Turing，sm_75） | 自 1.5.3 起支持，专用 SASS 内核：RTX 2060 SUPER @1605 MHz 约 49.9 TH/s；**显存必须锁定 5001，不是 810** |
 | 更老的显卡、A100（sm_80）、AMD | 不支持 |
 
 ### 2. 系统要求
@@ -1074,9 +1081,11 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | RTX 5070 Ti | 2445 | 锁定 `810` | +480 | 参考 |
 | RTX 5070 | 2400 | 锁定 `810` | 检查通过至 +390，更高则崩溃 | 用户报告，FreeForGemPear 1.5.1，Windows，驱动 617.14 |
 | RTX 5060、5060 Ti、5080、5090 | 1900–2500 | 锁定 `810` | +390..480 | 估计 |
+| RTX 2060 SUPER、RTX 2070/2080（含 SUPER）、GTX 1660/1650 | 1500–1650 | 锁定 `5001`（**不是 810**：Turing 在 810 下损失约 25%） | +200..260；建议 `--uv-max 225` | 参考（2060 SUPER：实测） |
+| CMP 40HX | 1400 | 锁定 `5001` | +150 | 用户矿机；CMP 40HX 在 +255 出现 Xid |
 
 RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高；因此 auto-uv 在它们上面从 +200 开始搜索（RTX 30 从 +120）。
-Turing / CMP 30HX–50HX（sm_75）和 CMP 170HX / A100（sm_80）不受支持。
+Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
 * HiveOS：Overclock 选项卡 → 核心频率（绝对值）、显存频率（绝对值）、功耗限制；V/F 偏移用 `--auto-uv`。
 * Linux：`nvidia-smi -lgc 1560,1560`、`nvidia-smi -lmc 810,810`、`nvidia-smi -pl 120`（root），或 `--lock-cclock` / `--lock-mclock`。
