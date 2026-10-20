@@ -26,6 +26,7 @@ unsafe extern "C" {
     fn pg_device_pci_bus_id(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_device_uuid(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_kernel_label() -> *const std::os::raw::c_char;
+    fn pg_row_align() -> i32;
     fn pg_check_run(seed: *const u8, m: i32, reps: i32, digest: *mut u64, diff_words: *mut u64) -> i32;
 }
 
@@ -128,6 +129,12 @@ pub fn device_uuid(device: i32) -> Result<String> {
         bail!("pg_device_uuid({device}): {}", last_error());
     }
     Ok(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+}
+
+/// Row granularity of the kernel the library selected for the calling thread (128 for gen13, 256 for the Ada kernel t256).  Only
+/// valid after `init` on this thread; an `m` that is not a multiple of it silently runs on gen13 (slower on Ada).
+pub fn row_align() -> usize {
+    unsafe { pg_row_align().max(128) as usize }
 }
 
 /// Identifier of the embedded search kernel build.

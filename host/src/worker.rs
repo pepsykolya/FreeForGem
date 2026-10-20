@@ -121,6 +121,7 @@ pub fn spawn(
             let _ = ready.send(Err(e));
             return;
         }
+        crate::mining::warn_m_align(dev, m_dev, gpu::row_align());
         let _ = ready.send(Ok(()));
         let (work_tx, work_rx) = mpsc::sync_channel::<Work>(WORK_QUEUE);
         let prover = {

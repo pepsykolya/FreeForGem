@@ -40,7 +40,9 @@ pub fn m() -> usize {
 /// 70.57, r = 12 -> 70.67 (+0.14%), r = 16 -> 70.71 (+0.20%) TMAC/s, saturating above that.  The library
 /// launches a persistent grid of min(m/128, SM) CTAs and the row-blocks divide evenly only when
 /// (m/128) % grid == 0, i.e. m = 128 * SM * r; r is the largest of 16,12,8,4,2 that keeps a_base within
-/// 768 MiB.  `FFGP_M` overrides it (same m on every device).  A mixed-SM rig gets the right m per device
+/// 768 MiB.  All five r are even, so m is always a multiple of 256: the Ada kernel t256 (CTA 256 rows, `gpu::row_align() == 256`)
+/// keeps its even split of m/256 = SM * r/2 blocks over the SM CTAs (an odd r would leave a wave tail or drop to gen13).
+/// `FFGP_M` overrides it (same m on every device).  A mixed-SM rig gets the right m per device
 /// (since 1.4.7): each SM group mines its own Job.
 pub fn device_m(sm: usize) -> usize {
     if let Some(v) = ffgp_m_override() {
@@ -54,6 +56,27 @@ pub fn device_m(sm: usize) -> usize {
         }
     }
     DEFAULT_M
+}
+
+/// Warns when `m` is not a multiple of the row granularity the library chose for this device (`FFGP_M` override only; `device_m`
+/// itself is always a multiple of 256): the library then runs those attempts on gen13 instead of the selected kernel.
+pub fn warn_m_align(dev: i32, m: usize, align: usize) {
+    if align > 0 && m % align != 0 {
+        eprintln!("!! GPU {dev}: m={m} is not a multiple of {align} (row granularity of the selected kernel): attempts fall back to the slower kernel; use FFGP_M = multiple of {align}");
+    }
+}
+
+#[cfg(test)]
+mod m_tests {
+    #[test]
+    fn device_m_is_256_aligned_and_wave_even() {
+        if std::env::var_os("FFGP_M").is_some() { return; }
+        for sm in 1..=200usize {
+            let m = super::device_m(sm);
+            assert_eq!(m % 256, 0, "sm {sm} m {m}");
+            if m != super::DEFAULT_M { assert_eq!((m / 256) % sm, 0, "sm {sm} m {m}: blocks must split evenly over the SM CTAs"); }
+        }
+    }
 }
 /// Common dimension k: the k the loaded libpearlgpu was built for (production 8192), overridable with `PEARL_K` for
 /// tests (pg_set_job refuses a mismatch).  Everything else (config, adjustment factor, commitment, proof size) follows
