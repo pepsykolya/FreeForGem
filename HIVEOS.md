@@ -80,6 +80,14 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 1%: 60 s in every 100 minutes, on the same pool you set. See [LICENSE](LICENSE).
 
+### Common Foundry (CMFD), since 1.6.0
+
+The same package mines CMFD (engine: FreeForgeMiner, MIT, in `cmfd/`). Flight sheet: *Hash algorithm* `forgematrix_v4`,
+*Wallet and worker template* `%WAL%.%WORKER_NAME%` with your 64-character CMFD address as the wallet, *Pool URL*
+`cmfd+tls://IP:PORT?pin=64HEX` exactly as your pool publishes it. Optional *Extra config*: `--cmfd-mode eco`, `--devices 0,1`,
+`--per-gpu-workers`. The 6.4 GB model goes to `/hive/miners/custom/cmfd-model` (shared with FreeForgeMiner; downloaded once).
+Stock clocks or a power limit; no undervolt. Dev fee 1% inside the engine (36 s per hour per GPU, worker `ffm-fee`).
+
 ## Русский
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
@@ -153,6 +161,14 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 - HiveOS с драйвером NVIDIA 525 или новее.
 - Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются.
 - Старые карты и AMD не поддерживаются.
+
+### Common Foundry (CMFD), с 1.6.0
+
+Тот же пакет майнит CMFD (движок FreeForgeMiner, MIT, папка `cmfd/`). Полётный лист: *Hash algorithm* `forgematrix_v4`,
+шаблон `%WAL%.%WORKER_NAME%`, кошелёк — 64-символьный адрес CMFD, *Pool URL* `cmfd+tls://IP:PORT?pin=64HEX` как его публикует пул.
+Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu-workers`. Модель 6,4 ГБ — в `/hive/miners/custom/cmfd-model`
+(общая с FreeForgeMiner, скачивается один раз). Стоковые частоты или лимит мощности, без андервольта. Комиссия 1% внутри движка
+(36 с в час на GPU, воркер `ffm-fee`).
 
 ### Комиссия разработчика
 

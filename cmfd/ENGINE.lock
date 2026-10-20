@@ -1,0 +1,9 @@
+# FreeForGemPear — CMFD engine pin (read by cmfd/fetch-engine.sh and cmfd/fetch-engine.ps1)
+# FreeForgeMiner release used unchanged as the Common Foundry (CMFD) engine. MIT, see LICENSE-FreeForgeMiner.
+ENGINE_NAME=FreeForgeMiner
+ENGINE_VERSION=1.2.3
+ENGINE_COMMIT=eca70151add9bb2fff62521e72cef2bf866a2860
+LINUX_URL=https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3.tar.gz
+LINUX_SHA256=1c9ef753d0b41010e5d1cc24e86371be5dc3129a83322bb3169bd1284b70f5a0
+WINDOWS_URL=https://github.com/pepsykolya/freeforgeminer/releases/download/v1.2.3/freeforgeminer-1.2.3-windows-x64.zip
+WINDOWS_SHA256=c301821f8262e5c0fcae772d1e11b3d48196a24fbb34be97a55ae4f3fb9092f7

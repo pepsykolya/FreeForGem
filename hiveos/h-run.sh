@@ -8,4 +8,7 @@ mkdir -p "$(dirname "$CUSTOM_LOG_BASENAME")"
 [[ -d /hive-config ]] && export FFGP_STATE_DIR=${FFGP_STATE_DIR:-/hive-config/freeforgempear}
 # GPU numbering in PCI bus order, the same as nvidia-smi and the HiveOS dashboard
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
+# no filename globbing of the arguments: a CMFD pool URL contains '?' (cmfd+tls://IP:PORT?pin=...)
+set -f
+# CMFD: the 6.4 GB model is shared with FreeForgeMiner in /hive/miners/custom/cmfd-model (downloaded once per rig)
 ./freeforgempear $(< "$CUSTOM_CONFIG_FILENAME") 2>&1 | tee --append "${CUSTOM_LOG_BASENAME}.log"

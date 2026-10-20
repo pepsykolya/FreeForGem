@@ -1,10 +1,10 @@
 # FreeForGemPear — see LICENSE
 [package]
 name = "freeforgempear"
-version = "1.5.4"
+version = "1.6.0"
 edition = "2024"
 license-file = "../LICENSE"
-description = "FreeForGemPear: Pearl (PRL) GPU miner"
+description = "FreeForGemPear: Pearl (PRL) and Common Foundry (CMFD) GPU miner"
 
 [dependencies]
 # Official Pearl crates (ISC), pinned to the upstream commit the miner was verified against
