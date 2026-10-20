@@ -408,7 +408,7 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         }
     };
     let driver = nv.driver_version();
-    let kernel = gpu::kernel_label();
+    let kernel = gpu::kernel_label_for(devices.first().copied().unwrap_or(0));
     let total = nv.device_count().unwrap_or(0);
     lg(format!("NVML loaded, driver {driver}, kernel {kernel}, {total} GPU(s) in the system; only the {} mining device(s) below are touched", devices.len()));
     let mut cards = Vec::new();
@@ -639,8 +639,13 @@ impl Manager {
         Some(Crash { at, good: v["good"].as_i64().map(|g| g as i32) })
     }
 
+    /// Kernel the mining worker of this card will run (t256 on Ada, gen13 otherwise): the undervolt results are keyed by it.
+    fn kernel_of(&self, c: &Card) -> String {
+        gpu::kernel_label_for(c.dev)
+    }
+
     fn new_entry(&self, c: &Card) -> Entry {
-        Entry { name: c.name.clone(), bus: c.bus.clone(), driver: self.driver.clone(), kernel: self.kernel.clone(), orig: c.orig, ..Default::default() }
+        Entry { name: c.name.clone(), bus: c.bus.clone(), driver: self.driver.clone(), kernel: self.kernel_of(c), orig: c.orig, ..Default::default() }
     }
 
     fn stopped(&self) -> bool {
@@ -666,8 +671,8 @@ impl Manager {
             return self.tune(c, saved, crashed);
         }
         if let Some(e) = &saved {
-            if e.driver != self.driver || e.kernel != self.kernel {
-                lg(format!("{} saved result is for driver {} / kernel {}, now driver {} / kernel {}: tuning again", c.label(), e.driver, e.kernel, self.driver, self.kernel));
+            if e.driver != self.driver || e.kernel != self.kernel_of(c) {
+                lg(format!("{} saved result is for driver {} / kernel {}, now driver {} / kernel {}: tuning again", c.label(), e.driver, e.kernel, self.driver, self.kernel_of(c)));
             } else if e.orig != c.orig {
                 lg(format!("{} the starting offset changed ({} when tuned, {} now): tuning again", c.label(), signed(e.orig), signed(c.orig)));
             } else if e.m != 0 && e.m != c.m {
@@ -780,7 +785,7 @@ impl Manager {
         }
         lg(format!("{} tuning: {} s warm-up at {}, then +{step} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(start), signed(cap), self.opts.step_secs));
         // the transcript digests depend on m too: a reference saved at another m must not seed the check
-        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel && e.m == c.m)
+        let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel_of(c) && e.m == c.m)
             .map(|e| e.refs.clone()).unwrap_or_default();
         // the baseline is measured at the start offset, which may differ from the card's current one
         if start != c.cur.load(Ordering::Relaxed) {

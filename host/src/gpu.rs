@@ -26,6 +26,7 @@ unsafe extern "C" {
     fn pg_device_pci_bus_id(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_device_uuid(device: i32, out: *mut std::os::raw::c_char, len: i32) -> i32;
     fn pg_kernel_label() -> *const std::os::raw::c_char;
+    fn pg_kernel_label_for(device: i32) -> *const std::os::raw::c_char;
     fn pg_row_align() -> i32;
     fn pg_check_run(seed: *const u8, m: i32, reps: i32, digest: *mut u64, diff_words: *mut u64) -> i32;
 }
@@ -141,6 +142,15 @@ pub fn row_align() -> usize {
 pub fn kernel_label() -> String {
     unsafe {
         let p = pg_kernel_label();
+        if p.is_null() { "?".into() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+    }
+}
+
+/// Label of the kernel `init(device)` will select, without initialising (the undervolt tuner runs on a thread that never called `init`,
+/// where `kernel_label()` would name gen13 on an Ada card).
+pub fn kernel_label_for(device: i32) -> String {
+    unsafe {
+        let p = pg_kernel_label_for(device);
         if p.is_null() { "?".into() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
     }
 }
