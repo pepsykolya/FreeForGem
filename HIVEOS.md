@@ -73,7 +73,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 ### Requirements
 
 - HiveOS with NVIDIA driver 525 or newer.
-- Tuned for RTX 30xx. RTX 40xx should work but is untested.
+- Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too.
 - Older and AMD GPUs are not supported.
 
 ### Developer fee
@@ -151,7 +151,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 ### Требования
 
 - HiveOS с драйвером NVIDIA 525 или новее.
-- Оптимизирован под RTX 30xx. RTX 40xx должны работать, но не проверены.
+- Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются.
 - Старые карты и AMD не поддерживаются.
 
 ### Комиссия разработчика

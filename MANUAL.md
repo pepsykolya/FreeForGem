@@ -19,7 +19,7 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 | GPU series | Status |
 |---|---|
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **main target, tuned: ~70 TH/s on an RTX 3070 at ~107 W** |
-| RTX 40xx (Ada, sm_89) | runs the sm_86 code, untuned |
+| RTX 40xx (Ada, sm_89) | own SASS kernel since 1.5.4 (RTX 4070 Ti: same hashrate, ~10 W less than the RTX 30xx kernel) |
 | RTX 50xx (Blackwell, sm_120) | supported since 1.5.0 with a compiled kernel (untuned); needs driver 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | supported since 1.5.3 with an own SASS kernel: ~49.9 TH/s on an RTX 2060 SUPER @1605 MHz; **memory must be locked at 5001, not 810** |
 | Older GPUs, A100 (sm_80), AMD | not supported |
@@ -461,7 +461,7 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 | Серия | Статус |
 |---|---|
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **основная цель, оптимизировано: ~70 TH/s на RTX 3070 при ~107 Вт** |
-| RTX 40xx (Ada, sm_89) | запускает код sm_86, без оптимизации |
+| RTX 40xx (Ada, sm_89) | своё SASS-ядро с 1.5.4 (RTX 4070 Ti: тот же хэшрейт, на ~10 Вт меньше, чем с ядром RTX 30xx) |
 | RTX 50xx (Blackwell, sm_120) | поддержка с 1.5.0, компилированное ядро (без оптимизации); нужен драйвер 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | поддержка с 1.5.3, собственное SASS-ядро: ~49,9 TH/s на RTX 2060 SUPER @1605 МГц; **память лочить на 5001, не 810** |
 | Старые карты, A100 (sm_80), AMD | не поддерживаются |
@@ -905,7 +905,7 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 | 显卡系列 | 状态 |
 |---|---|
 | RTX 30xx（Ampere，sm_86）：3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **主要目标，已调优：RTX 3070 约 70 TH/s，约 107 W** |
-| RTX 40xx（Ada，sm_89） | 运行 sm_86 代码，未调优 |
+| RTX 40xx（Ada，sm_89） | 自 1.5.4 起使用专用 SASS 内核（RTX 4070 Ti：算力相同，功耗比 RTX 30xx 内核低约 10 W） |
 | RTX 50xx（Blackwell，sm_120） | 自 1.5.0 起支持，使用编译内核（未调优）；需要驱动 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX（Turing，sm_75） | 自 1.5.3 起支持，专用 SASS 内核：RTX 2060 SUPER @1605 MHz 约 49.9 TH/s；**显存必须锁定 5001，不是 810** |
 | 更老的显卡、A100（sm_80）、AMD | 不支持 |
