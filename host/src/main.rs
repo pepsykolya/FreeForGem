@@ -3,6 +3,7 @@
 //!
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
+mod amd_uv;
 mod clocks;
 mod devfee;
 mod gpu;
@@ -289,8 +290,19 @@ fn mine(a: Args) -> Result<()> {
     let nv = gpu::backend() == gpu::Backend::Cuda; // clocks, undervolt and power readout use NVML (NVIDIA only)
     if !nv {
         ensure!(a.lock_cclock.is_none() && a.lock_mclock.is_none() && a.moffset.is_none(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
-        ensure!(!a.uv.enabled(), "--auto-uv/--uv-offset are NVIDIA-only (NVML); not available with the AMD backend");
+        ensure!(a.uv.fixed.is_none(), "--uv-offset is NVIDIA-only (NVML); with the AMD backend use --auto-uv (amduv)");
     }
+    // AMD: --auto-uv runs the separate tuner amduv (apply the saved result, tune first if there is none); its guard process puts
+    // the owner's settings back when the miner exits
+    let _amd_uv_guard = if !nv && a.uv.auto && !a.uv.dry_run {
+        if devices.len() > 1 {
+            println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devices[0]);
+        }
+        let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "eff".into());
+        amd_uv::start(devices[0], true, &goal)
+    } else {
+        None
+    };
     if nv {
         clocks::recover(&clock_dir);
     }
@@ -566,7 +578,8 @@ OPTIONS:
     --minutes N          stop after N minutes (default: run until interrupted)
     --self-test          verify the GPU kernel against the CPU reference and exit
     --backend B          GPU library: auto (default: CUDA if it sees a device, else AMD), cuda, amd ($FFGP_BACKEND)
-    --auto-uv            opt-in: find and apply a safe GPU undervolt (V/F offset, needs root/admin); see MANUAL.md
+    --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
+                         via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL eff|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
     --uv-max N           highest offset the tuner tries (default 495, at most 600)
@@ -702,6 +715,9 @@ fn main() -> Result<()> {
     }
     ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
     if a.uv.reset {
+        if gpu::backend() == gpu::Backend::Amd {
+            amd_uv::reset()?;
+        }
         uv::reset(&a.uv);
         if a.wallet.is_empty() && !test && !a.uv.enabled() {
             return Ok(());
