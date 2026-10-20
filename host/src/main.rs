@@ -696,6 +696,7 @@ fn main() -> Result<()> {
         return self_test(a.devices.as_ref().map_or(0, |d| d[0]));
     }
     ensure!(!a.wallet.is_empty(), "--wallet is required (see --help)");
+    a.pool = stratum::pool_addr(&a.pool).map_err(anyhow::Error::msg)?;
     ensure!(a.pool.contains(':'), "--pool must be HOST:PORT");
     mine(a)
 }

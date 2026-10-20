@@ -77,7 +77,7 @@ cd freeforgempear-1.5.2
 
 | Option | Meaning |
 |---|---|
-| `--pool HOST:PORT` | stratum pool (default `pearl-eu2.luckypool.io:3360`) |
+| `--pool HOST:PORT` | stratum pool (default `pearl-eu2.luckypool.io:3360`); a `stratum+tcp://` prefix is accepted, SSL is not supported (use the plain TCP port) |
 | `--wallet ADDRESS` | your PRL address (required) |
 | `--worker NAME` | worker name (default `worker1`) |
 | `--devices 0,1,...` | GPUs to use (default: all visible; honours `CUDA_VISIBLE_DEVICES`) |
@@ -519,7 +519,7 @@ cd freeforgempear-1.5.2
 
 | Опция | Значение |
 |---|---|
-| `--pool HOST:PORT` | stratum-пул (по умолчанию `pearl-eu2.luckypool.io:3360`) |
+| `--pool HOST:PORT` | stratum-пул (по умолчанию `pearl-eu2.luckypool.io:3360`); префикс `stratum+tcp://` допускается, SSL не поддерживается (нужен обычный TCP-порт) |
 | `--wallet ADDRESS` | ваш адрес PRL (обязательно) |
 | `--worker NAME` | имя воркера (по умолчанию `worker1`) |
 | `--devices 0,1,...` | какие GPU использовать (по умолчанию все видимые; учитывает `CUDA_VISIBLE_DEVICES`) |
@@ -963,7 +963,7 @@ cd freeforgempear-1.5.2
 
 | 选项 | 含义 |
 |---|---|
-| `--pool HOST:PORT` | stratum 矿池（默认 `pearl-eu2.luckypool.io:3360`） |
+| `--pool HOST:PORT` | stratum 矿池（默认 `pearl-eu2.luckypool.io:3360`）；可带 `stratum+tcp://` 前缀，不支持 SSL（请使用普通 TCP 端口） |
 | `--wallet ADDRESS` | 你的 PRL 地址（必填） |
 | `--worker NAME` | 矿工名（默认 `worker1`） |
 | `--devices 0,1,...` | 使用的显卡（默认所有可见显卡；遵循 `CUDA_VISIBLE_DEVICES`） |

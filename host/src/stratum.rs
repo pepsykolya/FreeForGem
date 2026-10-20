@@ -133,6 +133,23 @@ pub fn is_luckypool(pool: &str) -> bool {
     host == "luckypool.io" || host.ends_with(".luckypool.io")
 }
 
+/// `--pool` as HOST:PORT. Drops a `stratum+tcp://`-style prefix copied from a pool's page. TLS schemes are refused with a
+/// clear error: the client speaks plain TCP only, so a TLS port would just fail the handshake.
+pub fn pool_addr(pool: &str) -> Result<String, String> {
+    let p = pool.trim();
+    let addr = match p.split_once("://") {
+        None => p,
+        Some((scheme, rest)) => match scheme.to_ascii_lowercase().as_str() {
+            "stratum+tcp" | "stratum" | "tcp" => rest,
+            "stratum+ssl" | "stratum+tls" | "ssl" | "tls" => {
+                return Err(format!("--pool {p}: SSL/TLS is not supported, use the pool's plain TCP port (for example Kryptex 7048, not 8048)"));
+            }
+            _ => return Err(format!("--pool {p}: unknown scheme '{scheme}://', use HOST:PORT")),
+        },
+    };
+    Ok(addr.trim_end_matches('/').to_string())
+}
+
 /// Wallet string sent in mining.authorize. LuckyPool: as given. Other pools (Kryptex): a `+NOCK` part is dropped (merge
 /// mining is LuckyPool-only and such a login is refused) and the worker is appended as `wallet.worker`, because they read
 /// the worker name from the login string, not from the `worker` field. Returns the wallet and a note for the log.
@@ -380,5 +397,18 @@ mod login_tests {
         assert!(note.is_some());
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", &format!("{p}/own"), "rig1").0, format!("{p}/own"));
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", p, "").0, p);
+    }
+
+    #[test]
+    fn pool_addr_schemes() {
+        let k = "prl-eu.kryptex.network:7048";
+        assert_eq!(pool_addr(k).unwrap(), k);
+        assert_eq!(pool_addr(&format!("stratum+tcp://{k}")).unwrap(), k);
+        assert_eq!(pool_addr(&format!("Stratum+TCP://{k}/")).unwrap(), k);
+        assert_eq!(pool_addr(&format!(" tcp://{k} ")).unwrap(), k);
+        assert_eq!(pool_addr("stratum://pearl-eu2.luckypool.io:3360").unwrap(), "pearl-eu2.luckypool.io:3360");
+        assert!(pool_addr("stratum+ssl://prl-eu.kryptex.network:8048").unwrap_err().contains("not supported"));
+        assert!(pool_addr("ssl://prl-eu.kryptex.network:8048").is_err());
+        assert!(pool_addr("http://prl-eu.kryptex.network:7048").unwrap_err().contains("unknown scheme"));
     }
 }

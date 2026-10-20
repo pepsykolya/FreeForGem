@@ -7,8 +7,7 @@
 cd "$(dirname "$0")"
 . ./h-manifest.conf
 
-url=${CUSTOM_URL%% *}                      # first URL only
-url=${url#*://}                            # strip stratum+tcp:// and similar
+url=${CUSTOM_URL%% *}                      # first URL only; the miner drops stratum+tcp:// and refuses SSL with a clear error
 tpl=${CUSTOM_TEMPLATE:-}
 wallet=${tpl%%.*}
 worker=${WORKER_NAME:-rig}
