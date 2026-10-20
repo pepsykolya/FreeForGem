@@ -103,6 +103,7 @@ fn self_test(device: i32) -> Result<()> {
     }
 
     gpu::init(device)?;
+    println!("backend: {} ({}), kernel {}", gpu::backend().name(), gpu::device_name(device), gpu::kernel_label());
     // item 5: GPU A_L == reference
     let row0 = job.nonce_row(0);
     let seed = job.a_noise_seed(&row0);
@@ -185,6 +186,7 @@ struct Args {
     lock_cclock: Option<String>, // --lock-cclock: core clock MHz (one value, or one per device)
     lock_mclock: Option<String>, // --lock-mclock: memory clock MHz
     moffset: Option<String>,     // --moffset: memory clock offset MHz (may be negative)
+    backend: Option<String>,     // --backend auto|cuda|amd
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -252,11 +254,11 @@ fn mine(a: Args) -> Result<()> {
         })?;
     }
     let count = gpu::device_count();
-    ensure!(count > 0, "no CUDA devices visible (check the driver and CUDA_VISIBLE_DEVICES)");
+    ensure!(count > 0, "no GPU devices visible to the {} backend (check the driver{})", gpu::backend().name(), if gpu::backend() == gpu::Backend::Cuda { " and CUDA_VISIBLE_DEVICES" } else { "" });
     let devices = match &a.devices {
         Some(d) => {
             for &x in d {
-                ensure!((x as usize) < count && x >= 0, "device {x} does not exist ({count} CUDA device(s) visible)");
+                ensure!((x as usize) < count && x >= 0, "device {x} does not exist ({count} {} device(s) visible)", gpu::backend().name());
             }
             d.clone()
         }
@@ -276,7 +278,7 @@ fn mine(a: Args) -> Result<()> {
     } else {
         format!("m per device {device_ms:?} (SM {sms:?})")
     };
-    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), k());
+    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), gpu::backend().name(), k());
     // optional clock control (lock core/memory clock, memory offset): applied now, restored on any exit
     let clock_dir = a
         .uv
@@ -284,16 +286,25 @@ fn mine(a: Args) -> Result<()> {
         .clone()
         .or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    clocks::recover(&clock_dir);
+    let nv = gpu::backend() == gpu::Backend::Cuda; // clocks, undervolt and power readout use NVML (NVIDIA only)
+    if !nv {
+        ensure!(a.lock_cclock.is_none() && a.lock_mclock.is_none() && a.moffset.is_none(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
+        ensure!(!a.uv.enabled(), "--auto-uv/--uv-offset are NVIDIA-only (NVML); not available with the AMD backend");
+    }
+    if nv {
+        clocks::recover(&clock_dir);
+    }
     let clock_opts = clocks::ClockOpts {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
     };
-    let _clock_guard = clocks::apply(&devices, &clock_opts, &clock_dir);
+    let _clock_guard = if nv { clocks::apply(&devices, &clock_opts, &clock_dir) } else { None };
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
-    uv::recover(&a.uv);
-    let uv_state = uv::start(&a.uv, &devices, &stop);
+    if nv {
+        uv::recover(&a.uv);
+    }
+    let uv_state = if nv { uv::start(&a.uv, &devices, &stop) } else { None };
     println!("devfee: {}% (one {}s slot per {} min cycle, random position) on the same pool", devfee::FEE_PERCENT, devfee::Params::from_env().slot.as_secs(), devfee::Params::from_env().cycle.as_secs() / 60);
 
     let (user_wallet, note) = stratum::login_wallet(&a.pool, &a.wallet, &a.worker);
@@ -358,7 +369,7 @@ fn mine(a: Args) -> Result<()> {
     let mut last_attempts = vec![0u64; gstats.len()];
     let mut win_start = Instant::now();
     // board power per mining GPU (NVML, read-only) for the TH/W figures of the periodic line; absent NVML = no power shown
-    let power = nvml::Nvml::load().ok().map(|nv| {
+    let power = if !nv { None } else { nvml::Nvml::load().ok() }.map(|nv| {
         let devs: Vec<Option<nvml::Dev>> =
             gstats.iter().map(|g| gpu::device_pci_bus_id(g.dev).ok().and_then(|b| nv.by_bus(&b).ok())).collect();
         (nv, devs)
@@ -554,6 +565,7 @@ OPTIONS:
     --devices 0,1,...    CUDA devices to mine on (default: all visible; honours CUDA_VISIBLE_DEVICES)
     --minutes N          stop after N minutes (default: run until interrupted)
     --self-test          verify the GPU kernel against the CPU reference and exit
+    --backend B          GPU library: auto (default: CUDA if it sees a device, else AMD), cuda, amd ($FFGP_BACKEND)
     --auto-uv            opt-in: find and apply a safe GPU undervolt (V/F offset, needs root/admin); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
@@ -607,6 +619,7 @@ fn main() -> Result<()> {
         lock_cclock: None,
         lock_mclock: None,
         moffset: None,
+        backend: None,
     };
     let mut test = false;
     let mut child: Option<uv::ChildArgs> = None;
@@ -669,11 +682,13 @@ fn main() -> Result<()> {
                     _ => c.expect_bus = v,
                 }
             }
+            "--backend" => a.backend = Some(val()?),
             "--target-mode" => a.mode = if val()? == "jackpot" { TargetMode::Jackpot } else { TargetMode::Base },
             _ => bail!("unknown argument {arg} (see --help)"),
         }
     }
     let _ = uv_given;
+    gpu::select(a.backend.as_deref())?;
     if let Some(mut c) = child {
         c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
         std::process::exit(uv::check_child(&c));
