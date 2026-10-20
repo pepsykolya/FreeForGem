@@ -67,6 +67,14 @@ PG_API int pg_device_pci_bus_id(int device, char* out, int len);
 PG_API int pg_device_uuid(int device, char* out, int len);
 // Identifier of the embedded search kernel build ("<variant> <hash prefix>"); results saved by the tuner are keyed by it.
 PG_API const char* pg_kernel_label(void);
+
+// Label pg_init(device) would select, callable without pg_init (per-device key for the undervolt state).
+PG_API const char* pg_kernel_label_for(int device);
+
+// Row granularity of the search kernel selected by pg_init for the calling thread (128 for gen13, 256 for t256 on Ada; PEARL_KERNEL=gen13|t256
+// overrides the per-device choice).  m must stay a multiple of 128; a multiple of pg_row_align() keeps the selected kernel (otherwise the
+// attempt runs on gen13).  A host that picks m = 128 * SM * r should keep r even when pg_row_align() == 256.
+PG_API int pg_row_align(void);
 // Deterministic check (needs pg_init + pg_set_job): `reps` full attempts of the same seed are run back to back with the kernel's
 // transcript output enabled (the 16 jackpot words of every tile before BLAKE3).  The first transcript is hashed into a 256-bit
 // digest (same job and seed -> same digest on every GPU and every run); each further run is compared word by word with the first
