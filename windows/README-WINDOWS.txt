@@ -34,7 +34,7 @@ Proofs are sent gzip-compressed (~5 KB per share instead of ~270 KB).
 
 OPTIONAL UNDERVOLT: in start.bat remove "rem" before  set "AUTO_UV=1"  and run start.bat as Administrator (step by step: MANUAL.md, section 12, "Windows: step by step").
 The miner then looks for a lower, safe GPU voltage (saves watts at the same hashrate) and restores your settings on exit. See MANUAL.md, section 12.
-The tuner tries offsets up to +495 MHz (RTX 20xx/GTX 16xx: +225, CMP 30HX-50HX: +150); to change that set UV_MAX in start.bat
+The tuner tries offsets up to +495 MHz (RTX 20xx/GTX 16xx/CMP 50HX: +225, CMP 30HX/40HX: +150); to change that set UV_MAX in start.bat
 (e.g. set "UV_MAX=480", at most 600; a mixed rig can give one value per GPU in DEVICES order: set "UV_MAX=225,495,150").
 
 DEV FEE 1 %: one 60 s slot in every 100 min on the same pool (worker ffgp-devfee; on LuckyPool also NOCK). See LICENSE.

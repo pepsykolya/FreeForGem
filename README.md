@@ -30,7 +30,7 @@ is emitted directly as SASS by our own generator.
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810.
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl.
 * **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
@@ -62,7 +62,7 @@ cd freeforgempear-1.6.1
 | `--self-test` | verify the kernel and exit |
 | `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
 | `--uv-offset N` / `--uv-reset` | apply a fixed undervolt offset after a check / forget the saved undervolt results |
-| `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 30HX–50HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
+| `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 50HX up to +225, CMP 30HX/40HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
 
 The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per GPU and in total,
 plus the submitted, accepted and rejected shares.

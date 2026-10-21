@@ -26,7 +26,7 @@ rem Undervolt tuner settings (used with AUTO_UV=1; empty = default). Examples pe
 rem Lowest offset, MHz: the search starts here and never goes below (empty = the card's current offset, else +120;
 rem RTX 40: at least +200, RTX 50: at least +300). One value for all GPUs, or a comma list in DEVICES order:
 set "UV_MIN="
-rem Highest offset the tuner tries, MHz (at most 600). Empty = per card: RTX 20xx/GTX 16xx 225, CMP 30HX-50HX 150,
+rem Highest offset the tuner tries, MHz (at most 600). Empty = per card: RTX 20xx/GTX 16xx/CMP 50HX 225, CMP 30HX/40HX 150,
 rem others 495. One value for all GPUs, or a comma list in DEVICES order, e.g. 225,495,150 (- = that GPU's default):
 set "UV_MAX="
 rem MHz per tuning step (empty = 15; 30 = about half the tuning time, coarser result):

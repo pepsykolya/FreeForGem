@@ -70,14 +70,14 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   Other options (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) and a manual-tuning
   procedure are in [MANUAL.md](MANUAL.md#12-undervolt---auto-uv-optional-new-in-140). Undervolting is at your own risk, like any overclocking.
 - **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card (since 1.6.2): RTX 20xx / GTX 16xx up to +225,
-  CMP 30HX/40HX/50HX up to +150, all others up to +495; `grep range` in the miner log shows each GPU's range. For manual
+  CMP 30HX/40HX up to +150 (CMP 50HX: +225), all others up to +495; `grep range` in the miner log shows each GPU's range. For manual
   control give one value per GPU in nvidia-smi order (GPU0, GPU1, ... as in the miner log; or in `--devices` order), no spaces:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = that GPU's default).
 
 ### Requirements
 
 - HiveOS with NVIDIA driver 525 or newer.
-- Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too.
+- Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too (CMP 50HX: only ~2.6 TH/s, not recommended for Pearl).
 - Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
 
 ### Developer fee
@@ -167,14 +167,14 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgem
   Остальные параметры (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) и порядок ручной настройки —
   в [MANUAL.md](MANUAL.md#12-андервольт---auto-uv-необязательно-новое-в-140). Андервольт — на ваш риск, как и любой разгон.
 - **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте (с 1.6.2): RTX 20xx / GTX 16xx до +225,
-  CMP 30HX/40HX/50HX до +150, остальные до +495; `grep range` в логе майнера показывает диапазон каждой карты. Для ручного
+  CMP 30HX/40HX до +150 (CMP 50HX: +225), остальные до +495; `grep range` в логе майнера показывает диапазон каждой карты. Для ручного
   управления — по значению на карту в порядке nvidia-smi (GPU0, GPU1, ... как в логе майнера; или в порядке `--devices`), без пробелов:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = значение по умолчанию для карты).
 
 ### Требования
 
 - HiveOS с драйвером NVIDIA 525 или новее.
-- Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются.
+- Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: всего ~2,6 TH/s, для Pearl не рекомендуется).
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
 
 ### Common Foundry (CMFD), с 1.6.0
