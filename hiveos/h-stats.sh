@@ -2,7 +2,7 @@
 # FreeForGemPear — see LICENSE
 # Sourced by the HiveOS agent: sets $khs (total, kH/s) and $stats (JSON) from the miner's periodic log line
 #   [ 270s] GPU0 68.318 | GPU1 68.2 | total 136.5 TH/s (...) | ... | user sub 6 acc 6 rej 0 | fee sub 0 acc 0 rej 0     (Pearl)
-#   [ 270s] GPU0 20.31 (179 W, 408 FW/kWh)  GPU1 35.10 (...) | total 55.41 FW/s | ... | user sub 9 acc 9 rej 0 | ...   (CMFD)
+#   [ 380s] GPU0 21.76 (237 W, 330742 FW/kWh)  GPU1 21.75 (...) | total 87.46 FW/s | ... | user sub 1 acc 1 rej 0 | ...   (CMFD)
 _ffgp_dir=$(dirname "${BASH_SOURCE[0]}")
 . "$_ffgp_dir/h-manifest.conf"
 _log="${CUSTOM_LOG_BASENAME}.log"

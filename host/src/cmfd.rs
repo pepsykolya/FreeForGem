@@ -901,7 +901,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     Ok(())
 }
 
-/// `[ 120s] GPU0 20.31 (179 W, 408 FW/kWh)  GPU1 ... | total 35.10 FW/s | 360 W, 351 FW/kWh | user sub N acc A rej R | stale S | ...`
+/// `[ 380s] GPU0 21.76 (237 W, 330742 FW/kWh)  GPU1 ... | total 87.46 FW/s | 948 W, 332248 FW/kWh | user sub N acc A rej R | stale S | ...`
 /// The h-stats.sh of the HiveOS package reads "GPUn <rate>", "total <rate> FW/s" and "user sub/acc/rej" as for Pearl.
 fn report_line(slots: &[Slot], nv: Option<&nvml::Nvml>, up: Duration) -> String {
     let mut parts = Vec::new();
