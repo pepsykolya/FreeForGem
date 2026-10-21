@@ -170,6 +170,7 @@ pub fn wallet_hex(w: &str) -> Result<String> {
     Ok(hex)
 }
 
+#[cfg(test)]
 pub fn validate_wallet(w: &str) -> Result<()> {
     wallet_hex(w).map(|_| ())
 }
