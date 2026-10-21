@@ -1,6 +1,8 @@
 # CMFD engine (Common Foundry, ForgeMatrix V4)
 
-FreeForGemPear mines Common Foundry (CMFD) with the **FreeForgeMiner** engine, used unchanged:
+FreeForGemPear mines Common Foundry (CMFD) with the **FreeForgeMiner** engine (Windows: the release binaries unchanged;
+Linux/HiveOS: built from the same pinned source on Ubuntu 20.04 by `build-engine-compat.sh`, glibc 2.30+ instead of 2.34+, so
+CMFD runs on HiveOS images based on Ubuntu 20.04 too; their SHA-256 is listed in `ENGINE`):
 <https://github.com/pepsykolya/freeforgeminer> (MIT; release and SHA-256 pinned in `ENGINE.lock`).
 FreeForgeMiner is an open-source fork of the official Common Foundry miner (MIT); its changes against upstream,
 including the dev-fee code, are published in its `patches/` folder.

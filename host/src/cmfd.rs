@@ -250,27 +250,39 @@ pub fn engine_dir(given: &Option<PathBuf>) -> Result<PathBuf> {
             dir.join(&f).display()
         );
     }
-    check_glibc()?;
+    check_glibc(&dir)?;
     Ok(dir)
 }
 
-/// The Linux CMFD engine (FreeForgeMiner, built on Ubuntu 22.04) needs glibc 2.34+; Pearl itself runs from glibc 2.31 (Ubuntu
-/// 20.04).  Without this check an older system only shows "GLIBC_2.32 not found" from the engine and a restart loop.
-fn check_glibc() -> Result<()> {
+/// glibc the engine binaries need: build.sh writes "need GLIBC_2.30" into cmfd/ENGINE for the binaries it built on Ubuntu 20.04
+/// (cmfd/build-engine-compat.sh); the FreeForgeMiner release binaries (built on Ubuntu 22.04) need 2.34.  Pearl itself runs
+/// from glibc 2.31.  Without this check an older system only shows "GLIBC_2.3x not found" from the engine and a restart loop.
+fn check_glibc(dir: &Path) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         unsafe extern "C" {
             fn gnu_get_libc_version() -> *const std::os::raw::c_char;
         }
+        let parse = |v: &str| {
+            let mut it = v.split('.').map(|x| x.trim().parse::<u32>().unwrap_or(0));
+            (it.next().unwrap_or(0), it.next().unwrap_or(0))
+        };
+        let need = std::fs::read_to_string(dir.join("ENGINE"))
+            .ok()
+            .and_then(|t| t.split("need GLIBC_").nth(1).map(|r| parse(r.split_whitespace().next().unwrap_or(""))))
+            .filter(|n| n.0 == 2)
+            .unwrap_or((2, 34));
         let v = unsafe { std::ffi::CStr::from_ptr(gnu_get_libc_version()) }.to_string_lossy().into_owned();
-        let mut it = v.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
-        let (maj, min) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
         ensure!(
-            (maj, min) >= (2, 34),
-            "CMFD needs glibc 2.34 or newer (Ubuntu 22.04+, HiveOS on Ubuntu 22.04); this system has glibc {v}. Pearl mining works here; \
-             for CMFD update the OS (HiveOS: a current Ubuntu 22.04 image)"
+            parse(&v) >= need,
+            "the CMFD engine in {} needs glibc {}.{} or newer; this system has glibc {v}. Pearl mining works here; for CMFD use the              release package (its engine runs from glibc 2.30, Ubuntu 20.04 / any HiveOS)",
+            dir.display(),
+            need.0,
+            need.1
         );
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = dir;
     Ok(())
 }
 

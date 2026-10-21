@@ -90,7 +90,7 @@ Midas Mining `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b7
 The 6.4 GB model goes to `/hive/miners/custom/cmfd-model` (shared with FreeForgeMiner; downloaded once).
 Stock clocks or a power limit: a positive core offset of the OC profile is set to 0 by the miner for the run (and put back);
 `--uv-offset N` forces a value at your own risk. Dev fee 1% inside the engine (36 s per hour per GPU, worker `ffm-fee`).
-CMFD needs a HiveOS image on **Ubuntu 22.04** (glibc 2.34+; check with `ldd --version`); on Ubuntu 20.04 images only Pearl works.
+CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in the package needs glibc 2.30+).
 
 ## Русский
 
@@ -176,7 +176,7 @@ Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu
 (общая с FreeForgeMiner, скачивается один раз). Стоковые частоты или лимит мощности: положительное смещение ядра из профиля
 разгона майнер на время работы сам ставит в 0 (и возвращает); `--uv-offset N` — своё значение на ваш риск. Комиссия 1% внутри
 движка (36 с в час на GPU, воркер `ffm-fee`).
-Для CMFD нужен образ HiveOS на **Ubuntu 22.04** (glibc 2.34+; проверка: `ldd --version`); на образах с Ubuntu 20.04 работает только Pearl.
+CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04 (движку в пакете нужна glibc 2.30+).
 
 ### Комиссия разработчика
 

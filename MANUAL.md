@@ -453,8 +453,9 @@ value with `--uv-offset N` and do not copy another card's number.
 ### 13. Common Foundry (CMFD), new in 1.6.0
 
 The same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**. The CMFD work is done by the
-**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.4), shipped unchanged in the
-`cmfd/` folder of the package. FreeForGemPear prepares the model, runs one engine process per GPU, applies your clock
+**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.4), in the `cmfd/` folder of the
+package: Windows uses the release binaries unchanged; the Linux/HiveOS binaries are built from the same pinned source on
+Ubuntu 20.04, so they run on every HiveOS (Ubuntu 20.04 and 22.04 images). FreeForGemPear prepares the model, runs one engine process per GPU, applies your clock
 settings, prints its usual stats line and restarts an engine that exits.
 
 **The coin follows the pool URL**: a `cmfd+tls://` URL means CMFD (`--algo cmfd|pearl` forces it). The wallet is your
@@ -463,8 +464,8 @@ CMFD address in either form: `cmfd1...` (63 characters with a checksum, as the C
 (a typo is refused before mining starts) and sent to the pool as hex. Test-network `tcmfd1...` addresses are refused.
 
 **Requirements.** NVIDIA RTX 20xx or newer (tuned for RTX 30/40), about **7 GB of free GPU memory per card** (the model alone
-is 6.4 GB), NVIDIA driver R575+ on Linux/HiveOS, 7 GB of disk for the model. Linux/HiveOS: **glibc 2.34+** (Ubuntu 22.04 or newer,
-HiveOS on Ubuntu 22.04) — the CMFD engine does not run on Ubuntu 20.04 (Pearl does); the miner says so at start.
+is 6.4 GB), NVIDIA driver R575+ on Linux/HiveOS, 7 GB of disk for the model. Linux/HiveOS: glibc 2.30+ (Ubuntu 20.04 or newer, every
+HiveOS image).
 
 **The model** (6.4 GB) is downloaded once from the official Common Foundry servers in authenticated parts and then only
 verified at each start (takes 10–40 s). Location: `--cmfd-model DIR`; default `/hive/miners/custom/cmfd-model` on HiveOS
@@ -1025,7 +1026,9 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD), новое в 1.6.0
 
 Тот же бинарник майнит и **Common Foundry (CMFD, ForgeMatrix V4)**. Работу по CMFD делает движок **FreeForgeMiner**
-(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.4), он лежит без изменений в папке `cmfd/` пакета.
+(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.4), он лежит в папке `cmfd/` пакета: в Windows —
+релизные файлы без изменений, в Linux/HiveOS — собранные из того же закреплённого исходника на Ubuntu 20.04, чтобы работать на любом
+HiveOS (образы на Ubuntu 20.04 и 22.04).
 FreeForGemPear готовит модель, запускает по процессу движка на каждую GPU, применяет ваши настройки частот, печатает свою
 обычную строку статистики и перезапускает упавший движок.
 
@@ -1035,8 +1038,8 @@ Common Foundry 1.0.16+) или прежние 64 шестнадцатеричн�
 (опечатка отсекается до начала майнинга) и уходит на пул в hex. Адреса тестовой сети `tcmfd1...` не принимаются.
 
 **Требования.** NVIDIA RTX 20xx и новее (оптимизировано под RTX 30/40), около **7 ГБ свободной видеопамяти на карту**
-(одна модель — 6,4 ГБ), драйвер NVIDIA R575+ на Linux/HiveOS, 7 ГБ на диске под модель. Linux/HiveOS: **glibc 2.34+** (Ubuntu 22.04
-и новее, HiveOS на Ubuntu 22.04) — на Ubuntu 20.04 движок CMFD не запускается (Pearl работает); майнер сообщит об этом при старте.
+(одна модель — 6,4 ГБ), драйвер NVIDIA R575+ на Linux/HiveOS, 7 ГБ на диске под модель. Linux/HiveOS: glibc 2.30+ (Ubuntu 20.04 и новее, любой образ
+HiveOS).
 
 **Модель** (6,4 ГБ) скачивается один раз с официальных серверов Common Foundry проверяемыми частями, дальше при каждом
 запуске только проверяется (10–40 с). Где лежит: `--cmfd-model DIR`; по умолчанию `/hive/miners/custom/cmfd-model` в HiveOS
@@ -1545,7 +1548,8 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD)，1.6.0 新增
 
 同一个程序也可以挖 **Common Foundry（CMFD，ForgeMatrix V4）**。CMFD 的计算由 **FreeForgeMiner** 引擎完成
-（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.4 版），原样放在软件包的 `cmfd/` 文件夹中。
+（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.4 版），放在软件包的 `cmfd/` 文件夹中：Windows 使用原版发布文件；Linux/HiveOS 使用在 Ubuntu 20.04 上由同一固定源码编译的
+文件，可在所有 HiveOS（Ubuntu 20.04 和 22.04 镜像）上运行。
 FreeForGemPear 负责准备模型、为每块 GPU 启动一个引擎进程、应用您的频率设置、打印常规统计行，并在引擎退出时重新启动。
 
 **币种由矿池地址决定**：`cmfd+tls://` 地址即为 CMFD（`--algo cmfd|pearl` 可强制指定）。钱包为您的 CMFD 地址，两种形式均可：`cmfd1...`（63 个字符，带校验和，Common Foundry 1.0.16+ 钱包显示的格式）
@@ -1553,8 +1557,7 @@ FreeForGemPear 负责准备模型、为每块 GPU 启动一个引擎进程、应
 测试网 `tcmfd1...` 地址不被接受。
 
 **系统要求。** NVIDIA RTX 20xx 或更新（针对 RTX 30/40 优化），**每张卡约 7 GB 空闲显存**（仅模型就有 6.4 GB），
-Linux/HiveOS 上 NVIDIA 驱动 R575+，磁盘需 7 GB 存放模型。Linux/HiveOS 需要 **glibc 2.34+**（Ubuntu 22.04 或更新，基于 Ubuntu 22.04 的
-HiveOS）——CMFD 引擎无法在 Ubuntu 20.04 上运行（Pearl 可以）；矿工启动时会提示。
+Linux/HiveOS 上 NVIDIA 驱动 R575+，磁盘需 7 GB 存放模型。Linux/HiveOS 需要 glibc 2.30+（Ubuntu 20.04 或更新，所有 HiveOS 镜像）。
 
 **模型**（6.4 GB）首次从 Common Foundry 官方服务器分块下载并校验，之后每次启动只做校验（10–40 秒）。位置：`--cmfd-model DIR`；
 HiveOS 上默认 `/hive/miners/custom/cmfd-model`（与 FreeForgeMiner 共用，已运行过它的矿机不会重复下载），否则为程序旁的 `cmfd-model`。

@@ -15,6 +15,20 @@ echo "== freeforgempear (links $LIB)"
 # CMFD engine (FreeForgeMiner release pinned in cmfd/ENGINE.lock, MIT) goes into the packages as cmfd/; FFGP_NO_CMFD=1 = Pearl only
 E=dist/cmfd-engine/linux
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cmfd/fetch-engine.sh "$E"
+# Linux engine binaries rebuilt from the same pinned source on Ubuntu 20.04 (glibc 2.31; the release ones need 2.34), made by
+# cmfd/build-engine-compat.sh; FFGP_CMFD_COMPAT=0 keeps the FreeForgeMiner release binaries.
+C=dist/cmfd-engine-compat/linux
+if [ "${FFGP_NO_CMFD:-0}" != 1 ] && [ "${FFGP_CMFD_COMPAT:-1}" != 0 ]; then
+  if [ -x "$C/cmfd-miner" ] && [ -x "$C/cmfd-v4-replay" ] && [ -x "$C/cmfd-launch" ]; then
+    cp "$C"/cmfd-miner "$C"/cmfd-v4-replay "$C"/cmfd-launch "$E/"
+    g=$(objdump -T "$E"/cmfd-miner "$E"/cmfd-v4-replay "$E"/cmfd-launch | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
+    { echo "linux binaries: built from this source on Ubuntu 20.04 (cmfd/build-engine-compat.sh), need $g"
+      (cd "$E" && sha256sum cmfd-miner cmfd-v4-replay cmfd-launch); } >> "$E/ENGINE"
+    echo "CMFD engine: Ubuntu 20.04 build from $C ($g)"
+  else
+    echo "WARNING: $C missing: the CMFD engine in the package needs glibc 2.34+ (run cmfd/build-engine-compat.sh first)"
+  fi
+fi
 
 D=dist/freeforgempear-$VERSION
 rm -rf "$D"; mkdir -p "$D"
