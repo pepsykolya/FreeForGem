@@ -227,11 +227,16 @@ cards of the same generation and are not measured. Every card differs: let `--au
 | RTX 5070 Ti | 2445 | lock `810` | +480 | reference |
 | RTX 5070 | 2400 | lock `810` | checks pass up to +390, crash above | user report, FreeForGemPear 1.5.1, Windows, driver 617.14 |
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | lock `810` | +390..480 | estimate |
-| RTX 2060 SUPER, RTX 2070/2080 (incl. SUPER), GTX 1660/1650 | 1500–1650 | lock `5001` (**not 810**: Turing loses ~25% at 810) | +200..260; `--uv-max 225` recommended | reference (2060 SUPER: measured) |
-| CMP 40HX | 1400 | lock `5001` | +150 | user rigs; a CMP 40HX hit Xid at +255 |
+| RTX 2060 SUPER, RTX 2070/2080 (incl. SUPER), GTX 1660/1650 | 1500–1650 | lock `5001` (**not 810**: Turing loses ~25% at 810) | +200..260; auto-uv limit +225 by default (since 1.6.2) | reference (2060 SUPER: measured) |
+| CMP 40HX | 1400 | lock `5001` | +150; auto-uv limit +150 by default (since 1.6.2) | user rigs; a CMP 40HX hit Xid at +255 |
 
 RTX 40 and 50 run at a much higher locked core clock (**1900–2500 MHz**) and hold a higher offset than RTX 30; that is why
-auto-uv starts their search at +200 (RTX 30: +120). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
+auto-uv starts their search at +200 on RTX 40 and +300 on RTX 50 (RTX 30: +120).
+
+**Mixed rig:** `--auto-uv` is enough — the limits are chosen per card automatically (since 1.6.2): RTX 20xx / GTX 16xx up to
++225, CMP 30HX/40HX/50HX up to +150, all others up to +495; the log shows the range of every GPU at start
+(`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). For manual control give one value
+per GPU in `--devices` order: `--uv-max 225,495,150` (`-` = that GPU's default). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
 * HiveOS: Overclock tab → core clock (absolute), memory clock (absolute), power limit; the V/F offset via `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root), or `--lock-cclock` / `--lock-mclock`.
@@ -305,8 +310,10 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
    Wrong results without any driver error do happen near the limit, which is why the checks are done on the GPU *and* the CPU.
 3. The first mismatch, CUDA error, Xid error or hang ends the climb. The result is the **last good step minus one step (15 MHz
    margin)**, confirmed by a longer check (about 2 minutes); if the confirmation fails it goes one step lower. The highest
-   value tried is +495 (`--uv-max`, at most +600; before 1.5.1 it was +300 with a hard cap of +400). RTX 40/50 cards often
-   hold +450..480.
+   value tried is +495 (`--uv-max`, at most +600; before 1.5.1 it was +300 with a hard cap of +400); since 1.6.2 it is +225 on
+   Turing (RTX 20xx / GTX 16xx) and +150 on CMP 30HX–50HX unless `--uv-max` says otherwise. RTX 40/50 cards often hold +450..480.
+   A saved result above a lowered limit is not used as is: the card runs at the limit (after a quick check) and the saved
+   result is kept for when the limit goes up again; a saved result that *is* the old limit is tuned again when the limit rises.
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version and kernel build. Later starts apply it after a
    quick check (about 30 s). If the driver, the kernel build or your starting offset changed, the GPU is tuned again.
 5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
@@ -336,13 +343,14 @@ same clock), and the safety net worked too (a found result failed the CPU check 
    without the lock the card may boost higher instead and the saving is smaller.
 3. **Turn it on**, one of:
    * `start.bat` (or any `start-luckypool-*` / `start-kryptex-*`): remove `rem` before `set "AUTO_UV=1"`. The upper limit is
-     `set "UV_MAX="` (empty = +495; RTX 40/50 often hold +450..480, RTX 30 usually +200..360).
+     `set "UV_MAX="` (empty = per card: +495, RTX 20xx/GTX 16xx +225, CMP +150; RTX 40/50 often hold +450..480, RTX 30
+     usually +200..360). A comma list sets one value per GPU in `DEVICES` order, e.g. `set "UV_MAX=225,495,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, the range in `UV_MIN` / `UV_MAX`, plus power limit and clock lock through `nvidia-smi`.
    * your own command line: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Starting point.** The tuner starts from the offset the card has now and never goes below it. The *Core Clock* offset of
    MSI Afterburner (or a similar tool) is this same offset, so a value you set there is your starting point and is put back
    on exit. Do not let Afterburner re-apply a profile while mining: auto-uv sees that somebody else changed the offset and
-   stands down on that GPU. With no offset set the tuner starts at +120, on RTX 40/50 at +200 (or `--uv-min` / `UV_MIN`).
+   stands down on that GPU. With no offset set the tuner starts at +120, on RTX 40 at +200, on RTX 50 at +300 (or `--uv-min` / `UV_MIN`).
 5. **Wait.** The first start tunes for about 15 minutes per GPU (all GPUs in parallel) and only then starts mining. Later
    starts apply the saved value after a ~30 s check.
 6. **Files** are in the miner folder: `uv.json` (results) and `uv-restore.json` (your original offset). The folder must be
@@ -357,7 +365,8 @@ auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
 ```
    * `auto-uv paused for this GPU for 24 h`: the card had an error at the found offset; it mines at your own offset and
      the tuner tries again after 24 h (or after `--uv-reset`).
-   * `start offset ... leaves no room below the cap`: your offset is already at `UV_MAX` or higher; raise `UV_MAX`.
+   * `start offset ... leaves no room below the cap`: your offset is already at `UV_MAX` (or the card's default limit, shown
+     in brackets) or higher; raise `UV_MAX` if you are sure the card takes more.
    * `no safe offset above ... was found`: the card does not take more than your own value; nothing is changed.
 8. **If the PC hangs or the driver resets** (black screen, "display driver stopped responding"): reboot and start the miner
    again; it first restores your offset from `uv-restore.json`. If the miner itself crashed during a tuning step (window shows
@@ -391,9 +400,11 @@ set "UV_MIN=300"
 set "UV_MAX=495"
 ```
 * **Mixed rig:** `LOCK_CCLOCK` / `LOCK_MCLOCK` take one value per GPU in `DEVICES` order, e.g. `set "LOCK_CCLOCK=1560,2445"`.
-  `UV_MIN` / `UV_MAX` are common to all GPUs: leave them empty (RTX 40/50 start at +200 by themselves) or use the lower card's values.
-* **Faster tuning:** `set "UV_STEP=30"` halves the number of steps (coarser result). On RTX 50 a higher `UV_MIN` (about +300)
-  saves the most time: the card holds it anyway, and the search starts there. Do not set it too high: if the card fails
+  For the undervolt `AUTO_UV=1` alone is enough: the limits are chosen per card (RTX 20xx/GTX 16xx +225, CMP +150, others +495;
+  RTX 40/50 start at +200/+300 by themselves). For manual control `UV_MIN` / `UV_MAX` / `UV_OFFSET` take a list in the same order,
+  e.g. `set "UV_MAX=225,495,150"` (`-` = that GPU's default). A list must have exactly one value per GPU.
+* **Faster tuning:** `set "UV_STEP=30"` halves the number of steps (coarser result). On RTX 50 a higher start (about +300)
+  saves the most time: the card holds it anyway, and the search starts there (since 1.6.2 this is the default on RTX 50). Do not set it too high: if the card fails
   the check already at `UV_MIN`, it is not tuned and stays at your own offset (the log says so; lower `UV_MIN` then).
 * **Already know your offset:** `set "UV_OFFSET=480"` (and `AUTO_UV` left off) applies it after one quick check, no search.
 * **Power limit as well:** use `start-nvidia-smi.bat` (`CCLOCK` / `MCLOCK` / `PLIMIT`, `UV_MIN` / `UV_MAX` / `UV_STEP`).
@@ -413,13 +424,20 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--auto-uv` | find, apply and supervise the undervolt (as described above) |
 | `--uv-offset N` | apply the fixed offset N MHz after a quick check, no tuning (if the check fails, your offset stays) |
 | `--uv-reset` | forget the saved results; with `--auto-uv` the GPUs are tuned again; without a wallet the miner just exits |
-| `--uv-max N` | highest offset the tuner tries (default 495, at most 600; on Windows: `set "UV_MAX=480"` in `start.bat`) |
-| `--uv-min N` | offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120; RTX 40/50: at least 200; Windows: `UV_MIN`) |
+| `--uv-max N` | highest offset the tuner tries (at most 600; default per card: RTX 20xx / GTX 16xx 225, CMP 30HX/40HX/50HX 150, all others 495; on Windows: `set "UV_MAX=480"` in `start.bat`) |
+| `--uv-min N` | offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120; RTX 40: at least 200, RTX 50: at least 300; Windows: `UV_MIN`) |
 | `--uv-step N` | MHz per tuning step (default 15; Windows: `UV_STEP`) |
 | `--uv-keep-last` | after a failed step keep the last good step (default: the last good step minus one step) |
 | `--uv-reval-hours H` | re-validation interval while mining (default 6, `0` = never) |
 | `--uv-dir DIR` | where `uv.json` and `uv-restore.json` are kept (also `FFGP_STATE_DIR`) |
-| `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id); changes nothing |
+| `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id) and their ranges; changes nothing |
+
+`--uv-max`, `--uv-min` and `--uv-offset` take one value for all GPUs, or a comma list with exactly one value per GPU in
+`--devices` order (without `--devices`: GPU0, GPU1, ... as in the log; on HiveOS that is the PCI bus order of the dashboard).
+`-` in a list = that GPU's default (`--uv-offset`: the GPU is left alone). A list of the wrong length is an error, it is never
+extended. An explicit `--uv-max` is used as given, also above the card's default; the log then warns
+(`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Example for 2× RTX 2060 SUPER,
+3× RTX 3070 Laptop and a CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (the same as the defaults).
 
 **GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
 
@@ -429,6 +447,7 @@ Default location of the files: next to the binary (Windows: the miner folder), o
 **Log lines** (all start with `auto-uv:`, so `grep auto-uv` shows the story):
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
@@ -810,11 +829,16 @@ goto loop
 | RTX 5070 Ti | 2445 | лок `810` | +480 | опорные |
 | RTX 5070 | 2400 | лок `810` | проверки проходят до +390, выше — падение | отчёт пользователя, FreeForGemPear 1.5.1, Windows, драйвер 617.14 |
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | лок `810` | +390..480 | оценка |
-| RTX 2060 SUPER, RTX 2070/2080 (вкл. SUPER), GTX 1660/1650 | 1500–1650 | лок `5001` (**не 810**: на 810 Turing теряет ~25%) | +200..260; рекомендуется `--uv-max 225` | опорное (2060 SUPER: замер) |
-| CMP 40HX | 1400 | лок `5001` | +150 | риги пользователей; CMP 40HX ловила Xid на +255 |
+| RTX 2060 SUPER, RTX 2070/2080 (вкл. SUPER), GTX 1660/1650 | 1500–1650 | лок `5001` (**не 810**: на 810 Turing теряет ~25%) | +200..260; предел auto-uv +225 по умолчанию (с 1.6.2) | опорное (2060 SUPER: замер) |
+| CMP 40HX | 1400 | лок `5001` | +150; предел auto-uv +150 по умолчанию (с 1.6.2) | риги пользователей; CMP 40HX ловила Xid на +255 |
 
 RTX 40 и 50 работают на гораздо более высоком локе ядра (**1900–2500 МГц**) и держат больший offset, чем RTX 30; поэтому
-auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
+auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300 (RTX 30 — с +120).
+
+**Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте автоматически (с 1.6.2): RTX 20xx / GTX 16xx
+до +225, CMP 30HX/40HX/50HX до +150, остальные до +495; при старте в логе виден диапазон каждой карты
+(`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). Для ручного управления — по значению
+на карту в порядке `--devices`: `--uv-max 225,495,150` (`-` = значение по умолчанию для этой карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
 * HiveOS: вкладка Overclock → частота ядра (абсолютная), частота памяти (абсолютная), лимит мощности; V/F offset — через `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root) или `--lock-cclock` / `--lock-mclock`.
@@ -888,8 +912,11 @@ auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Tu
    У предела бывают неверные результаты без всякой ошибки драйвера, поэтому проверка идёт и на GPU, и на CPU.
 3. Первое расхождение, ошибка CUDA, Xid или зависание останавливают подъём. Итог — **последний успешный шаг минус один шаг
    (запас 15 МГц)**, подтверждённый более длинной проверкой (около 2 минут); если подтверждение не прошло, берётся шагом ниже.
-   Выше +495 не поднимается (`--uv-max`, максимум +600; до 1.5.1 было +300 с жёстким потолком +400). Карты RTX 40/50
-   часто держат +450..480.
+   Выше +495 не поднимается (`--uv-max`, максимум +600; до 1.5.1 было +300 с жёстким потолком +400); с 1.6.2 на Turing
+   (RTX 20xx / GTX 16xx) — выше +225, на CMP 30HX–50HX — выше +150, если `--uv-max` не задан. Карты RTX 40/50 часто держат +450..480.
+   Сохранённый результат выше уменьшенного предела не применяется как есть: карта работает на пределе (после быстрой проверки),
+   а сохранённый результат остаётся на случай, когда предел снова поднимут; если результат *равен* старому пределу, при
+   повышении предела карта подбирается заново.
 4. Результат сохраняется в `uv.json` с ключом: UUID карты, версия драйвера, сборка ядра. При следующих запусках он
    применяется после быстрой проверки (около 30 с). Если изменились драйвер, сборка ядра или ваш начальный offset,
    карта подбирается заново.
@@ -921,13 +948,14 @@ offset (в логе `allowed -1000..1000`), подбор нашёл +240 вме�
    на той же частоте; без фиксации карта может вместо этого буститься выше, и экономия меньше.
 3. **Включите**, любой из вариантов:
    * `start.bat` (или любой `start-luckypool-*` / `start-kryptex-*`): уберите `rem` перед `set "AUTO_UV=1"`. Верхний предел —
-     `set "UV_MAX="` (пусто = +495; RTX 40/50 часто держат +450..480, RTX 30 обычно +200..360).
+     `set "UV_MAX="` (пусто = по карте: +495, RTX 20xx/GTX 16xx +225, CMP +150; RTX 40/50 часто держат +450..480, RTX 30
+     обычно +200..360). Список через запятую задаёт значение для каждой карты в порядке `DEVICES`, например `set "UV_MAX=225,495,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, диапазон в `UV_MIN` / `UV_MAX`, плюс лимит мощности и фиксация частот через `nvidia-smi`.
    * своя командная строка: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Точка старта.** Подбор начинает с offset, который сейчас стоит на карте, и ниже него не опускается. Смещение *Core Clock*
    в MSI Afterburner (и похожих программах) — это тот же самый offset: выставленное там значение станет точкой старта и
    вернётся при выходе. Не давайте Afterburner заново применять профиль во время майнинга: auto-uv увидит, что offset
-   поменял кто-то другой, и отступит на этой карте. Если offset не задан, подбор стартует с +120, на RTX 40/50 — с +200 (или с `--uv-min` / `UV_MIN`).
+   поменял кто-то другой, и отступит на этой карте. Если offset не задан, подбор стартует с +120, на RTX 40 — с +200, на RTX 50 — с +300 (или с `--uv-min` / `UV_MIN`).
 5. **Подождите.** При первом запуске подбор идёт около 15 минут на карту (все карты параллельно), майнинг начинается после
    него. Следующие запуски применяют сохранённое значение после проверки ~30 с.
 6. **Файлы** лежат в папке майнера: `uv.json` (результаты) и `uv-restore.json` (ваш исходный offset). Папка должна быть
@@ -943,7 +971,8 @@ auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
 ```
    * `auto-uv paused for this GPU for 24 h` — на найденном offset у карты была ошибка; она майнит на вашем offset, подбор
      повторится через 24 ч (или после `--uv-reset`).
-   * `start offset ... leaves no room below the cap` — ваш offset уже равен `UV_MAX` или выше; поднимите `UV_MAX`.
+   * `start offset ... leaves no room below the cap` — ваш offset уже равен `UV_MAX` (или пределу карты по умолчанию, он
+     указан в скобках) или выше; поднимите `UV_MAX`, если уверены, что карта держит больше.
    * `no safe offset above ... was found` — карта не держит больше вашего значения; ничего не меняется.
 8. **Если ПК завис или сбросился драйвер** (чёрный экран, «видеодрайвер перестал отвечать»): перезагрузитесь и запустите
    майнер снова — он сначала вернёт ваш offset из `uv-restore.json`. Если сам майнер упал на шаге подбора (в окне
@@ -978,10 +1007,13 @@ set "UV_MIN=300"
 set "UV_MAX=495"
 ```
 * **Смешанный риг:** `LOCK_CCLOCK` / `LOCK_MCLOCK` принимают по значению на карту в порядке `DEVICES`, например
-  `set "LOCK_CCLOCK=1560,2445"`. `UV_MIN` / `UV_MAX` общие для всех карт: оставьте пустыми (RTX 40/50 сами стартуют с +200)
-  или возьмите значения младшей карты.
+  `set "LOCK_CCLOCK=1560,2445"`. Для андервольта достаточно `AUTO_UV=1`: пределы выбираются по каждой карте (RTX 20xx/GTX 16xx
+  +225, CMP +150, остальные +495; RTX 40/50 сами стартуют с +200/+300). Для ручного управления `UV_MIN` / `UV_MAX` / `UV_OFFSET`
+  принимают список в том же порядке, например `set "UV_MAX=225,495,150"` (`-` = значение по умолчанию для карты). В списке должно
+  быть ровно по одному значению на карту.
 * **Быстрее подбор:** `set "UV_STEP=30"` вдвое сокращает число шагов (результат грубее). На RTX 50 больше всего времени
-  экономит высокий `UV_MIN` (около +300): карта его всё равно держит, и поиск начинается сразу оттуда. Не завышайте: если
+  экономит высокий старт (около +300): карта его всё равно держит, и поиск начинается сразу оттуда (с 1.6.2 это значение по
+  умолчанию на RTX 50). Не завышайте: если
   карта не проходит проверку уже на `UV_MIN`, подбора не будет и останется ваш offset (это видно в логе; тогда уменьшите `UV_MIN`).
 * **Offset уже известен:** `set "UV_OFFSET=480"` (а `AUTO_UV` не включать) — применится после одной быстрой проверки, без поиска.
 * **Нужен ещё лимит мощности:** используйте `start-nvidia-smi.bat` (`CCLOCK` / `MCLOCK` / `PLIMIT`, `UV_MIN` / `UV_MAX` / `UV_STEP`).
@@ -1001,13 +1033,20 @@ set "UV_MAX=495"
 | `--auto-uv` | подобрать, применить и сопровождать андервольт (как описано выше) |
 | `--uv-offset N` | применить фиксированный offset N МГц после быстрой проверки, без подбора (если проверка не прошла, остаётся ваш offset) |
 | `--uv-reset` | забыть сохранённые результаты; вместе с `--auto-uv` карты подбираются заново; без кошелька майнер просто завершается |
-| `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию 495, максимум 600; в Windows: `set "UV_MAX=480"` в `start.bat`) |
-| `--uv-min N` | offset, с которого начинается подбор и ниже которого не опускается (по умолчанию offset из HiveOS/драйвера, иначе 120) |
+| `--uv-max N` | наибольший offset, который пробует подбор (максимум 600; по умолчанию по карте: RTX 20xx / GTX 16xx 225, CMP 30HX/40HX/50HX 150, остальные 495; в Windows: `set "UV_MAX=480"` в `start.bat`) |
+| `--uv-min N` | offset, с которого начинается подбор и ниже которого не опускается (по умолчанию offset из HiveOS/драйвера, иначе 120; RTX 40 — не ниже 200, RTX 50 — не ниже 300) |
 | `--uv-step N` | шаг подбора в МГц (по умолчанию 15) |
 | `--uv-keep-last` | после неудачного шага оставить последний удачный шаг (по умолчанию — последний удачный минус один шаг) |
 | `--uv-reval-hours H` | интервал перепроверки во время майнинга (по умолчанию 6, `0` — не перепроверять) |
 | `--uv-dir DIR` | где лежат `uv.json` и `uv-restore.json` (также `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | только пишет в лог, какие карты были бы изменены (устройство CUDA → устройство NVML, шина); ничего не меняет |
+
+`--uv-max`, `--uv-min` и `--uv-offset` принимают одно значение для всех карт или список через запятую — ровно по одному
+значению на карту в порядке `--devices` (без `--devices`: GPU0, GPU1, ... как в логе; в HiveOS это порядок PCI-шины, как в
+панели). `-` в списке = значение по умолчанию для этой карты (`--uv-offset`: карта не трогается). Список неверной длины —
+ошибка, он не дополняется. Явный `--uv-max` применяется как задан, даже выше предела карты по умолчанию; тогда в логе
+предупреждение (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Пример для 2× RTX 2060 SUPER,
+3× RTX 3070 Laptop и CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (то же, что по умолчанию).
 
 **Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
 
@@ -1017,6 +1056,7 @@ set "UV_MAX=495"
 **Строки лога** (все начинаются с `auto-uv:`, так что `grep auto-uv` показывает всю историю):
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
@@ -1374,10 +1414,14 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | RTX 5070 Ti | 2445 | 锁定 `810` | +480 | 参考 |
 | RTX 5070 | 2400 | 锁定 `810` | 检查通过至 +390，更高则崩溃 | 用户报告，FreeForGemPear 1.5.1，Windows，驱动 617.14 |
 | RTX 5060、5060 Ti、5080、5090 | 1900–2500 | 锁定 `810` | +390..480 | 估计 |
-| RTX 2060 SUPER、RTX 2070/2080（含 SUPER）、GTX 1660/1650 | 1500–1650 | 锁定 `5001`（**不是 810**：Turing 在 810 下损失约 25%） | +200..260；建议 `--uv-max 225` | 参考（2060 SUPER：实测） |
-| CMP 40HX | 1400 | 锁定 `5001` | +150 | 用户矿机；CMP 40HX 在 +255 出现 Xid |
+| RTX 2060 SUPER、RTX 2070/2080（含 SUPER）、GTX 1660/1650 | 1500–1650 | 锁定 `5001`（**不是 810**：Turing 在 810 下损失约 25%） | +200..260；自 1.6.2 起 auto-uv 默认上限 +225 | 参考（2060 SUPER：实测） |
+| CMP 40HX | 1400 | 锁定 `5001` | +150；自 1.6.2 起 auto-uv 默认上限 +150 | 用户矿机；CMP 40HX 在 +255 出现 Xid |
 
-RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高；因此 auto-uv 在它们上面从 +200 开始搜索（RTX 30 从 +120）。
+RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高；因此 auto-uv 在 RTX 40 上从 +200、在 RTX 50 上从 +300 开始搜索（RTX 30 从 +120）。
+
+**混合矿机：**只需 `--auto-uv`——上限按每块显卡自动选择（自 1.6.2 起）：RTX 20xx / GTX 16xx 最高 +225，CMP 30HX/40HX/50HX
+最高 +150，其他最高 +495；启动时日志会显示每块显卡的范围（`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`）。
+如需手动控制，按 `--devices` 顺序每卡一个值：`--uv-max 225,495,150`（`-` = 该卡的默认值）。
 Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
 * HiveOS：Overclock 选项卡 → 核心频率（绝对值）、显存频率（绝对值）、功耗限制；V/F 偏移用 `--auto-uv`。
@@ -1447,7 +1491,9 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
    每个结果的每个 tile 逐位比较；比较正常挖矿尝试的命中计数；找到的结果由官方验证器在 CPU 上验证。接近极限时会出现
    驱动不报任何错误的错误结果，因此检查同时在 GPU 和 CPU 上进行。
 3. 第一次不一致、CUDA 错误、Xid 错误或卡死就结束爬升。结果为**最后一个正常步长再减一步（15 MHz 余量）**，并用更长的
-   检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +495（`--uv-max`，最多 +600；1.5.1 之前为 +300，硬上限 +400）。RTX 40/50 显卡常能稳定在 +450..480。
+   检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +495（`--uv-max`，最多 +600；1.5.1 之前为 +300，硬上限 +400）；自 1.6.2 起，未指定 `--uv-max` 时 Turing（RTX 20xx / GTX 16xx）
+   为 +225，CMP 30HX–50HX 为 +150。RTX 40/50 显卡常能稳定在 +450..480。已保存的结果若高于降低后的上限，不会原样使用：显卡在上限处运行
+   （先快速检查），已保存的结果保留，待上限再次提高时使用；若已保存的结果*正好*等于旧上限，上限提高后会重新调校。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本和内核版本为键。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动、内核版本或你的起始偏移发生变化，则重新调校。
 5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
@@ -1473,12 +1519,13 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
    `start-nvidia-smi.bat` 中用 `nvidia-smi -lgc`。锁频后，更高的偏移意味着同频下更低的电压；不锁频时显卡可能改为提升频率，节省更少。
 3. **开启**，任选其一：
    * `start.bat`（或任一 `start-luckypool-*` / `start-kryptex-*`）：删除 `set "AUTO_UV=1"` 前面的 `rem`。上限为
-     `set "UV_MAX="`（留空 = +495；RTX 40/50 常能稳定在 +450..480，RTX 30 通常 +200..360）。
+     `set "UV_MAX="`（留空 = 按显卡：+495，RTX 20xx/GTX 16xx +225，CMP +150；RTX 40/50 常能稳定在 +450..480，RTX 30 通常
+     +200..360）。逗号分隔的列表按 `DEVICES` 顺序为每卡设置一个值，例如 `set "UV_MAX=225,495,150"`。
    * `start-nvidia-smi.bat`：`AUTO_UV=1`，范围在 `UV_MIN` / `UV_MAX`，并通过 `nvidia-smi` 设置功耗限制和锁频。
    * 自己的命令行：`freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`。
 4. **起点。** 调校从显卡当前的偏移开始，且不会低于它。MSI Afterburner（或类似工具）中的 *Core Clock* 偏移就是同一个偏移：
    你在那里设置的值就是起点，退出时会恢复。挖矿期间不要让 Afterburner 重新应用配置文件：auto-uv 发现偏移被别人修改后会在
-   该卡上退让。未设置偏移时，调校从 +120 开始，RTX 40/50 从 +200 开始（或 `--uv-min` / `UV_MIN`）。
+   该卡上退让。未设置偏移时，调校从 +120 开始，RTX 40 从 +200、RTX 50 从 +300 开始（或 `--uv-min` / `UV_MIN`）。
 5. **等待。** 首次启动时每块显卡调校约 15 分钟（所有显卡并行），完成后才开始挖矿。之后的启动在约 30 秒检查后应用已保存的值。
 6. **文件**在矿工目录中：`uv.json`（结果）和 `uv-restore.json`（你原来的偏移）。该目录必须可写，所以不要把矿工放在
    `C:\Program Files`。重新调校：关闭矿工，删除 `uv.json`（或在该目录运行 `freeforgempear.exe --uv-reset`），再启动。
@@ -1491,7 +1538,7 @@ auto-uv: GPU0 (bus 04, RTX 3070) step +270: FAILED (rerun_diff: 256 transcript w
 auto-uv: GPU0 (bus 04, RTX 3070) offset +225 -> +240, 98.4 W -> 86.5 W, saved
 ```
    * `auto-uv paused for this GPU for 24 h`：显卡在找到的偏移上出错；它以你自己的偏移挖矿，24 小时后（或 `--uv-reset` 后）再次调校。
-   * `start offset ... leaves no room below the cap`：你的偏移已等于或高于 `UV_MAX`；请提高 `UV_MAX`。
+   * `start offset ... leaves no room below the cap`：你的偏移已等于或高于 `UV_MAX`（或括号中显示的显卡默认上限）；如确定显卡能承受更多，请提高 `UV_MAX`。
    * `no safe offset above ... was found`：显卡承受不了比你的值更高的偏移；不做任何修改。
 8. **如果电脑卡死或驱动重置**（黑屏、“显示驱动程序已停止响应”）：重启后再次启动矿工——它会先从 `uv-restore.json`
    恢复你的偏移。如果矿工本身在调校某一步时崩溃（窗口显示 `Miner exited (code -1073741819)`），下次启动会把这一步视为失败，只在其下方调校（自 1.5.2 起；之前会重新开始整个搜索并在同一步再次崩溃）。自 1.5.3 起还会跳过已经通过的步骤：预热后直接进行确认（约 5 分钟，而不是完整搜索）。如果某块卡反复出错，请降低 `UV_MAX` 或不要开启 `AUTO_UV`。
@@ -1521,8 +1568,9 @@ set "UV_MIN=300"
 set "UV_MAX=495"
 ```
 * **混合矿机：**`LOCK_CCLOCK` / `LOCK_MCLOCK` 按 `DEVICES` 顺序每卡一个值，例如 `set "LOCK_CCLOCK=1560,2445"`。
-  `UV_MIN` / `UV_MAX` 对所有显卡通用：留空（RTX 40/50 会自动从 +200 开始）或使用较弱显卡的值。
-* **更快调校：**`set "UV_STEP=30"` 使步数减半（结果更粗）。在 RTX 50 上，较高的 `UV_MIN`（约 +300）最省时间：显卡反正能承受，搜索直接从那里开始。不要设得过高：如果显卡在 `UV_MIN` 处就未通过检查，则不会调校，保持你自己的偏移（日志会说明；此时请降低 `UV_MIN`）。
+  降压只需 `AUTO_UV=1`：上限按每块显卡选择（RTX 20xx/GTX 16xx +225，CMP +150，其他 +495；RTX 40/50 自动从 +200/+300 开始）。
+  如需手动控制，`UV_MIN` / `UV_MAX` / `UV_OFFSET` 接受同样顺序的列表，例如 `set "UV_MAX=225,495,150"`（`-` = 该卡默认值）。列表必须每卡恰好一个值。
+* **更快调校：**`set "UV_STEP=30"` 使步数减半（结果更粗）。在 RTX 50 上，较高的起点（约 +300）最省时间：显卡反正能承受，搜索直接从那里开始（自 1.6.2 起这是 RTX 50 的默认值）。不要设得过高：如果显卡在 `UV_MIN` 处就未通过检查，则不会调校，保持你自己的偏移（日志会说明；此时请降低 `UV_MIN`）。
 * **已知道偏移：**`set "UV_OFFSET=480"`（不开启 `AUTO_UV`）——一次快速检查后直接应用，不搜索。
 * **还需要功耗限制：**使用 `start-nvidia-smi.bat`（`CCLOCK` / `MCLOCK` / `PLIMIT`，`UV_MIN` / `UV_MAX` / `UV_STEP`）。
 * **更改范围后重新调校：**在一次启动中设置 `set "EXTRA=--uv-reset"`，之后再清空。
@@ -1540,13 +1588,19 @@ set "UV_MAX=495"
 | `--auto-uv` | 查找、应用并监控降压（如上所述） |
 | `--uv-offset N` | 快速检查后应用固定偏移 N MHz，不做调校（检查失败则保持你的偏移） |
 | `--uv-reset` | 忘记已保存的结果；与 `--auto-uv` 一起使用时重新调校；没有钱包地址时矿工直接退出 |
-| `--uv-max N` | 调校尝试的最高偏移（默认 495，最多 600；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
-| `--uv-min N` | 调校的起始偏移，且不会低于该值（默认：HiveOS/驱动中的偏移，否则 120） |
+| `--uv-max N` | 调校尝试的最高偏移（最多 600；默认按显卡：RTX 20xx / GTX 16xx 225，CMP 30HX/40HX/50HX 150，其他 495；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
+| `--uv-min N` | 调校的起始偏移，且不会低于该值（默认：HiveOS/驱动中的偏移，否则 120；RTX 40 至少 200，RTX 50 至少 300） |
 | `--uv-step N` | 每步调校的 MHz（默认 15） |
 | `--uv-keep-last` | 某一步失败后保留最后一个通过的步（默认：最后通过的步再减一步） |
 | `--uv-reval-hours H` | 挖矿期间的复查间隔（默认 6，`0` 表示不复查） |
 | `--uv-dir DIR` | `uv.json` 和 `uv-restore.json` 的存放位置（也可用 `FFGP_STATE_DIR`） |
 | `--auto-uv-dry-run` | 只在日志中说明会改动哪些显卡（CUDA 设备 → NVML 设备、总线地址），不做任何改动 |
+
+`--uv-max`、`--uv-min` 和 `--uv-offset` 可以为所有显卡给一个值，或给逗号分隔的列表——按 `--devices` 顺序每卡恰好一个值
+（没有 `--devices` 时：按日志中的 GPU0、GPU1……；HiveOS 上即面板中的 PCI 总线顺序）。列表中的 `-` = 该卡的默认值
+（`--uv-offset`：不改动该卡）。长度不对的列表会报错，不会自动补齐。显式指定的 `--uv-max` 按原值使用，即使高于显卡默认上限；
+此时日志会给出警告（`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`）。2× RTX 2060 SUPER、
+3× RTX 3070 Laptop 加一块 CMP 40HX 的示例：`--auto-uv --uv-max 225,225,495,495,495,150`（与默认值相同）。
 
 **GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。
 
@@ -1556,6 +1610,7 @@ set "UV_MAX=495"
 **日志行**（都以 `auto-uv:` 开头，`grep auto-uv` 即可看到全过程）：
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (1952 reruns, cpu ok 6), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (rerun_diff: ...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved

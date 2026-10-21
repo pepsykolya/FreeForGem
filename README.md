@@ -62,6 +62,7 @@ cd freeforgempear-1.6.1
 | `--self-test` | verify the kernel and exit |
 | `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
 | `--uv-offset N` / `--uv-reset` | apply a fixed undervolt offset after a check / forget the saved undervolt results |
+| `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 30HX–50HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
 
 The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per GPU and in total,
 plus the submitted, accepted and rejected shares.
@@ -70,7 +71,8 @@ plus the submitted, accepted and rejected shares.
 `nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
 works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W. With the optional `--auto-uv` (new in 1.4.0) the miner also finds the lowest safe core voltage
 of each GPU, checking every step bit-for-bit on the GPU and on the CPU, and restores your settings on exit
-(roughly 5-10 W less per card at the same hashrate). The default rows-per-attempt `m` is auto-picked per GPU
+(roughly 5-10 W less per card at the same hashrate). Mixed rig: `--auto-uv` is enough, the limits are chosen per card
+automatically (since 1.6.2); for manual control `--uv-max 225,495,150`. The default rows-per-attempt `m` is auto-picked per GPU
 from its SM count (RTX 3070 &rarr; 47104; +0.4% at the same power), so a mixed-SM rig balances each card
 (since 1.4.7); override with `FFGP_M`.
 
