@@ -560,6 +560,10 @@ the CUDA one). Same binary, same start files, same log; the miner picks the GPU 
 **Needs:** Windows 10/11 x64 and the AMD Adrenalin driver (it brings OpenCL); no NVIDIA driver. Run any `start*.bat` as
 for NVIDIA. Self-test: `freeforgempear.exe --self-test` (checks the AMD kernel against the CPU reference, `== self-test PASSED ==`).
 
+**Busy CPU:** with AMD the miner waits for the GPU actively and runs at Above Normal priority, so a CPU miner or other load
+on all cores does not starve the GPU (33.7–33.9 instead of 32.6 TH/s next to a CPU miner on all cores). This keeps one CPU
+thread busy; `PEARL_AMD_SPIN=0` / `FFGP_PROC_PRIO=0` turn it off.
+
 **Watts** in the stats line come from the driver (ADLX, chip power, read-only). On a rig with several AMD cards the per-card
 watts may be swapped between cards (the rig total is right).
 
@@ -1134,6 +1138,10 @@ RTX 3070 (лимит 135 Вт) 14,1 FW/s при 135 Вт — столько же
 **Нужно:** Windows 10/11 x64 и драйвер AMD Adrenalin (в нём OpenCL); драйвер NVIDIA не нужен. Запуск — любой `start*.bat`,
 как для NVIDIA. Проверка: `freeforgempear.exe --self-test` (ядро AMD сверяется с эталоном на CPU, `== self-test PASSED ==`).
 
+**Занятый CPU:** с AMD майнер ждёт GPU активно и работает с приоритетом «выше среднего», поэтому CPU-майнер или другая
+нагрузка на все ядра не оставляет GPU без работы (33,7–33,9 вместо 32,6 TH/s рядом с CPU-майнером на всех ядрах). Один поток
+CPU при этом занят; `PEARL_AMD_SPIN=0` / `FFGP_PROC_PRIO=0` отключают это.
+
 **Ватты** в строке статистики — от драйвера (ADLX, мощность чипа, только чтение). На риге из нескольких карт AMD ватты
 отдельных карт могут перепутаться между картами (сумма по ригу верна).
 
@@ -1645,6 +1653,9 @@ Windows 软件包也可以在 **AMD Radeon** 显卡上挖矿，使用自有的 O
 
 **需要：** Windows 10/11 x64 和 AMD Adrenalin 驱动（自带 OpenCL）；不需要 NVIDIA 驱动。与 NVIDIA 一样运行任意 `start*.bat`。
 自检：`freeforgempear.exe --self-test`（将 AMD 内核与 CPU 参考实现比对，`== self-test PASSED ==`）。
+
+**CPU 繁忙时：** 使用 AMD 时矿工主动等待 GPU，并以“高于正常”优先级运行，因此 CPU 矿工等占满所有核心的负载不会让 GPU 断供
+（与占满所有核心的 CPU 矿工同时运行时 33.7–33.9 TH/s，而不是 32.6）。这会占用一个 CPU 线程；`PEARL_AMD_SPIN=0` / `FFGP_PROC_PRIO=0` 可关闭。
 
 统计行中的**功耗**来自驱动（ADLX，芯片功耗，只读）。在多块 AMD 显卡的矿机上，单卡功耗可能在显卡之间对调（整机总和正确）。
 
