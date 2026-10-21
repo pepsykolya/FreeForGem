@@ -360,6 +360,7 @@ fn mine(a: Args) -> Result<()> {
         v.dedup();
         v
     });
+    a.uv.check_counts(devices.len())?; // --uv-max/--uv-min/--uv-offset lists: one value per mining GPU
     let m_desc = if distinct_ms.len() == 1 {
         format!("m={}", distinct_ms[0])
     } else {
@@ -376,7 +377,7 @@ fn mine(a: Args) -> Result<()> {
     let nv = gpu::backend() == gpu::Backend::Cuda; // clocks, undervolt and power readout use NVML (NVIDIA only)
     if !nv {
         ensure!(a.lock_cclock.is_none() && a.lock_mclock.is_none() && a.moffset.is_none(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
-        ensure!(a.uv.fixed.is_none(), "--uv-offset is NVIDIA-only (NVML); with the AMD backend use --auto-uv (amduv)");
+        ensure!(!a.uv.fixed.is_set(), "--uv-offset is NVIDIA-only (NVML); with the AMD backend use --auto-uv (amduv)");
     }
     // AMD: --auto-uv runs the separate tuner amduv (apply the saved result, tune first if there is none); its guard process puts
     // the owner's settings back when the miner exits
@@ -673,9 +674,12 @@ OPTIONS:
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL eff|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
-    --uv-max N           highest offset the tuner tries (default 495, at most 600)
+    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx 225,
+                         CMP 30HX/40HX/50HX 150, all others 495
     --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120;
-                         RTX 40/50: at least 200)
+                         RTX 40: at least 200, RTX 50: at least 300)
+                         --uv-max, --uv-min and --uv-offset take one value for all GPUs, or one per GPU in --devices
+                         order (without --devices: GPU0, GPU1, ...), e.g. --uv-max 225,495,150; '-' = that GPU's default
     --uv-step N          MHz per tuning step (default 15)
     --uv-keep-last       after a failed step keep the last good step (default: last good step minus one step)
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
@@ -749,6 +753,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
         clocks::restore_all();
     });
     let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
+    a.uv.fixed.check_count(n, "--uv-offset")?;
     let state_dir = a
         .uv
         .dir
@@ -773,7 +778,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
             batch: a.cmfd_batch,
             per_gpu_workers: a.per_gpu_workers,
             skip_prepare: a.cmfd_skip_prepare,
-            uv_offset: a.uv.fixed,
+            uv_offset: a.uv.fixed.clone(),
             state_dir,
             clocks,
         },
@@ -851,9 +856,9 @@ fn main() -> Result<()> {
                 a.uv.dry_run = true;
             }
             "--uv-reset" => a.uv.reset = true,
-            "--uv-offset" => a.uv.fixed = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-offset needs an integer (MHz)"))?),
-            "--uv-max" => a.uv.max_offset = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-max needs an integer (MHz)"))?,
-            "--uv-min" => a.uv.min_offset = Some(val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-min needs an integer (MHz)"))?),
+            "--uv-offset" => a.uv.fixed = uv::PerGpu::parse(&val()?, "--uv-offset")?,
+            "--uv-max" => a.uv.max_offset = uv::PerGpu::parse(&val()?, "--uv-max")?,
+            "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,
             "--uv-step" => a.uv.step = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-step needs a positive integer (MHz)"))?,
             "--uv-keep-last" => a.uv.keep_last_good = true,
             "--lock-cclock" => a.lock_cclock = Some(val()?),
@@ -887,6 +892,13 @@ fn main() -> Result<()> {
         }
     }
     let _ = uv_given;
+    // undervolt options first: a typo must not wait for the GPU library
+    if child.is_none() {
+        a.uv.validate()?;
+        if let Some(d) = &a.devices {
+            a.uv.check_counts(d.len())?; // without --devices: checked once the GPUs are counted
+        }
+    }
     // AMD (OpenCL) library: busy-wait for attempt completion unless the user chose otherwise.  Must be set before the
     // library is loaded (its CRT copies the environment at load); the CUDA library does not read it.  Under full CPU load
     // from other Normal-priority processes (e.g. a CPU miner) a blocking wait wakes the feeding thread late and the
@@ -898,13 +910,6 @@ fn main() -> Result<()> {
     if let Some(mut c) = child {
         c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
         std::process::exit(uv::check_child(&c));
-    }
-    ensure!(!(a.uv.auto && a.uv.fixed.is_some()), "--auto-uv and --uv-offset exclude each other");
-    ensure!(a.uv.step >= 1, "--uv-step must be at least 1 MHz");
-    ensure!(a.uv.max_offset >= a.uv.step, "--uv-max must be at least one step (--uv-step {})", a.uv.step);
-    ensure!(a.uv.max_offset <= uv::HARD_CAP, "--uv-max must not exceed {}", uv::HARD_CAP);
-    if let Some(mn) = a.uv.min_offset {
-        ensure!(mn >= 0 && mn <= a.uv.max_offset, "--uv-min must be between 0 and --uv-max ({})", a.uv.max_offset);
     }
     ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
     if a.uv.reset {

@@ -26,24 +26,98 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const STEP: i32 = 15;
-const NEWGEN_MIN: i32 = 200; // default --uv-min on RTX 40 / 50
+const NEWGEN_MIN: i32 = 200; // default search start on RTX 40 (compute capability 8.9)
+const BLACKWELL_MIN: i32 = 300; // default search start on RTX 50 (sm_120): they hold +390..480, starting at +300 saves ~7 steps
 pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-offset say (the driver range c.hi caps it too)
+pub const DEFAULT_MAX: i32 = 495; // default --uv-max (RTX 30 / 40 / 50 and everything not listed in card_defaults)
+const TURING_MAX: i32 = 225; // default --uv-max on Turing (RTX 20 / GTX 16, sm_75): +200..260 measured, 225 keeps a margin
+const CMP_MAX: i32 = 150; // default --uv-max on Turing CMP (30HX / 40HX / 50HX): a CMP 40HX hit Xid at +255, rigs run +150
 const DISABLE_SECS: u64 = 24 * 3600;
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
 const CHECK_MB: u64 = 2400;
 const CHECK_RESERVE_MB: u64 = 600;
 
+/// A per-GPU option (`--uv-max`, `--uv-min`, `--uv-offset`): not given, one value for every GPU, or a comma list with one
+/// value per mining GPU, in `--devices` order (without `--devices`: GPU0, GPU1, ... as the miner numbers them; on HiveOS
+/// that is the PCI bus order of the dashboard).  In a list `-` (or an empty field) means "the default for this GPU".
+/// A list must have exactly one value per mining GPU (like --lock-cclock): a shorter list is an error, never extended,
+/// because extending the last value could give a weak card the limit of a strong one.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum PerGpu {
+    #[default]
+    Unset,
+    All(i32),
+    List(Vec<Option<i32>>),
+}
+
+impl PerGpu {
+    pub fn parse(raw: &str, flag: &str) -> Result<PerGpu> {
+        let num = |s: &str| -> Result<i32> {
+            let t = s.strip_prefix('+').unwrap_or(s);
+            t.parse::<i32>().ok().filter(|_| !t.starts_with('+')).ok_or_else(|| anyhow::anyhow!("{flag}: '{s}' is not a whole number of MHz"))
+        };
+        let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
+        if parts.len() == 1 {
+            return match parts[0] {
+                "" => anyhow::bail!("{flag} needs a value (one number, or a comma list with one value per GPU)"),
+                "-" | "auto" => Ok(PerGpu::Unset),
+                s => Ok(PerGpu::All(num(s)?)),
+            };
+        }
+        let v = parts.iter().map(|&s| if s.is_empty() || s == "-" || s == "auto" { Ok(None) } else { num(s).map(Some) }).collect::<Result<Vec<_>>>()?;
+        Ok(PerGpu::List(v))
+    }
+
+    /// Value for the GPU at position `i` of the mining device list.
+    pub fn get(&self, i: usize) -> Option<i32> {
+        match self {
+            PerGpu::Unset => None,
+            PerGpu::All(v) => Some(*v),
+            PerGpu::List(l) => l.get(i).copied().flatten(),
+        }
+    }
+
+    pub fn is_set(&self) -> bool {
+        match self {
+            PerGpu::Unset => false,
+            PerGpu::All(_) => true,
+            PerGpu::List(l) => l.iter().any(Option::is_some),
+        }
+    }
+
+    /// every explicit value
+    pub fn values(&self) -> Vec<i32> {
+        match self {
+            PerGpu::Unset => vec![],
+            PerGpu::All(v) => vec![*v],
+            PerGpu::List(l) => l.iter().flatten().copied().collect(),
+        }
+    }
+
+    /// A list must name every mining GPU (n = number of mining GPUs).
+    pub fn check_count(&self, n: usize, flag: &str) -> Result<()> {
+        if let PerGpu::List(l) = self {
+            ensure!(
+                l.len() == n,
+                "{flag}: {} values for {n} mining GPU(s); give one value for all, or exactly one per GPU in --devices order ('-' = the default for that GPU)",
+                l.len()
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Opts {
     pub auto: bool,
-    pub fixed: Option<i32>,
+    pub fixed: PerGpu, // --uv-offset
     pub dry_run: bool,
     pub reset: bool,
-    pub max_offset: i32,
-    pub min_offset: Option<i32>, // --uv-min: start/floor of the search (default: see Card::default_start)
-    pub step: i32,               // --uv-step: MHz per step (default 15)
-    pub keep_last_good: bool,    // --uv-keep-last: after a failed step keep the last good step (not last good - one step)
+    pub max_offset: PerGpu,   // --uv-max; a GPU without a value gets its card default (card_defaults)
+    pub min_offset: PerGpu,   // --uv-min: start/floor of the search (no value: see Card::start)
+    pub step: i32,            // --uv-step: MHz per step (default 15)
+    pub keep_last_good: bool, // --uv-keep-last: after a failed step keep the last good step (not last good - one step)
     pub dir: Option<PathBuf>,
     pub reval_hours: f64,
     pub warmup_secs: u32,
@@ -53,13 +127,86 @@ pub struct Opts {
 
 impl Default for Opts {
     fn default() -> Opts {
-        Opts { auto: false, fixed: None, dry_run: false, reset: false, max_offset: 495, min_offset: None, step: STEP, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
+        Opts { auto: false, fixed: PerGpu::Unset, dry_run: false, reset: false, max_offset: PerGpu::Unset, min_offset: PerGpu::Unset, step: STEP, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120 }
     }
 }
 
 impl Opts {
     pub fn enabled(&self) -> bool {
-        self.auto || self.fixed.is_some()
+        self.auto || self.fixed.is_set()
+    }
+
+    /// Checks of the values that need no GPU (at argument parsing).
+    pub fn validate(&self) -> Result<()> {
+        ensure!(!(self.auto && self.fixed.is_set()), "--auto-uv and --uv-offset exclude each other");
+        ensure!(self.step >= 1, "--uv-step must be at least 1 MHz");
+        for v in self.max_offset.values() {
+            ensure!(v >= self.step, "--uv-max {v}: must be at least one step (--uv-step {})", self.step);
+            ensure!(v <= HARD_CAP, "--uv-max {v}: must not exceed {HARD_CAP}");
+        }
+        for v in self.min_offset.values() {
+            ensure!((0..=HARD_CAP).contains(&v), "--uv-min {v}: must be between 0 and {HARD_CAP}");
+        }
+        for v in self.fixed.values() {
+            ensure!((-1000..=HARD_CAP).contains(&v), "--uv-offset {v}: must be between -1000 and +{HARD_CAP}");
+        }
+        // min <= max wherever both are given for the same GPU
+        let len = |p: &PerGpu| if let PerGpu::List(l) = p { l.len() } else { 1 };
+        let n = len(&self.max_offset).max(len(&self.min_offset));
+        for i in 0..n {
+            if let (Some(mn), Some(mx)) = (self.min_offset.get(i), self.max_offset.get(i)) {
+                ensure!(mn <= mx, "--uv-min {mn} is above --uv-max {mx}{}", if n > 1 { format!(" (value {} of the list)", i + 1) } else { String::new() });
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks that need the number of mining GPUs.
+    pub fn check_counts(&self, n: usize) -> Result<()> {
+        self.max_offset.check_count(n, "--uv-max")?;
+        self.min_offset.check_count(n, "--uv-min")?;
+        self.fixed.check_count(n, "--uv-offset")
+    }
+}
+
+/// Built-in limits of one card type, used where --uv-max / --uv-min give no value for that GPU.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Defaults {
+    pub max: i32,
+    pub max_src: &'static str,
+    /// lowest search start (the search starts at max(current offset, this)); None: the current offset, else +120
+    pub start_floor: Option<i32>,
+    pub start_src: &'static str,
+}
+
+/// Card type from the NVML name and compute capability (`cc`; None when NVML does not report it).
+///  * Turing CMP (30HX / 40HX / 50HX, sm_75): max +150 (a CMP 40HX hit Xid at +255; user rigs run +150)
+///  * Turing (RTX 20xx / GTX 16xx, sm_75): max +225 (+200..260 measured on a 2060 SUPER)
+///  * RTX 50 (Blackwell, sm_120): search starts at +300 at least (they hold +390..480; a shorter search)
+///  * RTX 40 (Ada, sm_89): search starts at +200 at least
+///  * everything else (RTX 30, Ampere CMP 70HX / 90HX): max +495, start at the current offset or +120
+pub fn card_defaults(name: &str, cc: Option<(i32, i32)>) -> Defaults {
+    let n = name.to_ascii_uppercase();
+    let words: Vec<&str> = n.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let cmp = words.contains(&"CMP");
+    // the CMP 30HX/40HX/50HX are Turing; CMP 70HX/90HX are Ampere (sm_86), CMP 170HX is GA100 (sm_80)
+    let ampere_cmp = ["70HX", "90HX", "170HX"].iter().any(|m| words.contains(m));
+    let turing_name = n.contains("RTX 20") || n.contains("GTX 16") || n.contains("TITAN RTX") || n.contains("QUADRO RTX") || words.contains(&"T4");
+    let turing = match cc {
+        Some(c) => c == (7, 5),
+        None => turing_name || (cmp && !ampere_cmp), // no compute capability: the name decides, a CMP counts as Turing
+    };
+    let base = Defaults { max: DEFAULT_MAX, max_src: "default", start_floor: None, start_src: "current offset or +120" };
+    if turing && cmp {
+        Defaults { max: CMP_MAX, max_src: "CMP default", ..base }
+    } else if turing {
+        Defaults { max: TURING_MAX, max_src: "Turing default", ..base }
+    } else if cc.is_some_and(|c| c >= (12, 0)) {
+        Defaults { start_floor: Some(BLACKWELL_MIN), start_src: "RTX 50 default", ..base }
+    } else if cc.is_some_and(|c| c >= (8, 9)) {
+        Defaults { start_floor: Some(NEWGEN_MIN), start_src: "RTX 40 default", ..base }
+    } else {
+        base
     }
 }
 
@@ -160,14 +307,15 @@ struct Entry {
     verified_at: u64,
     disabled_until: u64,
     refs: Vec<String>,
-    m: usize, // rows of A per attempt the transcript digests were taken at
+    m: usize,   // rows of A per attempt the transcript digests were taken at
+    cap: i32,   // the upper limit (--uv-max or the card default) of the tuning that found `offset`; 0 = unknown (before 1.6.2)
 }
 
 impl Entry {
     fn to_json(&self) -> Value {
         json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
                "offset": self.offset, "clk_mhz": self.clk, "watts_before": self.w_before, "watts_after": self.w_after,
-               "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until, "refs": self.refs, "m": self.m})
+               "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until, "refs": self.refs, "m": self.m, "cap": self.cap})
     }
 
     fn from_json(v: &Value) -> Option<Entry> {
@@ -186,6 +334,7 @@ impl Entry {
             disabled_until: v["disabled_until"].as_u64().unwrap_or(0),
             refs: v["refs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
             m: v["m"].as_u64().unwrap_or(0) as usize,
+            cap: v["cap"].as_i64().unwrap_or(0) as i32,
         })
     }
 }
@@ -240,7 +389,8 @@ pub fn recover(o: &Opts) {
             return;
         }
     }
-    lg(format!("a previous run did not exit cleanly ({}): restoring the owner's offset", rp.display()));
+    let who = v["pid"].as_u64().map_or(String::new(), |p| format!(", pid {p}"));
+    lg(format!("a previous run{who} did not exit cleanly ({}): putting back the offsets it left changed", rp.display()));
     let nv = match Nvml::load() {
         Ok(n) => n,
         Err(e) => {
@@ -251,23 +401,26 @@ pub fn recover(o: &Opts) {
     let mut all_ok = true;
     for g in v["gpus"].as_array().into_iter().flatten() {
         let (bus, uuid, orig) = (g["bus"].as_str().unwrap_or(""), g["uuid"].as_str().unwrap_or(""), g["orig_offset"].as_i64().unwrap_or(0) as i32);
+        let name = g["name"].as_str().map_or(String::new(), |n| format!(", {}", short_name(n)));
         let res: Result<String> = (|| {
             let d = nv.by_bus(bus)?;
             ensure!(nv.uuid(d)? == uuid, "UUID at bus {bus} differs from the saved one");
             let (mode, cur, _, _) = nv.probe_offset(d)?;
-            if cur != orig {
-                nv.set_offset(d, mode, orig)?;
-                std::thread::sleep(Duration::from_millis(150));
-                let rb = nv.get_offset(d, mode)?;
-                ensure!(rb == orig, "read-back {rb} != {orig}");
+            if cur == orig {
+                return Ok(format!("already at the owner's offset {}", signed(orig)));
             }
-            Ok(format!("offset {} -> {} restored", signed(cur), signed(orig)))
+            nv.set_offset(d, mode, orig)?;
+            std::thread::sleep(Duration::from_millis(150));
+            let rb = nv.get_offset(d, mode)?;
+            ensure!(rb == orig, "read-back {rb} != {orig}");
+            // worded unlike the shutdown line ("GPUn ... restored"): this is the previous run's card, put back at this start
+            Ok(format!("offset {} -> {} put back (left changed by the previous run)", signed(cur), signed(orig)))
         })();
         match res {
-            Ok(m) => lg(format!("(bus {}) {m}", short_bus(bus))),
+            Ok(m) => lg(format!("(bus {}{name}) {m}", short_bus(bus))),
             Err(e) => {
                 all_ok = false;
-                lg(format!("(bus {}) restore FAILED: {e:#}", short_bus(bus)));
+                lg(format!("(bus {}{name}) restore FAILED: {e:#}", short_bus(bus)));
             }
         }
     }
@@ -290,7 +443,12 @@ pub struct Card {
     orig: i32,
     lo: i32,
     hi: i32,
-    newgen: bool, // RTX 40 / 50 (compute capability 8.9 and newer): they hold higher offsets, so the search starts higher
+    max: i32,              // upper limit of the search on this card: --uv-max for it, else its card default; <= HARD_CAP, <= hi
+    max_wanted: i32,       // `max` before the driver range cut it
+    max_src: &'static str, // where `max` comes from ("--uv-max", "CMP default", ...)
+    max_default: Defaults, // the card type's built-in limits (for the warning when --uv-max is above them)
+    min: Option<i32>,      // --uv-min for this card
+    fixed: Option<i32>,    // --uv-offset for this card
     m: usize, // rows of A this card mines (its SM group); the undervolt check must stress it at this m
     cur: AtomicI32,
     owned: AtomicBool, // we still own the setting (false after tuning gave up or somebody else changed it)
@@ -306,17 +464,50 @@ impl Card {
         format!("GPU{} (bus {}, {})", self.dev, short_bus(&self.bus), short_name(&self.name))
     }
 
-    /// search base/floor without --uv-min: the offset HiveOS/NVML already has, else 120;
-    /// on RTX 40 / 50 at least +200 (they hold +300..480, starting low only costs tuning time)
-    fn default_start(&self) -> i32 {
-        if self.newgen {
-            self.orig.max(NEWGEN_MIN)
+    /// search base/floor: --uv-min for this card; without it the offset HiveOS/NVML already has, else 120;
+    /// on RTX 40 at least +200, on RTX 50 at least +300 (they hold +300..480, starting low only costs tuning time).
+    /// Returns the offset and where it comes from (for the log).
+    fn start(&self) -> (i32, &'static str) {
+        if let Some(m) = self.min {
+            (m, "--uv-min")
+        } else if let Some(f) = self.max_default.start_floor.filter(|&f| f < self.max) {
+            // (a default floor at or above a lower --uv-max is dropped: the search then starts as on other cards)
+            (self.orig.max(f), self.max_default.start_src)
         } else if self.orig != 0 {
-            self.orig
+            (self.orig, "current offset")
         } else {
-            120
+            (120, "default")
         }
     }
+
+    /// One log line with the offset range (or the fixed offset) this card gets, and a warning when an explicit value is
+    /// above the card type's safe default.
+    fn range_lines(&self, auto: bool) -> Vec<String> {
+        let mut out = Vec::new();
+        let d = self.max_default;
+        if let Some(f) = self.fixed {
+            out.push(format!("{}: fixed offset {} (--uv-offset)", self.label(), signed(f.min(HARD_CAP))));
+            if d.max < DEFAULT_MAX && f > d.max {
+                out.push(format!("{}: WARNING --uv-offset {} is above the recommended +{} for this card ({}); applied as given", self.label(), signed(f), d.max, d.max_src));
+            }
+            return out;
+        }
+        if !auto {
+            out.push(format!("{}: no --uv-offset for this GPU, left alone", self.label()));
+            return out;
+        }
+        let (start, ssrc) = self.start();
+        let hi_note = if self.max < self.max_wanted { format!(", driver limit +{}", self.hi) } else { String::new() };
+        out.push(format!("{}: range {}..{} (max: {}{hi_note}; start: {ssrc})", self.label(), signed(start.clamp(0, self.max)), signed(self.max), self.max_src));
+        if self.max_src == "--uv-max" && d.max < DEFAULT_MAX && self.max_wanted > d.max {
+            out.push(format!("{}: WARNING --uv-max {} is above the recommended +{} for this card ({}); used as given", self.label(), signed(self.max_wanted), d.max, d.max_src));
+        }
+        if start > self.max {
+            out.push(format!("{}: the start {} ({ssrc}) is above the limit {}: this GPU is not tuned", self.label(), signed(start), signed(self.max)));
+        }
+        out
+    }
+
 }
 
 pub struct Manager {
@@ -436,11 +627,10 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     if !o.enabled() {
         return None;
     }
-    if let Some(f) = o.fixed {
-        if !(-1000..=HARD_CAP).contains(&f) {
-            lg(format!("--uv-offset {f} is outside the allowed range (up to +{HARD_CAP}); undervolting disabled"));
-            return None;
-        }
+    // main() validated the values and the list lengths; a wrong one here only disables undervolting
+    if let Err(e) = o.validate().and_then(|_| o.check_counts(devices.len())) {
+        lg(format!("{e:#}; undervolting disabled"));
+        return None;
     }
     let dir = state_dir(o);
     if !writable_dir(&dir) {
@@ -459,8 +649,8 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     let total = nv.device_count().unwrap_or(0);
     lg(format!("NVML loaded, driver {driver}, kernel {kernel}, {total} GPU(s) in the system; only the {} mining device(s) below are touched", devices.len()));
     let mut cards = Vec::new();
-    for &dev in devices {
-        match map_card(&nv, dev) {
+    for (pos, &dev) in devices.iter().enumerate() {
+        match map_card(&nv, dev, pos, o) {
             Ok(c) => {
                 let idx = nv.index(c.nv).map_or("?".to_string(), |i| i.to_string());
                 lg(format!("{}: CUDA device {dev} -> NVML index {idx}, PCI {}, {}, current offset {} (allowed {}..{})", c.label(), c.bus, c.uuid, signed(c.orig), c.lo, c.hi));
@@ -469,15 +659,29 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
             Err(e) => lg(format!("GPU{dev}: cannot manage ({e:#}); left alone")),
         }
     }
+    for c in &cards {
+        for l in c.range_lines(o.auto) {
+            lg(l);
+        }
+    }
+    // with a --uv-offset list, a GPU without a value is not touched at all
+    cards.retain(|c| o.auto || c.fixed.is_some());
+    if cards.is_empty() {
+        return None;
+    }
     if cards.is_empty() {
         lg("no GPU can be managed (V/F offset unavailable or no permission?); mining at the current clocks and voltage");
         return None;
     }
     if o.dry_run {
         for c in &cards {
-            let start = o.min_offset.unwrap_or(c.default_start());
+            if let Some(f) = c.fixed {
+                lg(format!("DRY RUN: would set {} (NVML handle of PCI {}) to the fixed offset {}; nothing is changed", c.label(), c.bus, signed(f.min(HARD_CAP))));
+                continue;
+            }
+            let start = c.start().0.clamp(0, c.max);
             let first = start + o.step;
-            lg(format!("DRY RUN: would change {} (NVML handle of PCI {}): start {}, {} -> {} ... up to {}; nothing is changed", c.label(), c.bus, signed(start), signed(start), signed(first), signed(o.max_offset.min(c.hi))));
+            lg(format!("DRY RUN: would change {} (NVML handle of PCI {}): start {}, {} -> {} ... up to {}; nothing is changed", c.label(), c.bus, signed(start), signed(start), signed(first), signed(c.max)));
         }
         return None;
     }
@@ -543,7 +747,8 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     Some((m, guard))
 }
 
-fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
+/// `pos`: position of `dev` in the mining device list (the index into the per-GPU option lists).
+fn map_card(nv: &Nvml, dev: i32, pos: usize, o: &Opts) -> Result<Card> {
     let bus = gpu::device_pci_bus_id(dev)?;
     let cuda_uuid = gpu::device_uuid(dev)?;
     let cuda_name = gpu::device_name(dev);
@@ -557,27 +762,58 @@ fn map_card(nv: &Nvml, dev: i32) -> Result<Card> {
     let name = nv.name(h).unwrap_or_else(|_| cuda_name.clone());
     ensure!(name == cuda_name, "name mismatch: NVML {name:?}, CUDA {cuda_name:?}");
     let (mode, cur, lo, hi) = nv.probe_offset(h)?;
-    let newgen = nv.compute_capability(h).is_some_and(|cc| cc >= (8, 9));
-    Ok(Card {
-        dev,
-        name,
-        bus,
-        uuid,
-        nv: h,
-        mode,
-        orig: cur,
-        lo,
-        hi,
-        newgen,
-        m: crate::mining::device_m(gpu::sm_count(dev)),
-        cur: AtomicI32::new(cur),
+    let cc = nv.compute_capability(h);
+    let m = crate::mining::device_m(gpu::sm_count(dev));
+    Ok(new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, lo, hi, cc, m }, pos, o))
+}
+
+/// What NVML/CUDA tell about one mining GPU.
+struct CardHw {
+    dev: i32,
+    name: String,
+    bus: String,
+    uuid: String,
+    nv: Dev,
+    mode: OffMode,
+    cur: i32,
+    lo: i32,
+    hi: i32,
+    cc: Option<(i32, i32)>,
+    m: usize,
+}
+
+/// The card with its limits: --uv-max / --uv-min / --uv-offset at position `pos` of the lists, else the card type's defaults.
+fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
+    let def = card_defaults(&hw.name, hw.cc);
+    let (max_wanted, max_src) = match o.max_offset.get(pos) {
+        Some(v) => (v.min(HARD_CAP), "--uv-max"),
+        None => (def.max, def.max_src),
+    };
+    Card {
+        dev: hw.dev,
+        name: hw.name,
+        bus: hw.bus,
+        uuid: hw.uuid,
+        nv: hw.nv,
+        mode: hw.mode,
+        orig: hw.cur,
+        lo: hw.lo,
+        hi: hw.hi,
+        max: max_wanted.min(hw.hi),
+        max_wanted,
+        max_src,
+        max_default: def,
+        min: o.min_offset.get(pos),
+        fixed: o.fixed.get(pos),
+        m: hw.m,
+        cur: AtomicI32::new(hw.cur),
         owned: AtomicBool::new(true),
         bad_seen: Mutex::new(0),
         reval_busy: AtomicBool::new(false),
         next_reval: Mutex::new(Instant::now()),
         next_readback: Mutex::new(Instant::now() + Duration::from_secs(30)),
         last_good: AtomicI32::new(i32::MIN),
-    })
+    }
 }
 
 impl Manager {
@@ -722,7 +958,7 @@ impl Manager {
         if let Some(k) = crashed {
             lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(k.at)));
         }
-        if let Some(f) = self.opts.fixed {
+        if let Some(f) = c.fixed {
             if crashed.is_some_and(|k| k.at == f.min(HARD_CAP)) {
                 lg(format!("{} not applying the fixed offset {} this time; keeping {} (lower --uv-offset)", c.label(), signed(f), signed(c.orig)));
                 return Ok(());
@@ -754,6 +990,8 @@ impl Manager {
             } else if e.offset <= c.orig {
                 lg(format!("{} no safe offset above {} was found when tuned; keeping it (--uv-reset to tune again)", c.label(), signed(c.orig)));
                 return Ok(());
+            } else if saved_vs_limit(e.offset, e.cap, c.max) == Saved::Retune {
+                lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning again", c.label(), signed(e.cap), signed(c.max), signed(e.offset)));
             } else {
                 return self.apply_saved(c, e);
             }
@@ -786,6 +1024,9 @@ impl Manager {
 
     fn apply_saved(&self, c: &Card, e: &Entry) -> Result<()> {
         let before = c.cur.load(Ordering::Relaxed);
+        if saved_vs_limit(e.offset, e.cap, c.max) == Saved::Clamp {
+            return self.apply_clamped(c, e);
+        }
         // verified recently (within the re-validation interval, same driver/kernel/m): apply it right away, so a restart
         // does not cost ~30 s of mining per GPU; the periodic re-validation and the rejected-share guard still cover it
         let fresh = self.opts.reval_hours > 0.0
@@ -822,11 +1063,36 @@ impl Manager {
         Ok(())
     }
 
+    /// The saved offset is above this run's limit (--uv-max lowered, or the new per-card default): run at the limit instead.
+    /// A lower offset than a verified one only raises the voltage, but it still gets the quick check. The saved result is
+    /// left as it is (it was found with the higher limit and is used again when the limit goes back up).
+    fn apply_clamped(&self, c: &Card, e: &Entry) -> Result<()> {
+        let before = c.cur.load(Ordering::Relaxed);
+        let t = c.max;
+        if t <= c.orig {
+            lg(format!("{} saved offset {} is above the limit {} ({}), which is not above your offset {}: keeping {}", c.label(), signed(e.offset), signed(t), c.max_src, signed(c.orig), signed(c.orig)));
+            return Ok(());
+        }
+        self.set_checked(c, t)?;
+        std::thread::sleep(Duration::from_secs(3));
+        let r = self.run_check(c, &self.quick_spec(if e.m == c.m { e.refs.clone() } else { vec![] }));
+        if r.ok {
+            lg(format!("{} offset {} -> {}: the saved {} is above the limit {} ({}), limited to it; quick check passed ({} reruns, cpu ok {})", c.label(), signed(before), signed(t), signed(e.offset), signed(t), c.max_src, r.reruns, r.cpu_ok));
+        } else {
+            lg(format!("{} offset {} (the limit, below the saved {}) FAILED the quick check ({}); back to {}, auto-uv paused for 24 h", c.label(), signed(t), signed(e.offset), r.reason, signed(c.orig)));
+            self.restore_card(c);
+            let mut e2 = e.clone();
+            e2.disabled_until = now() + DISABLE_SECS;
+            self.save_entry(c, &e2);
+        }
+        Ok(())
+    }
+
     fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<Crash>) -> Result<()> {
         let step = self.opts.step;
-        let mut cap = self.opts.max_offset.min(HARD_CAP).min(c.hi);
+        let mut cap = c.max;
         if let Some(x) = crashed.map(|k| k.at) {
-            let want = self.opts.min_offset.unwrap_or(c.default_start()).clamp(0, cap);
+            let want = c.start().0.clamp(0, cap);
             if x - step < want + step {
                 // it died at (or one step above) the start: nothing left to search; remember "nothing above your offset"
                 // so the next starts do not try again (--uv-reset to retry)
@@ -840,10 +1106,10 @@ impl Manager {
             cap = cap.min(x - step);
             lg(format!("{} tuning again below the crash: up to {}", c.label(), signed(cap)));
         }
-        // search base/floor: --uv-min, else Card::default_start; never above the cap
-        let start = self.opts.min_offset.unwrap_or(c.default_start()).clamp(0, cap);
+        // search base/floor: --uv-min for this card, else its default (Card::start); never above the cap
+        let start = c.start().0.clamp(0, cap);
         if start + step > cap {
-            lg(format!("{} start offset {} leaves no room below the cap {}; nothing to do", c.label(), signed(start), signed(cap)));
+            lg(format!("{} start offset {} leaves no room below the cap {} ({}); nothing to do", c.label(), signed(start), signed(cap), c.max_src));
             return Ok(());
         }
         lg(format!("{} tuning: {} s warm-up at {}, then +{step} MHz steps up to {} ({} s each)", c.label(), self.opts.warmup_secs, signed(start), signed(cap), self.opts.step_secs));
@@ -939,6 +1205,7 @@ impl Manager {
         }
         let mut e = self.new_entry(c);
         e.offset = fin;
+        e.cap = c.max;
         e.refs = refs;
         e.m = c.m;
         e.clk = base.clk.unwrap_or(0);
@@ -1266,9 +1533,12 @@ impl Manager {
                     lg(format!("{} re-validation at {}: ok ({} reruns, cpu ok {}), {}", c.label(), signed(cur), r.reruns, r.cpu_ok, fmt_w(r.watts)));
                     if c.cur.load(Ordering::Relaxed) == cur {
                         let mut e = self.entry(c).unwrap_or_else(|| self.new_entry(c));
-                        e.offset = cur;
-                        e.verified_at = now();
-                        self.save_entry(c, &e);
+                        // running below the saved result because of the limit (apply_clamped): the saved one stays as it is
+                        if e.offset <= cur {
+                            e.offset = cur;
+                            e.verified_at = now();
+                            self.save_entry(c, &e);
+                        }
                     }
                     break;
                 }
@@ -1279,6 +1549,25 @@ impl Manager {
             lg(format!("{} re-validation skipped (the mining thread did not pause)", c.label()));
         }
         gs.pause.store(false, Ordering::SeqCst);
+    }
+}
+
+/// What a saved result means under this run's limit (`max`: --uv-max for the card, or its default).
+#[derive(Debug, PartialEq)]
+enum Saved {
+    Apply,  // within the limit: apply it as saved
+    Clamp,  // above the limit (the limit was lowered): run at the limit, keep the saved result for later
+    Retune, // the saved result is the old limit itself (no failing step below it) and the limit is higher now
+}
+
+/// `cap`: the limit the saved result was tuned with (0 = unknown, results of 1.6.1 and older: never re-tuned for it).
+fn saved_vs_limit(offset: i32, cap: i32, max: i32) -> Saved {
+    if offset > max {
+        Saved::Clamp
+    } else if cap > 0 && max > cap && offset >= cap {
+        Saved::Retune
+    } else {
+        Saved::Apply
     }
 }
 
@@ -1490,4 +1779,234 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     cpu!(1002);
     let refs: Vec<String> = refs.into_iter().map(|r| r.unwrap_or_default()).collect();
     Ok((true, format!("UVRESULT ok=1 reruns={reruns} mined={mined} cpu_ok={cpu_ok} secs={:.1} refs={}", t0.elapsed().as_secs_f64(), refs.join(","))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_gpu_parse() {
+        assert_eq!(PerGpu::parse("495", "--uv-max").unwrap(), PerGpu::All(495));
+        assert_eq!(PerGpu::parse("+225", "--uv-max").unwrap(), PerGpu::All(225));
+        assert_eq!(PerGpu::parse(" 150 ", "--uv-max").unwrap(), PerGpu::All(150));
+        assert_eq!(PerGpu::parse("-", "--uv-max").unwrap(), PerGpu::Unset);
+        assert_eq!(PerGpu::parse("auto", "--uv-max").unwrap(), PerGpu::Unset);
+        assert_eq!(PerGpu::parse("-100", "--uv-offset").unwrap(), PerGpu::All(-100));
+        assert_eq!(
+            PerGpu::parse("225,225,495,495,495,150", "--uv-max").unwrap(),
+            PerGpu::List(vec![Some(225), Some(225), Some(495), Some(495), Some(495), Some(150)])
+        );
+        assert_eq!(PerGpu::parse("150, +330", "--uv-max").unwrap(), PerGpu::List(vec![Some(150), Some(330)]));
+        assert_eq!(PerGpu::parse("225,-,150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
+        assert_eq!(PerGpu::parse("225,,150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
+        assert_eq!(PerGpu::parse("-50,-", "--uv-offset").unwrap(), PerGpu::List(vec![Some(-50), None]));
+        for bad in ["", "abc", "1.5", "150,abc", "150;225", "150 225", "++150"] {
+            assert!(PerGpu::parse(bad, "--uv-max").is_err(), "{bad:?} must be rejected");
+        }
+        assert!(format!("{:#}", PerGpu::parse("150,x", "--uv-max").unwrap_err()).contains("--uv-max: 'x'"));
+    }
+
+    #[test]
+    fn per_gpu_get_and_count() {
+        let l = PerGpu::parse("225,-,150", "--uv-max").unwrap();
+        assert_eq!((l.get(0), l.get(1), l.get(2), l.get(3)), (Some(225), None, Some(150), None));
+        assert!(l.is_set());
+        assert_eq!(l.values(), vec![225, 150]);
+        assert!(l.check_count(3, "--uv-max").is_ok());
+        // a list must name every mining GPU: shorter or longer is an error, never extended
+        let short = l.check_count(6, "--uv-max").unwrap_err();
+        assert!(format!("{short:#}").contains("3 values for 6 mining GPU(s)"), "{short:#}");
+        assert!(l.check_count(2, "--uv-max").is_err());
+        // one value: every GPU, any count
+        let one = PerGpu::All(300);
+        assert!(one.check_count(1, "x").is_ok() && one.check_count(8, "x").is_ok());
+        assert_eq!((one.get(0), one.get(7)), (Some(300), Some(300)));
+        assert!(PerGpu::Unset.check_count(5, "x").is_ok());
+        assert_eq!(PerGpu::Unset.get(0), None);
+        assert!(!PerGpu::Unset.is_set());
+        assert!(!PerGpu::List(vec![None, None]).is_set());
+    }
+
+    fn opts(max: &str, min: &str) -> Opts {
+        let mut o = Opts { auto: true, ..Default::default() };
+        if !max.is_empty() {
+            o.max_offset = PerGpu::parse(max, "--uv-max").unwrap();
+        }
+        if !min.is_empty() {
+            o.min_offset = PerGpu::parse(min, "--uv-min").unwrap();
+        }
+        o
+    }
+
+    #[test]
+    fn opts_validate() {
+        assert!(opts("", "").validate().is_ok());
+        assert!(opts("495", "120").validate().is_ok());
+        assert!(opts("150,225,495", "120,-,300").validate().is_ok());
+        assert!(opts("601", "").validate().is_err()); // above HARD_CAP
+        assert!(opts("150,700", "").validate().is_err());
+        assert!(opts("10", "").validate().is_err()); // below one step
+        assert!(opts("", "-5").validate().is_err());
+        assert!(opts("200", "250").validate().is_err()); // min above max
+        assert!(opts("150,495", "200").validate().is_err()); // min 200 above the first card's max 150
+        assert!(opts("150,495", "-,200").validate().is_ok());
+        assert!(opts("150,495", "100,500").validate().is_err());
+        let mut o = opts("", "");
+        o.fixed = PerGpu::All(200);
+        assert!(o.validate().is_err(), "--auto-uv and --uv-offset exclude each other");
+        o.auto = false;
+        assert!(o.validate().is_ok() && o.enabled());
+        o.fixed = PerGpu::parse("200,700", "--uv-offset").unwrap();
+        assert!(o.validate().is_err());
+        o.fixed = PerGpu::parse("-,-", "--uv-offset").unwrap();
+        assert!(!o.enabled());
+        let o = opts("150,225,495", "");
+        assert!(o.check_counts(3).is_ok());
+        assert!(o.check_counts(4).is_err());
+    }
+
+    #[test]
+    fn defaults_by_card() {
+        let t = |name: &str, cc: Option<(i32, i32)>| card_defaults(name, cc);
+        // Turing CMP
+        for n in ["NVIDIA CMP 40HX", "NVIDIA CMP 30HX", "NVIDIA CMP 50HX"] {
+            assert_eq!(t(n, Some((7, 5))).max, 150, "{n}");
+            assert_eq!(t(n, Some((7, 5))).max_src, "CMP default");
+            assert_eq!(t(n, None).max, 150, "{n} without compute capability");
+        }
+        // Turing GeForce
+        for n in ["NVIDIA GeForce RTX 2060 SUPER", "NVIDIA GeForce RTX 2080 Ti", "NVIDIA GeForce GTX 1660 Ti", "NVIDIA GeForce GTX 1650"] {
+            let d = t(n, Some((7, 5)));
+            assert_eq!((d.max, d.max_src, d.start_floor), (225, "Turing default", None), "{n}");
+            assert_eq!(t(n, None).max, 225, "{n} by name only");
+        }
+        // sm_75 decides even when the name is unknown
+        assert_eq!(t("Some Turing Board", Some((7, 5))).max, 225);
+        // Ampere CMP and RTX 30: the default; a "CMP" on Ampere is not capped
+        for (n, cc) in [
+            ("NVIDIA CMP 90HX", Some((8, 6))),
+            ("NVIDIA CMP 70HX", Some((8, 6))),
+            ("NVIDIA CMP 90HX", None),
+            ("NVIDIA GeForce RTX 3070", Some((8, 6))),
+            ("NVIDIA GeForce RTX 3070 Laptop GPU", Some((8, 6))),
+            ("NVIDIA GeForce RTX 3070", None),
+        ] {
+            let d = t(n, cc);
+            assert_eq!((d.max, d.start_floor), (DEFAULT_MAX, None), "{n} {cc:?}");
+        }
+        // "cmp" inside another word is no CMP
+        assert_eq!(t("NVIDIA Compute Board", None).max, DEFAULT_MAX);
+        // RTX 40: start at +200, RTX 50: at +300, both up to 495
+        let d = t("NVIDIA GeForce RTX 4070 Ti", Some((8, 9)));
+        assert_eq!((d.max, d.start_floor, d.start_src), (495, Some(200), "RTX 40 default"));
+        let d = t("NVIDIA GeForce RTX 5070", Some((12, 0)));
+        assert_eq!((d.max, d.start_floor, d.start_src), (495, Some(300), "RTX 50 default"));
+        // the mixed HiveOS rig of the report: 2x 2060 SUPER, 3x 3070 Laptop, CMP 40HX
+        let rig = [
+            ("NVIDIA GeForce RTX 2060 SUPER", (7, 5)),
+            ("NVIDIA GeForce RTX 2060 SUPER", (7, 5)),
+            ("NVIDIA GeForce RTX 3070 Laptop GPU", (8, 6)),
+            ("NVIDIA GeForce RTX 3070 Laptop GPU", (8, 6)),
+            ("NVIDIA GeForce RTX 3070 Laptop GPU", (8, 6)),
+            ("NVIDIA CMP 40HX", (7, 5)),
+        ];
+        let caps: Vec<i32> = rig.iter().map(|(n, cc)| card_defaults(n, Some(*cc)).max).collect();
+        assert_eq!(caps, vec![225, 225, 495, 495, 495, 150]);
+    }
+
+    fn card(name: &str, cc: (i32, i32), cur: i32, pos: usize, o: &Opts) -> Card {
+        let hw = CardHw { dev: pos as i32, name: name.into(), bus: format!("0000:0{pos}:00.0"), uuid: format!("GPU-{pos}"), nv: Dev(std::ptr::null_mut()), mode: OffMode::Gpc, cur, lo: -1000, hi: 1000, cc: Some(cc), m: 0 };
+        new_card(hw, pos, o)
+    }
+
+    #[test]
+    fn card_range_per_gpu() {
+        const CMP: (&str, (i32, i32)) = ("NVIDIA CMP 40HX", (7, 5));
+        const TU: (&str, (i32, i32)) = ("NVIDIA GeForce RTX 2060 SUPER", (7, 5));
+        const AMP: (&str, (i32, i32)) = ("NVIDIA GeForce RTX 3070 Laptop GPU", (8, 6));
+        const BW: (&str, (i32, i32)) = ("NVIDIA GeForce RTX 5070", (12, 0));
+        // --auto-uv alone: per-card defaults
+        let o = opts("", "");
+        let c = card(CMP.0, CMP.1, 0, 5, &o);
+        assert_eq!((c.max, c.max_src, c.start()), (150, "CMP default", (120, "default")));
+        let l = c.range_lines(true);
+        assert_eq!(l.len(), 1, "{l:?}");
+        assert!(l[0].ends_with("range +120..+150 (max: CMP default; start: default)"), "{}", l[0]);
+        assert_eq!(card(TU.0, TU.1, 0, 0, &o).max, 225);
+        assert_eq!(card(AMP.0, AMP.1, 0, 2, &o).max, 495);
+        // the HiveOS offset is the start
+        assert_eq!(card(TU.0, TU.1, 150, 0, &o).start(), (150, "current offset"));
+        // a HiveOS offset at the cap: nothing to tune (start > max is logged)
+        let c = card(CMP.0, CMP.1, 200, 0, &o);
+        assert!(c.range_lines(true).iter().any(|l| l.contains("is above the limit +150: this GPU is not tuned")));
+        // RTX 50: start at +300 at least
+        assert_eq!(card(BW.0, BW.1, 0, 0, &o).start(), (300, "RTX 50 default"));
+        assert_eq!(card(BW.0, BW.1, 345, 0, &o).start(), (345, "RTX 50 default"));
+        // one explicit --uv-max for all: used as given, with a warning on Turing/CMP
+        let o = opts("495", "");
+        let c = card(CMP.0, CMP.1, 0, 5, &o);
+        assert_eq!((c.max, c.max_src), (495, "--uv-max"));
+        let l = c.range_lines(true);
+        assert!(l.iter().any(|l| l.contains("WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)")), "{l:?}");
+        assert!(!card(AMP.0, AMP.1, 0, 2, &o).range_lines(true).iter().any(|l| l.contains("WARNING")));
+        // explicit, lower than the default: no warning
+        assert!(!card(CMP.0, CMP.1, 0, 0, &opts("120", "")).range_lines(true).iter().any(|l| l.contains("WARNING")));
+        // a list: by position; '-' = that card's default
+        let o = opts("225,-,330", "");
+        assert_eq!((card(TU.0, TU.1, 0, 0, &o).max, card(CMP.0, CMP.1, 0, 1, &o).max, card(AMP.0, AMP.1, 0, 2, &o).max), (225, 150, 330));
+        assert_eq!(card(CMP.0, CMP.1, 0, 1, &o).max_src, "CMP default");
+        // RTX 50 with a --uv-max below its default start: the +300 floor is dropped, it still tunes
+        let o = opts("250", "");
+        assert_eq!(card(BW.0, BW.1, 0, 0, &o).start(), (120, "default"));
+        // --uv-min per card
+        let o = opts("", "135,-");
+        assert_eq!(card(AMP.0, AMP.1, 0, 0, &o).start(), (135, "--uv-min"));
+        assert_eq!(card(AMP.0, AMP.1, 0, 1, &o).start(), (120, "default"));
+        // --uv-min for all above a card's default limit: that card is not tuned (logged)
+        let c = card(CMP.0, CMP.1, 0, 0, &opts("", "200"));
+        assert!(c.range_lines(true).iter().any(|l| l.contains("this GPU is not tuned")));
+        // the driver range cuts the limit, and the log says so
+        let mut c = card(AMP.0, AMP.1, 0, 0, &opts("", ""));
+        c.hi = 300;
+        c.max = c.max_wanted.min(c.hi);
+        assert!(c.range_lines(true)[0].contains("range +120..+300 (max: default, driver limit +300"), "{:?}", c.range_lines(true));
+        // --uv-offset list
+        let mut o = Opts::default();
+        o.fixed = PerGpu::parse("200,-", "--uv-offset").unwrap();
+        let c = card(CMP.0, CMP.1, 0, 0, &o);
+        assert_eq!(c.fixed, Some(200));
+        assert!(c.range_lines(false).iter().any(|l| l.contains("WARNING --uv-offset +200 is above the recommended +150")));
+        let c = card(AMP.0, AMP.1, 0, 1, &o);
+        assert_eq!(c.fixed, None);
+        assert!(c.range_lines(false)[0].contains("no --uv-offset for this GPU, left alone"));
+    }
+
+    #[test]
+    fn saved_result_under_a_new_limit() {
+        // within the limit: applied
+        assert_eq!(saved_vs_limit(270, 495, 495), Saved::Apply);
+        assert_eq!(saved_vs_limit(270, 0, 495), Saved::Apply); // 1.6.1 entry (no cap saved)
+        // the limit was lowered below the saved result: run at the limit
+        assert_eq!(saved_vs_limit(315, 495, 225), Saved::Clamp);
+        assert_eq!(saved_vs_limit(315, 0, 150), Saved::Clamp); // 1.6.1 entry: a lower limit is respected too
+        // the result is the old limit itself and the limit went up: tune again
+        assert_eq!(saved_vs_limit(225, 225, 495), Saved::Retune);
+        // an edge was found below the old limit: a higher limit changes nothing
+        assert_eq!(saved_vs_limit(210, 225, 495), Saved::Apply);
+        // unknown old limit: never re-tuned for it
+        assert_eq!(saved_vs_limit(225, 0, 495), Saved::Apply);
+        assert_eq!(saved_vs_limit(150, 150, 150), Saved::Apply);
+    }
+
+    #[test]
+    fn entry_cap_roundtrip() {
+        let e = Entry { driver: "580".into(), kernel: "k".into(), offset: 150, cap: 150, orig: 0, ..Default::default() };
+        let back = Entry::from_json(&e.to_json()).unwrap();
+        assert_eq!((back.offset, back.cap), (150, 150));
+        // an entry written by 1.6.1 has no "cap"
+        let mut v = e.to_json();
+        v.as_object_mut().unwrap().remove("cap");
+        assert_eq!(Entry::from_json(&v).unwrap().cap, 0);
+    }
 }

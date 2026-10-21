@@ -196,7 +196,7 @@ pub struct Opts {
     pub batch: Option<u32>,
     pub per_gpu_workers: bool,
     pub skip_prepare: bool,
-    pub uv_offset: Option<i32>,
+    pub uv_offset: crate::uv::PerGpu, // --uv-offset: one value or one per GPU (in `devices` order)
     pub state_dir: PathBuf,
     pub clocks: clocks::ClockOpts,
 }
@@ -515,7 +515,7 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
     if !amd() {
         crate::cmfd_offset::recover(state_dir);
     }
-    let _offset_guard = if with_model && !amd() { crate::cmfd_offset::apply(&devs, None, state_dir) } else { None };
+    let _offset_guard = if with_model && !amd() { crate::cmfd_offset::apply(&devs, &crate::uv::PerGpu::Unset, state_dir) } else { None };
     let mut failed = 0;
     for (dev, uuid, name) in gpus {
         let t = Instant::now();
@@ -711,7 +711,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     // clocks, the undervolt offset and the power readout are NVML (NVIDIA only); AMD runs stock, power comes from the library
     if amd() {
         ensure!(!o.clocks.any(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
-        ensure!(o.uv_offset.is_none(), "--uv-offset is NVIDIA-only (NVML); not available for CMFD with the AMD backend");
+        ensure!(!o.uv_offset.is_set(), "--uv-offset is NVIDIA-only (NVML); not available for CMFD with the AMD backend");
     }
     if !amd() {
         clocks::recover(&o.state_dir);
@@ -721,7 +721,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     if !amd() {
         crate::cmfd_offset::recover(&o.state_dir);
     }
-    let _offset_guard = if amd() { None } else { crate::cmfd_offset::apply(&devs, o.uv_offset, &o.state_dir) };
+    let _offset_guard = if amd() { None } else { crate::cmfd_offset::apply(&devs, &o.uv_offset, &o.state_dir) };
 
     let nv = if amd() { None } else { nvml::Nvml::load().ok() };
     let mut slots: Vec<Slot> = gpus

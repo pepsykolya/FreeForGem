@@ -60,8 +60,9 @@ pub fn recover(dir: &Path) {
     let _ = std::fs::remove_file(&p);
 }
 
-/// Offset to use: `fixed` (explicit --uv-offset) or 0 when the current offset is positive. Returns a guard that restores.
-pub fn apply(devices: &[i32], fixed: Option<i32>, dir: &Path) -> Option<Guard> {
+/// Offset to use: `fixed` (explicit --uv-offset for that GPU, by its position in `devices`) or 0 when the current offset is
+/// positive. Returns a guard that restores.
+pub fn apply(devices: &[i32], fixed_all: &crate::uv::PerGpu, dir: &Path) -> Option<Guard> {
     let nv = match Nvml::load() {
         Ok(n) => n,
         Err(e) => {
@@ -70,7 +71,8 @@ pub fn apply(devices: &[i32], fixed: Option<i32>, dir: &Path) -> Option<Guard> {
         }
     };
     let mut items = Vec::new();
-    for &dev in devices {
+    for (pos, &dev) in devices.iter().enumerate() {
+        let fixed = fixed_all.get(pos);
         let Ok(bus) = gpu::device_pci_bus_id(dev) else { continue };
         let Ok(d) = nv.by_bus(&bus) else { continue };
         let (mode, cur, lo, hi) = match nv.probe_offset(d) {
