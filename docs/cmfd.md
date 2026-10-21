@@ -139,3 +139,31 @@ Found and fixed during QA:
 * Mining start line per GPU now names backend and kernel (`GPU 0: … (cuda backend, kernel t256 t256s-F2c dcc8446f)`).
 * Minor, not fixed (engine side): a read-only model folder makes `production-v4-inputs.py` wait forever ("Another miner is
   preparing the shared model"); HiveOS folders are writable.
+
+## 1.6.1 hotfix (21.10, branch `rel-1.6.1` from v1.6.0)
+
+Field bug (Rig02, HiveOS, 4x RTX 3070, 1.5.4rc2 and 1.6.0): `miner stop` sends SIGINT to the whole `freeforgempear | tee`
+pipeline; tee exited first, the miner put back GPU0's offset, then `println!` panicked on EPIPE (Rust ignores SIGPIPE, so a
+dead pipe is an error, and std's println! panics on it) and GPU1-3 stayed undervolted with locked clocks until the next start.
+On Windows the same panic happens as soon as the PowerShell pipeline of start.ps1 stops reading (Ctrl+C).
+* println!/print!/eprintln! shadowed crate-wide (main.rs) by macros that drop write errors.
+* Shutdown order: Pearl restores uv offsets (all cards in parallel) and clocks right after the main loop, then joins workers
+  and logs; CMFD stops all engines together, then restores the offset and clocks, then logs. Restore functions log only after
+  every card is set. `step_back` never sets an offset after the card was handed back.
+* Windows console close / logoff / shutdown: own console handler restores synchronously (ctrlc's handler returns at once and
+  Windows ends the process right after it, so nothing was restored before).
+* h-run.sh: `tee -i`.
+* CMFD: once per GPU after 30 s of mining, memory clock < 1/2 of the board maximum -> WARNING (Pearl OC with Mem lock 810 cuts
+  CMFD ~6x: Rig02 3070 3.7 FW/s locked vs 21.8 FW/s at ~237 W free; Shahtyor 3070 3.6-3.7 FW/s with -lmc 810).
+* Pearl `--self-test` without `--devices` checks every GPU.
+
+Checks (Shahtyor GPU1 3070 + GPU2 4070 Ti in one miner under gpu1-test.sh, GPU2 units paused under the same lock; owner's
+offsets +200/+300; SIGINT to the process group of `miner | tee`; note: a job started with `&` from a script has SIGINT
+ignored, which tee inherits, so the launcher must reset SIGINT to default or tee survives and nothing reproduces):
+* 1.6.0, tee dies: offsets +200/+215 (GPU2 left), clocks still locked, uv-restore.json + clocks-restore.json left = the bug.
+* 1.6.1, tee dies: +200/+300, clocks reset, no state left. tee -i, 3 min on the pool: 14/14 accepted, restore lines in the log.
+* 1.6.1 CMFD, tee dies, GPU1 memory locked 810: WARNING on GPU1 only; offsets 0 -> +200/+300 back, marker removed.
+* Self-tests without --devices: Pearl GPUs [0, 1] PASSED; CMFD both ok (official 1.0.16 vector). Clawa 4070 Laptop: Pearl
+  self-test PASSED; Windows reader-gone test: 1.6.0 exits 101 (panic) at once, 1.6.1 mines on and ends normally (exit 0).
+* cargo test --release: 7/7. Packages: libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/* byte-identical to 1.6.0.
+* Not tested on hardware: the Windows console-close restore (needs an Administrator session with an offset/clock lock set).
