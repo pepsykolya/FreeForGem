@@ -511,7 +511,7 @@ fn mine(a: Args) -> Result<()> {
                 total_att += rate;
                 total_ths += ths;
                 // power after the number, in parentheses: the HiveOS stats parser reads "GPUn <TH/s>" only
-                let w = power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h)));
+                let w = power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h))).or_else(|| gpu::amd_power_w(g.dev)); // AMD: ADLX / hwmon
                 let pw = match w {
                     Some(w) if w > 0.0 => {
                         total_w += w;

@@ -31,6 +31,12 @@ Copy-Item host\target\release\freeforgempear.exe, "$lib\pearlgpu.dll", windows\s
     windows\README-WINDOWS.txt, LICENSE, NOTICE, README.md, HIVEOS.md, MANUAL.md $stage
 # CMFD engine (FreeForgeMiner release pinned in cmfd\ENGINE.lock, MIT) as cmfd\; $env:FFGP_NO_CMFD = '1' builds Pearl only
 if ($env:FFGP_NO_CMFD -ne '1') { & "$PSScriptRoot\cmfd\fetch-engine.ps1" -Dest "$stage\cmfd" }
+# AMD (OpenCL, RDNA2+): search library pearlgpu_amd.dll; for CMFD the OpenCL worker cmfd-v4-replay-ocl.exe and the pool client
+# rebuilt with cmfd\patches\ (cmfd-miner-ffgp.exe, MIT; cmfd\build-engine-ffgp.ps1).  Prebuilt in prebuilt\windows-x64.
+if (Test-Path "$lib\pearlgpu_amd.dll") { Copy-Item "$lib\pearlgpu_amd.dll" $stage }
+if ($env:FFGP_NO_CMFD -ne '1' -and (Test-Path "$lib\cmfd\cmfd-v4-replay-ocl.exe")) {
+    Copy-Item "$lib\cmfd\cmfd-v4-replay-ocl.exe", "$lib\cmfd\cmfd-miner-ffgp.exe" "$stage\cmfd"
+}
 $zip = "dist\$name.zip"
 Remove-Item -Force $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path "dist\$name\freeforgempear" -DestinationPath $zip

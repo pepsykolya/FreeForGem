@@ -29,3 +29,18 @@ Building: `cmfd/fetch-engine.sh` / `cmfd\fetch-engine.ps1` put the pinned releas
 
 Copyright (c) 2026 FreeForgeMiner contributors; portions copyright (c) 2026 CommonFoundry contributors. MIT License,
 see `LICENSE-FreeForgeMiner` and `LICENSE-CommonFoundry`. The FreeForGemPear License does not apply to this folder.
+
+## AMD GPUs (`--backend amd`, or auto when no NVIDIA GPU is found)
+
+| File | What it is |
+|---|---|
+| `cmfd-v4-replay-ocl.exe` | OpenCL worker (RDNA2+, `v_dot4_i32_i8`): same command protocol and output files as `cmfd-v4-replay`, bit-identical results |
+| `cmfd-miner-ffgp.exe` | the FreeForgeMiner pool client rebuilt from source with the FreeForGemPear patches in `patches/` |
+
+`patches/` (MIT, like the engine it changes; Copyright (c) 2026 FreeForGemPear contributors). Until FreeForgeMiner has the same
+option itself (then `cmfd-miner-ffgp` is dropped and the release binary is used on AMD too):
+* `FFM_GPU_BACKEND=opencl` + `FFM_GPU_UUID=GPU-…`: the engine runs on a non-NVIDIA GPU without calling nvidia-smi
+  (sensors N/A in its own line; FreeForGemPear prints the AMD power read through ADLX / amdgpu hwmon).
+
+`cmfd/build-engine-ffgp.ps1` / `.sh` rebuild `cmfd-miner-ffgp` from the pinned FreeForgeMiner commit + upstream Common Foundry +
+`patches/`. On NVIDIA the FreeForgeMiner release binary is used unchanged (`FFGP_CMFD_PATCHED=1` switches to the patched one).

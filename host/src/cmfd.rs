@@ -212,6 +212,25 @@ fn absolute(p: &Path) -> PathBuf {
     if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|d| d.join(p)).unwrap_or_else(|_| p.to_path_buf()) }
 }
 
+/// `--backend amd`: the CMFD work runs on the OpenCL worker `cmfd-v4-replay-ocl` (same stdin protocol and output files as the
+/// CUDA worker) driven by `cmfd-miner-ffgp`, the engine rebuilt from FreeForgeMiner source with the FreeForGemPear patch in
+/// cmfd/patches/ (MIT): `FFM_GPU_BACKEND=opencl` + `FFM_GPU_UUID` select the GPU without nvidia-smi (until FreeForgeMiner has
+/// that option itself; then the release binary is used here too).
+fn amd() -> bool {
+    gpu::backend() == gpu::Backend::Amd
+}
+
+/// Pool client binary: the FFGP-patched engine on AMD (on NVIDIA only with FFGP_CMFD_PATCHED=1, for tests), else the release.
+fn miner_program() -> &'static str {
+    let opt_in = std::env::var("FFGP_CMFD_PATCHED").is_ok_and(|v| v == "1");
+    if amd() || opt_in { "cmfd-miner-ffgp" } else { "cmfd-miner" }
+}
+
+/// The GPU worker: CUDA `cmfd-v4-replay`, or the OpenCL `cmfd-v4-replay-ocl` with the AMD backend.
+fn replay_worker() -> &'static str {
+    if amd() { "cmfd-v4-replay-ocl" } else { "cmfd-v4-replay" }
+}
+
 fn bin(name: &str) -> String {
     if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
 }
@@ -223,7 +242,7 @@ pub fn engine_dir(given: &Option<PathBuf>) -> Result<PathBuf> {
         .or_else(|| std::env::var_os("FFGP_CMFD_DIR").map(Into::into))
         .unwrap_or_else(|| exe_dir().join("cmfd"));
     let dir = absolute(&dir);
-    for f in [bin("cmfd-miner"), bin("cmfd-v4-replay")] {
+    for f in [bin(miner_program()), bin(replay_worker())] {
         ensure!(
             dir.join(&f).is_file(),
             "CMFD engine file {} is missing (the cmfd/ folder of the package; see cmfd/README.md)",
@@ -255,6 +274,12 @@ fn model_dir(given: &Option<PathBuf>) -> PathBuf {
 
 /// Environment of every engine process (and of the self-test).
 fn engine_cmd(engine: &Path, program: &str, uuid: Option<&str>, mode: &str) -> Command {
+    // AMD: the patched pool client and the OpenCL worker (see amd())
+    let program = match program {
+        "cmfd-miner" => miner_program(),
+        "cmfd-v4-replay" => replay_worker(),
+        p => p,
+    };
     let mut c = Command::new(engine.join(bin(program)));
     c.current_dir(engine);
     if !cfg!(windows) {
@@ -267,6 +292,16 @@ fn engine_cmd(engine: &Path, program: &str, uuid: Option<&str>, mode: &str) -> C
         c.env("CUDA_VISIBLE_DEVICES", u);
     }
     c.env("CMFD_MODE", mode);
+    if amd() {
+        if let Some(u) = uuid {
+            c.env("FFM_GPU_BACKEND", "opencl"); // FFGP engine patch: no nvidia-smi, the GPU is FFM_GPU_UUID
+            c.env("FFM_GPU_UUID", u);
+            // OpenCL device index (same AMD device order as the Pearl library): looked up by identity
+            if let Some(d) = (0..gpu::device_count() as i32).find(|&d| device_uuid(d).is_ok_and(|x| x == u)) {
+                c.env("CMFD_CL_DEVICE", d.to_string());
+            }
+        }
+    }
     c
 }
 
@@ -327,19 +362,34 @@ fn prepare_model(engine: &Path, model: &Path) -> Result<PathBuf> {
 
 fn select_devices(devices: &Option<Vec<i32>>) -> Result<Vec<(i32, String, String)>> {
     let count = gpu::device_count();
-    ensure!(count > 0, "no CUDA devices visible (check the driver and CUDA_VISIBLE_DEVICES)");
+    ensure!(count > 0, "no {} GPU devices visible (check the driver{})", gpu::backend().name(), if amd() { "" } else { " and CUDA_VISIBLE_DEVICES" });
     let list = match devices {
         Some(d) => {
             for &x in d {
-                ensure!(x >= 0 && (x as usize) < count, "device {x} does not exist ({count} CUDA device(s) visible)");
+                ensure!(x >= 0 && (x as usize) < count, "device {x} does not exist ({count} {} device(s) visible)", gpu::backend().name());
             }
             d.clone()
         }
         None => (0..count as i32).collect(),
     };
     list.into_iter()
-        .map(|d| Ok((d, gpu::device_uuid(d)?, gpu::device_name(d))))
+        .map(|d| Ok((d, device_uuid(d)?, gpu::device_name(d))))
         .collect()
+}
+
+/// GPU identity for the engine (`--gpu`, nvidia-smi format). AMD OpenCL has no device UUID: current pearlgpu_amd libraries
+/// return a PCI-based stand-in themselves (`GPU-a3d00000-0000-0000-0000-0000<bus><dev><fn>`); older ones are covered here.
+fn device_uuid(dev: i32) -> Result<String> {
+    match gpu::device_uuid(dev) {
+        Ok(u) => Ok(u),
+        Err(e) if amd() => {
+            let bus = gpu::device_pci_bus_id(dev).map_err(|_| e)?;
+            let hex: String = bus.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+            let tail = format!("{:0>12}", &hex[hex.len().saturating_sub(12)..]).to_ascii_lowercase();
+            Ok(format!("GPU-a3d00000-0000-0000-0000-{tail}"))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// `--self-test --algo cmfd`: the engine's GPU self-test on each selected device (small exact differential of the
@@ -382,9 +432,9 @@ fn reference_vector(engine: &Path, uuid: &str, mode: &str, bank: &Path, work: &P
             let left = end.saturating_duration_since(Instant::now());
             match rx.recv_timeout(left) {
                 Ok((_, l)) if l.contains(tag) => return Ok(()),
-                Ok((_, l)) if l.starts_with("error") => anyhow::bail!("CUDA worker: {l}"),
+                Ok((_, l)) if l.starts_with("error") => anyhow::bail!("GPU worker: {l}"),
                 Ok(_) => {}
-                Err(_) => anyhow::bail!("CUDA worker: no {tag} within {secs} s"),
+                Err(_) => anyhow::bail!("GPU worker: no {tag} within {secs} s"),
             }
         }
     };
@@ -427,8 +477,11 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
     let with_model = bank.is_file();
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
     // the same stock-offset rule as for mining: a Pearl undervolt would fail the test vector
-    crate::cmfd_offset::recover(state_dir);
-    let _offset_guard = if with_model { crate::cmfd_offset::apply(&devs, None, state_dir) } else { None };
+    // NVML only; on AMD nothing to reset (the amduv undervolt is only active while Pearl mines and is restored on exit)
+    if !amd() {
+        crate::cmfd_offset::recover(state_dir);
+    }
+    let _offset_guard = if with_model && !amd() { crate::cmfd_offset::apply(&devs, None, state_dir) } else { None };
     let mut failed = 0;
     for (dev, uuid, name) in gpus {
         let t = Instant::now();
@@ -597,13 +650,22 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
 
     // clock locks before the engine starts (the engine must not see clocks change under it)
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
-    clocks::recover(&o.state_dir);
-    let _clock_guard = clocks::apply(&devs, &o.clocks, &o.state_dir);
+    // clocks, the undervolt offset and the power readout are NVML (NVIDIA only); AMD runs stock, power comes from the library
+    if amd() {
+        ensure!(!o.clocks.any(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
+        ensure!(o.uv_offset.is_none(), "--uv-offset is NVIDIA-only (NVML); not available for CMFD with the AMD backend");
+    }
+    if !amd() {
+        clocks::recover(&o.state_dir);
+    }
+    let _clock_guard = if amd() { None } else { Some(clocks::apply(&devs, &o.clocks, &o.state_dir)) };
     // a Pearl undervolt offset makes the engine fail: stock (0) for the run, or the explicit --uv-offset
-    crate::cmfd_offset::recover(&o.state_dir);
-    let _offset_guard = crate::cmfd_offset::apply(&devs, o.uv_offset, &o.state_dir);
+    if !amd() {
+        crate::cmfd_offset::recover(&o.state_dir);
+    }
+    let _offset_guard = if amd() { None } else { crate::cmfd_offset::apply(&devs, o.uv_offset, &o.state_dir) };
 
-    let nv = nvml::Nvml::load().ok();
+    let nv = if amd() { None } else { nvml::Nvml::load().ok() };
     let mut slots: Vec<Slot> = gpus
         .iter()
         .map(|(dev, uuid, name)| Slot {
@@ -686,7 +748,8 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     .stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
-                if let Some(b) = o.batch {
+                // AMD default 32: same FW/s as 64 on the RX 6800 XT (~3.3 s per pass instead of ~6.4 s, fewer stale shares)
+                if let Some(b) = o.batch.or(if amd() { Some(32) } else { None }) {
                     c.args(["--batch", &b.to_string()]);
                 }
                 match c.spawn() {
@@ -783,7 +846,7 @@ fn report_line(slots: &[Slot], nv: Option<&nvml::Nvml>, up: Duration) -> String 
         let fresh = s.last.filter(|(t, _)| t.elapsed() <= MAX_SAMPLE_AGE).map(|(_, x)| x.rate);
         let rate = fresh.unwrap_or(0.0);
         total += rate;
-        let w = nv.zip(s.nv).and_then(|(n, d)| n.power_w(d));
+        let w = nv.zip(s.nv).and_then(|(n, d)| n.power_w(d)).or_else(|| gpu::amd_power_w(s.dev)); // AMD: ADLX / hwmon
         let pw = match w {
             Some(w) if w > 0.0 => {
                 total_w += w;

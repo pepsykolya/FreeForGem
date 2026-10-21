@@ -339,3 +339,17 @@ pub fn check_run(seed: &[u8; 32], m: usize, reps: u32) -> Result<([u64; 4], u64)
     }
     Ok((d, diff))
 }
+
+/// ASIC power of `device` in watts from the AMD library (`pg_amd_power_w`: ADLX on Windows, amdgpu hwmon on Linux; read-only).
+/// None with the CUDA backend (NVML is used there), with an older library, or when the driver gives no reading.
+pub fn amd_power_w(device: i32) -> Option<f64> {
+    type PowerFn = unsafe extern "C" fn(i32) -> f64;
+    static POWER: std::sync::OnceLock<Option<PowerFn>> = std::sync::OnceLock::new();
+    let a = api();
+    if a.kind != Backend::Amd {
+        return None;
+    }
+    let f = POWER.get_or_init(|| a._lib.sym("pg_amd_power_w").map(|p| unsafe { std::mem::transmute::<*mut std::ffi::c_void, PowerFn>(p) })).as_ref().copied()?;
+    let w = unsafe { f(device) };
+    (w.is_finite() && w > 0.0).then_some(w)
+}
