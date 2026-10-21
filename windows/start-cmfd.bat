@@ -21,7 +21,7 @@ rem   cmfd-pool.online (3 %):
 rem set "POOL=cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be"
 rem Worker (rig) name: 1-32 letters, numbers, dots, underscores, hyphens
 set "WORKER=%COMPUTERNAME%"
-rem GPUs to use: empty = all NVIDIA GPUs, or a list like 0,1,3 (indexes from nvidia-smi)
+rem GPUs to use: empty = all GPUs, or a list like 0,1,3 (NVIDIA: indexes from nvidia-smi; AMD: order of the miner log)
 set "DEVICES="
 rem speed = maximum hashrate (default), eco = fewer watts (RTX 30: about -13 % power, -2 % hashrate). RTX 40/50: same in both
 set "MODE=speed"

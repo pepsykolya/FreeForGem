@@ -35,7 +35,7 @@ if ($env:FFGP_NO_CMFD -ne '1') { & "$PSScriptRoot\cmfd\fetch-engine.ps1" -Dest "
 # rebuilt with cmfd\patches\ (cmfd-miner-ffgp.exe, MIT; cmfd\build-engine-ffgp.ps1).  Prebuilt in prebuilt\windows-x64.
 # amduv.exe: AMD clock/voltage tuner for --auto-uv (ADLX; restores the owner's settings when the miner exits)
 if (Test-Path "$lib\pearlgpu_amd.dll") { Copy-Item "$lib\pearlgpu_amd.dll" $stage }
-if (Test-Path "$libmduv.exe") { Copy-Item "$libmduv.exe" $stage }
+if (Test-Path "$lib\amduv.exe") { Copy-Item "$lib\amduv.exe" $stage }
 if ($env:FFGP_NO_CMFD -ne '1' -and (Test-Path "$lib\cmfd\cmfd-v4-replay-ocl.exe")) {
     Copy-Item "$lib\cmfd\cmfd-v4-replay-ocl.exe", "$lib\cmfd\cmfd-miner-ffgp.exe" "$stage\cmfd"
 }

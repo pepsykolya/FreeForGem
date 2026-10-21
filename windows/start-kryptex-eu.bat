@@ -13,7 +13,7 @@ rem Stratum pool HOST:PORT (see MANUAL.md, section "Pools")
 set "POOL=prl-eu.kryptex.network:7048"
 rem Worker (rig) name: letters, numbers, dots, underscores, hyphens
 set "WORKER=%COMPUTERNAME%"
-rem GPUs to use: empty = all NVIDIA GPUs, or a list like 0,1,3 (indexes from nvidia-smi)
+rem GPUs to use: empty = all GPUs, or a list like 0,1,3 (NVIDIA: indexes from nvidia-smi; AMD: order of the miner log)
 set "DEVICES="
 rem Kryptex only: custom share difficulty for big rigs, e.g. d=8388608 (empty = pool default 2097152). See MANUAL.md, "Pools".
 set "PASSWORD="

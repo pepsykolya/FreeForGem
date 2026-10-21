@@ -35,7 +35,7 @@ if ($root -match '\s|[^\x00-\x7F]') {
 # Common Foundry (CMFD): the coin follows the pool URL (cmfd+tls://IP:PORT?pin=HEX), see start-cmfd.bat
 $Cmfd = $Pool -match '^cmfd\+tls://'
 if ([string]::IsNullOrWhiteSpace($Wallet)) {
-    if ($Cmfd) { Write-Host 'WALLET is empty. Right-click start-cmfd.bat -> Edit, and set WALLET to your 64-character CMFD address.' }
+    if ($Cmfd) { Write-Host 'WALLET is empty. Right-click start-cmfd.bat -> Edit, and set WALLET to your CMFD address (cmfd1... or 64 hex).' }
     else { Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your PRL address (prl1...).' }
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
@@ -75,9 +75,16 @@ foreach ($file in 'freeforgempear.exe', 'pearlgpu.dll') {
     if (-not (Test-Path -LiteralPath (Join-Path $root $file))) { Fail "$file is missing - unpack the whole archive again." }
 }
 $smi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
-if (-not $smi) { Fail 'nvidia-smi.exe not found - install the NVIDIA driver (version 525 or newer).' }
+# AMD Radeon (RX 6000+, since 1.6.0): no NVIDIA driver needed; the miner picks the AMD library by itself (--backend auto)
+$amd = @()
+try { $amd = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { $_.Name -match 'Radeon|AMD' -and $_.Name -notmatch '^AMD Radeon\(TM\) Graphics$' }) } catch {}
+if (-not $smi -and $amd.Count -eq 0) { Fail 'nvidia-smi.exe not found - install the NVIDIA driver (version 525 or newer); for an AMD Radeon card install the AMD Adrenalin driver.' }
+if ($amd.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $root 'pearlgpu_amd.dll'))) { Fail 'pearlgpu_amd.dll is missing - unpack the whole archive again.' }
 Write-Host "FreeForGemPear for Windows - pool $Pool, wallet $($Wallet.Substring(0,[Math]::Min(8,$Wallet.Length)))..., worker $Worker"
-& $smi.Source --query-gpu=index,name,memory.free --format=csv,noheader | ForEach-Object { Write-Host "  GPU $_" }
+if ($smi) {
+    try { & $smi.Source --query-gpu=index,name,memory.free --format=csv,noheader 2>$null | ForEach-Object { Write-Host "  GPU $_" } } catch {}
+}
+foreach ($g in $amd) { Write-Host "  AMD GPU: $($g.Name)" }
 
 $logs = Join-Path $root 'logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null

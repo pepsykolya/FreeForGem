@@ -15,7 +15,7 @@ rem Stratum pool HOST:PORT (see MANUAL.md, section "Pools")
 set "POOL=pearl-us-east.luckypool.io:3360"
 rem Worker (rig) name: letters, numbers, dots, underscores, hyphens
 set "WORKER=%COMPUTERNAME%"
-rem GPUs to use: empty = all NVIDIA GPUs, or a list like 0,1,3 (indexes from nvidia-smi)
+rem GPUs to use: empty = all GPUs, or a list like 0,1,3 (NVIDIA: indexes from nvidia-smi; AMD: order of the miner log)
 set "DEVICES="
 rem Stratum password (normally empty)
 set "PASSWORD="
