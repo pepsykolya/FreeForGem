@@ -603,6 +603,7 @@ struct Slot {
     base: Sample, // totals of earlier (exited) engine processes of this GPU
     fee: bool,
     nv: Option<nvml::Dev>,
+    mem_checked: bool, // memory-clock warning check done (once per GPU and run)
 }
 
 impl Slot {
@@ -649,6 +650,24 @@ fn stop_children(slots: &mut [Slot]) {
         }
         let _ = c.wait();
     }
+}
+
+/// CMFD needs the memory clock: a memory clock locked low (a Pearl overclock, e.g. HiveOS "Mem lock" 810 / nvidia-smi -lmc)
+/// cuts it about 6x (RTX 3070: 3.7 instead of 21.8 FW/s).  Checked once per GPU while the engine mines; only a warning,
+/// the miner never changes the owner's OC by itself.
+fn check_mem_clock(nv: &nvml::Nvml, d: nvml::Dev, dev: i32, own_lock: Option<u32>) {
+    let (Some(cur), Some(max)) = (nv.mem_clock_mhz(d), nv.max_mem_clock_mhz(d)) else { return };
+    if max == 0 || cur * 2 >= max {
+        return;
+    }
+    let why = match own_lock {
+        Some(l) => format!("--lock-mclock {l} of this run"),
+        None => "the OC locks the memory clock: HiveOS \"Mem lock\", nvidia-smi -lmc, ...".to_string(),
+    };
+    println!(
+        "[GPU{dev}] WARNING: memory clock {cur} MHz of {max} MHz while mining CMFD ({why}). CMFD runs about 6x slower with the memory held low \
+         (RTX 3070: 3.7 instead of 21.8 FW/s). Use a separate OC profile for CMFD without the memory clock lock; the miner does not change your OC"
+    );
 }
 
 pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
@@ -721,6 +740,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             base: Sample::default(),
             fee: false,
             nv: nv.as_ref().and_then(|n| gpu::device_pci_bus_id(*dev).ok().and_then(|b| n.by_bus(&b).ok())),
+            mem_checked: false,
         })
         .collect();
     for s in &slots {
@@ -815,8 +835,11 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         // engine output: shown with a GPU prefix, stats lines parsed
         while let Ok((i, line)) = rx.try_recv() {
             let s = &mut slots[i];
+            let mut check_mem = false;
             if let Some(sample) = parse_stats(&line) {
                 s.last = Some((Instant::now(), sample));
+                // the engine mines (model loaded, work running): the memory clock now is the one it really gets
+                check_mem = !s.mem_checked && sample.rate > 0.0 && s.started.elapsed() >= Duration::from_secs(30);
             }
             if line.starts_with("DEV FEE | mining") {
                 s.fee = true;
@@ -824,6 +847,12 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                 s.fee = false;
             }
             println!("[GPU{}] {line}", s.dev);
+            if check_mem {
+                s.mem_checked = true;
+                if let (Some(n), Some(d)) = (nv.as_ref(), s.nv) {
+                    check_mem_clock(n, d, s.dev, o.clocks.mem_mhz.get(i).copied().flatten());
+                }
+            }
             if line.contains("out of memory") {
                 println!("[GPU{}] hint: CMFD needs about 7 GB of free GPU memory (6.4 GB model); stop other programs/miners on this GPU", s.dev);
             }
