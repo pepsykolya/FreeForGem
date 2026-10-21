@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.5.2):**
+**Installation URL (1.6.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 ### Flight sheet
@@ -74,7 +74,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 - HiveOS with NVIDIA driver 525 or newer.
 - Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too.
-- Older and AMD GPUs are not supported.
+- Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
 
 ### Developer fee
 
@@ -95,10 +95,10 @@ Stock clocks or a power limit: a positive core offset of the OC profile is set t
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.5.2):**
+**Ссылка для установки (1.6.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 ### Полётный лист
@@ -163,7 +163,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 
 - HiveOS с драйвером NVIDIA 525 или новее.
 - Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются.
-- Старые карты и AMD не поддерживаются.
+- Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
 
 ### Common Foundry (CMFD), с 1.6.0
 

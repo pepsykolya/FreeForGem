@@ -10,7 +10,7 @@ QUICK START
      start-kryptex-ru / -us / -asia       Kryptex Russia / North America / Singapore
      start-nvidia-smi.bat                 advanced, as Administrator: nvidia-smi clock lock + power limit (MANUAL.md, section 5)
      start-cmfd.bat                       Common Foundry (CMFD), pool Aria (Midas Mining and others inside the file);
-                                          WALLET = your 64-hex CMFD address; ~7 GB free GPU memory; the 6.4 GB model is
+                                          WALLET = your CMFD address (cmfd1... or 64 hex); ~7 GB free GPU memory; the 6.4 GB model is
                                           downloaded once into cmfd-model (MANUAL.md, section 13). Run as Administrator if
                                           the card has an undervolt offset: the miner sets it to 0 for CMFD and puts it back.
    Right-click it -> Edit and REPLACE WALLET with your own prl1... address: it is preset to the developer's
@@ -20,10 +20,13 @@ QUICK START
    A miner that exits or crashes is restarted automatically after 15 s.
 
 Needs only the NVIDIA driver 525 or newer (no CUDA, no Python, no WSL). One process drives all GPUs.
+AMD Radeon RX 6000 (RDNA2, tested on RX 6800 XT; since 1.6.0): needs only the AMD Adrenalin driver, the same start files work
+(the miner picks the AMD library when no NVIDIA GPU is found; integrated Radeon graphics are skipped). AUTO_UV=1 on AMD runs
+amduv.exe (tunes once ~10-15 min, restores your settings on exit; run as Administrator). MANUAL.md, section 14.
 Self-test (optional): open cmd in this folder and run  freeforgempear.exe --self-test
 If the log says "embedded search kernel could not be loaded", update the NVIDIA driver (525+); the GPU must be Ampere (RTX 30xx) or newer.
 If Defender/SmartScreen blocks the start: "More info -> Run anyway", or add the folder to the exclusions.
-Check the archive SHA-256 against the release page:  certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256
+Check the archive SHA-256 against the release page:  certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256
 
 POOLS (POOL=HOST:PORT; ports 3360 / 3361 / 3362 = share difficulty 2M / 4M / 8M)
 pearl-eu2.luckypool.io:3360 (default, Europe); Kryptex prl-eu.kryptex.network:7048; see MANUAL.md for the other regions.
@@ -53,9 +56,12 @@ FreeForGemPear для Windows 10/11 (x64)
    Если майнер завершился или упал, он автоматически перезапускается через 15 с.
 
 Нужен только драйвер NVIDIA 525 или новее (CUDA, Python и WSL не нужны). Один процесс работает со всеми картами.
+AMD Radeon RX 6000 (RDNA2, проверено на RX 6800 XT; с 1.6.0): нужен только драйвер AMD Adrenalin, подходят те же файлы запуска
+(майнер сам берёт AMD-библиотеку, если карт NVIDIA нет; встроенная графика Radeon пропускается). AUTO_UV=1 на AMD запускает
+amduv.exe (подбор один раз ~10-15 мин, при выходе возвращает ваши настройки; запуск от администратора). MANUAL.md, раздел 14.
 Проверка (по желанию): в cmd в этой папке выполните  freeforgempear.exe --self-test
 Если Defender/SmartScreen блокирует запуск: "Подробнее -> Выполнить в любом случае" или добавьте папку в исключения.
-Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256
+Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256
 
 ------------------------------------------------------------------------------------------------
 FreeForGemPear Windows 10/11 (x64) 版

@@ -372,7 +372,7 @@ fn mine(a: Args) -> Result<()> {
         let (rtx, rrx) = mpsc::channel();
         handles.push(worker::spawn(dev, device_ms[i], sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
         rrx.recv()??; // GPU initialised (or the error that stopped it)
-        println!("GPU {dev}: {}", gs.name);
+        println!("GPU {dev}: {} ({} backend, kernel {})", gs.name, gpu::backend().name(), gpu::kernel_label_for(dev));
         gstats.push(gs);
     }
     drop((user_sub_tx, fee_sub_tx));
@@ -586,7 +586,7 @@ OPTIONS:
     --wallet ADDRESS     your PRL wallet address (required)
     --worker NAME        worker name (default worker1)
     --password TEXT      stratum password (default x); Kryptex custom share difficulty: d=VALUE, e.g. d=8388608
-    --devices 0,1,...    CUDA devices to mine on (default: all visible; honours CUDA_VISIBLE_DEVICES)
+    --devices 0,1,...    GPUs to mine on (default: all visible; NVIDIA: honours CUDA_VISIBLE_DEVICES)
     --minutes N          stop after N minutes (default: run until interrupted)
     --self-test          verify the GPU kernel against the CPU reference and exit
     --backend B          GPU library: auto (default: CUDA if it sees a device, else AMD), cuda, amd ($FFGP_BACKEND)

@@ -1,6 +1,7 @@
 # FreeForGemPear
 
-GPU miner for **Pearl (PRL)** — pearlhash proof-of-useful-work — with a **1% developer fee**.
+GPU miner for **Pearl (PRL)** — pearlhash proof-of-useful-work — with a **1% developer fee**. Since 1.6.0 it also mines
+**Common Foundry (CMFD)** and runs on **AMD Radeon** cards (Windows).
 
 Our own CUDA kernel for NVIDIA Ampere: the A′ matrix is generated on-chip, the int8 tensor-core
 GEMM (`mma.sync m16n8k32`) runs in a persistent kernel, and the jackpot fold and the BLAKE3
@@ -30,7 +31,11 @@ is emitted directly as SASS by our own generator.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
 * **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810.
-* **Not supported:** older GPUs (Pascal and earlier), A100 (sm_80), AMD.
+* **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
+  ~32 TH/s at ~172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
+  graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
+  Details: [MANUAL.md](MANUAL.md) section 14.
+* **Not supported:** older GPUs (Pascal and earlier), A100 (sm_80), AMD RX 5000 and older, AMD on Linux/HiveOS.
 * **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer (RTX 50xx: 570 or newer). The Linux binary is built on
   Ubuntu 20.04 (glibc 2.31), so it runs on Ubuntu 20.04+ and HiveOS.
 
@@ -39,8 +44,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.5.2-linux-x86_64.tar.gz
-cd freeforgempear-1.5.2
+tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
+cd freeforgempear-1.6.0
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -52,6 +57,7 @@ cd freeforgempear-1.5.2
 | `--worker NAME` | worker name (default `worker1`) |
 | `--password TEXT` | stratum password (default `x`); on Kryptex `d=VALUE` sets a custom share difficulty |
 | `--devices 0,1,...` | GPUs to use (default: all visible; honours `CUDA_VISIBLE_DEVICES`) |
+| `--backend auto\|cuda\|amd` | GPU library: auto (default) = CUDA if it sees an NVIDIA GPU, else AMD (Windows) |
 | `--minutes N` | stop after N minutes (default: run until Ctrl-C / SIGTERM) |
 | `--self-test` | verify the kernel and exit |
 | `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
@@ -73,10 +79,10 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.5.2-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+Download `freeforgempear-1.6.0-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
 (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
 `WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
-exits is restarted after 15 s. Only the NVIDIA driver is needed. Details: [MANUAL.md](MANUAL.md#5-windows-1011),
+exits is restarted after 15 s. Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
 `README-WINDOWS.txt`.
 For a driver clock lock + power limit through `nvidia-smi` there is `start-nvidia-smi.bat` (run as Administrator).
 
@@ -86,7 +92,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
@@ -97,7 +103,7 @@ in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**
 
 ## Common Foundry (CMFD)
 
-Since 1.6.0 (branch `cmfd`, not released yet) the same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**:
+Since 1.6.0 the same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**:
 give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ shows it, or the older 64-hex form), everything else works as for Pearl
 (one process for all GPUs, `--devices`, `--lock-cclock/--lock-mclock/--moffset`, `--minutes`, the stats line, HiveOS, Windows):
 
@@ -107,7 +113,8 @@ give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ 
 ```
 
 The CMFD work is done by the **FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>), shipped
-unchanged in the `cmfd/` folder: same consensus code, same speed (RTX 3070 ~20 FW/s, RTX 4070 Ti ~35 FW/s). The 6.4 GB
+unchanged in the `cmfd/` folder (release 1.2.4): same consensus code, same speed (RTX 3070 ~20 FW/s, RTX 4070 Ti ~35 FW/s;
+AMD RX 6800 XT ~10 FW/s on Windows). The 6.4 GB
 model is downloaded once from the official Common Foundry servers and then only verified (`--cmfd-model DIR`; on HiveOS it is
 shared with FreeForgeMiner in `/hive/miners/custom/cmfd-model`). Needs about 7 GB of free GPU memory and an RTX 20xx or newer.
 `--cmfd-mode eco` = RTX 30 about 13% fewer watts for 2% less hashrate. A Pearl undervolt (positive core offset) makes CMFD
@@ -137,8 +144,8 @@ The fee is a condition of the license: removing, reducing or redirecting it is n
 
 The **host program** (pool client, job and proof logic, `host/`) is open source and built from this repository.
 The **GPU kernel is closed source**: the search library is provided as a binary in `prebuilt/`
-(`linux-x86_64/libpearlgpu.so`, `windows-x64/pearlgpu.dll` + `pearlgpu.lib`). Its C API is declared in
-`gpu/pearlgpu.h`. The build only compiles the host and links this library.
+(`linux-x86_64/libpearlgpu.so`, `windows-x64/pearlgpu.dll` + `pearlgpu.lib`; AMD: `windows-x64/pearlgpu_amd.dll`, `amduv.exe`).
+Its C API is declared in `gpu/pearlgpu.h`. The build only compiles the host; the library is loaded at run time.
 
 Requirements: Rust (stable, edition 2024), a C linker (gcc), git, and the NVIDIA driver (or the CUDA toolkit stubs) so the
 linker can resolve the library's `libcuda.so.1` dependency. No `nvcc` is needed.

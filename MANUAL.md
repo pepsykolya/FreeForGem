@@ -11,7 +11,8 @@
 
 ### 1. What it is
 
-FreeForGemPear is a GPU miner for **Pearl (PRL)** (pearlhash proof-of-useful-work) on NVIDIA GPUs, with a **1% developer fee**.
+FreeForGemPear is a GPU miner for **Pearl (PRL)** (pearlhash proof-of-useful-work) on NVIDIA GPUs (and, since 1.6.0, AMD Radeon
+on Windows), with a **1% developer fee**. Since 1.6.0 it also mines Common Foundry (CMFD, section 13).
 It has its own CUDA kernel for Ampere: the A′ matrix is generated on-chip, the int8 tensor-core GEMM runs in a persistent
 kernel, and the jackpot fold and the BLAKE3 hash are fused into it. The main loop is hand-tuned at SASS level.
 The host builds and checks every share proof with the official `zk-pow` verifier before it is submitted.
@@ -22,11 +23,13 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 | RTX 40xx (Ada, sm_89) | own SASS kernel since 1.5.4 (RTX 4070 Ti: same hashrate, ~10 W less than the RTX 30xx kernel) |
 | RTX 50xx (Blackwell, sm_120) | supported since 1.5.0 with a compiled kernel (untuned); needs driver 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | supported since 1.5.3 with an own SASS kernel: ~49.9 TH/s on an RTX 2060 SUPER @1605 MHz; **memory must be locked at 5001, not 810** |
-| Older GPUs, A100 (sm_80), AMD | not supported |
+| AMD Radeon RX 6000 (RDNA2), Windows | **new in 1.6.0**, own OpenCL kernel: 34.4 TH/s on an RX 6800 XT (section 14) |
+| Older GPUs, A100 (sm_80), AMD on Linux / HiveOS | not supported |
 
 ### 2. Requirements
 
-* NVIDIA GPU of the RTX 30 series (RTX 40 runs untuned, RTX 50 since 1.5.0) and NVIDIA driver **525 or newer** (RTX 50xx: **570+**).
+* NVIDIA GPU: RTX 30 / RTX 40 (own kernels), RTX 20 / GTX 16 / CMP, RTX 50 (since 1.5.0); NVIDIA driver **525 or newer** (RTX 50xx: **570+**).
+* Or, on **Windows only**, an **AMD Radeon RX 6000** (RDNA2) card with the AMD Adrenalin driver (since 1.6.0, section 14).
 * HiveOS, Linux x86_64 (glibc 2.31+, Ubuntu 20.04+), or Windows 10/11 x64. No CUDA toolkit, no Python, no WSL.
 * A PRL wallet address (`prl1...`) and an internet connection to a Pearl stratum pool.
 * Video memory: the kernel works from the L2 cache and needs little VRAM.
@@ -38,7 +41,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -68,8 +71,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.5.2-linux-x86_64.tar.gz
-cd freeforgempear-1.5.2
+tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
+cd freeforgempear-1.6.0
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -90,8 +93,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.5.2-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2-windows-x64.zip`
+1. Download **`freeforgempear-1.6.0-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -142,7 +145,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -253,9 +256,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.5.2-linux-x86_64.tar.gz freeforgempear-1.5.2.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.5.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -533,6 +536,44 @@ is left alone and the log says why (no endless reconnects that could get the IP 
 internet access to downloads.commonfoundry.ai and github.com, free disk space; a pool refusing the URL — take its current
 line (pin) from the pool's site.
 
+
+### 14. AMD Radeon (Windows), new in 1.6.0
+
+The Windows package also mines on **AMD Radeon** cards with its own OpenCL kernel (`pearlgpu_amd.dll`, closed source like
+the CUDA one). Same binary, same start files, same log; the miner picks the GPU library by itself:
+
+* `--backend auto` (default): the CUDA library if it sees an NVIDIA GPU, otherwise the AMD library. `--backend amd` /
+  `--backend cuda` (or `FFGP_BACKEND`) force it. The log shows the choice: `1 GPU(s) [amd]` and
+  `[pearlgpu-amd] gfx1030: amd-a0 udot4 k8192`.
+* Only **discrete** Radeon cards are used; the integrated "AMD Radeon(TM) Graphics" of Ryzen CPUs is skipped.
+* One process drives one vendor: on a PC with NVIDIA and AMD cards run two miners (`--backend cuda` and `--backend amd`).
+
+| AMD GPU | Status |
+|---|---|
+| RX 6000 (RDNA2, e.g. RX 6800 XT) | **tested**: Pearl 34.4 TH/s at ~260 W (stock), self-test, pool shares; CMFD ~10 FW/s |
+| RX 7000 (RDNA3), RX 9000 (RDNA4) | should run the same kernel, **not tested** |
+| RX 5000 (RDNA1), Vega and older, integrated graphics | not supported |
+| Linux / HiveOS with AMD | **not available yet** (the Linux and HiveOS packages are NVIDIA-only) |
+
+**Needs:** Windows 10/11 x64 and the AMD Adrenalin driver (it brings OpenCL); no NVIDIA driver. Run any `start*.bat` as
+for NVIDIA. Self-test: `freeforgempear.exe --self-test` (checks the AMD kernel against the CPU reference, `== self-test PASSED ==`).
+
+**Watts** in the stats line come from the driver (ADLX, chip power, read-only). On a rig with several AMD cards the per-card
+watts may be swapped between cards (the rig total is right).
+
+**Undervolt (`--auto-uv`) on AMD** works differently from NVIDIA: the miner starts the `amduv.exe` tool next to it, which
+tunes the core clock limit at the lowest core voltage (every point is checked bit-for-bit on the GPU and the CPU), once per
+card / driver / AMD library version (~10–15 min), and then applies the result at each start. A guard process puts **your own
+clock / voltage / power-limit settings back** when the miner exits, also after a crash or a kill. Run as Administrator.
+Result on our RX 6800 XT: about 32 TH/s at ~172 W instead of 34 TH/s at ~260 W (+40 % TH/W). `$FFGP_AMD_UV_GOAL=max`
+keeps more speed; `--uv-reset` forgets the result. `--uv-offset`, `--lock-cclock`, `--lock-mclock` and `--moffset` are
+NVIDIA-only (the miner refuses them with AMD).
+
+**CMFD on AMD:** `start-cmfd.bat` / `--pool cmfd+tls://…` works the same way; the package runs its OpenCL worker
+`cmfd\cmfd-v4-replay-ocl.exe` and the pool client `cmfd\cmfd-miner-ffgp.exe` (FreeForgeMiner rebuilt with the small patch in
+`cmfd/patches/`, so it runs without nvidia-smi). Needs ~7 GB of free GPU memory. RX 6800 XT: ~10 FW/s at ~275 W (an RTX 3070
+does ~20 FW/s): CMFD is much better on NVIDIA tensor cores.
+
 ---
 
 ## Русский
@@ -550,11 +591,13 @@ FreeForGemPear — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-
 | RTX 40xx (Ada, sm_89) | своё SASS-ядро с 1.5.4 (RTX 4070 Ti: тот же хэшрейт, на ~10 Вт меньше, чем с ядром RTX 30xx) |
 | RTX 50xx (Blackwell, sm_120) | поддержка с 1.5.0, компилированное ядро (без оптимизации); нужен драйвер 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | поддержка с 1.5.3, собственное SASS-ядро: ~49,9 TH/s на RTX 2060 SUPER @1605 МГц; **память лочить на 5001, не 810** |
-| Старые карты, A100 (sm_80), AMD | не поддерживаются |
+| AMD Radeon RX 6000 (RDNA2), Windows | **новое в 1.6.0**, своё ядро OpenCL: 34,4 TH/s на RX 6800 XT (раздел 14) |
+| Старые карты, A100 (sm_80), AMD в Linux / HiveOS | не поддерживаются |
 
 ### 2. Требования
 
-* Видеокарта NVIDIA серии RTX 30 (RTX 40 — без оптимизации, RTX 50 — с 1.5.0), драйвер NVIDIA **525 или новее** (RTX 50xx: **570+**).
+* Видеокарта NVIDIA: RTX 30 / RTX 40 (свои ядра), RTX 20 / GTX 16 / CMP, RTX 50 (с 1.5.0); драйвер NVIDIA **525 или новее** (RTX 50xx: **570+**).
+* Или, **только в Windows**, карта **AMD Radeon RX 6000** (RDNA2) с драйвером AMD Adrenalin (с 1.6.0, раздел 14).
 * HiveOS, Linux x86_64 (glibc 2.31+, Ubuntu 20.04+) или Windows 10/11 x64. CUDA toolkit, Python и WSL не нужны.
 * Адрес кошелька PRL (`prl1...`) и интернет до stratum-пула Pearl.
 * Видеопамять: ядро работает из L2-кэша и почти не использует VRAM.
@@ -566,7 +609,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -596,8 +639,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.5.2-linux-x86_64.tar.gz
-cd freeforgempear-1.5.2
+tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
+cd freeforgempear-1.6.0
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -618,8 +661,8 @@ cd freeforgempear-1.5.2
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.5.2-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.6.0-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -670,7 +713,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -779,9 +822,9 @@ auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Tu
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.5.2-linux-x86_64.tar.gz freeforgempear-1.5.2.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.5.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1064,6 +1107,44 @@ RTX 3070 (лимит 135 Вт) 14,1 FW/s при 135 Вт — столько же
 доступ к downloads.commonfoundry.ai и github.com и место на диске; пул не принимает адрес — возьмите актуальную строку (пин) на
 сайте пула.
 
+
+### 14. AMD Radeon (Windows), новое в 1.6.0
+
+Пакет для Windows майнит и на картах **AMD Radeon** — своим ядром OpenCL (`pearlgpu_amd.dll`, закрытое, как и CUDA-ядро).
+Тот же бинарник, те же файлы запуска, тот же лог; библиотеку GPU майнер выбирает сам:
+
+* `--backend auto` (по умолчанию): CUDA-библиотека, если она видит карту NVIDIA, иначе AMD. `--backend amd` / `--backend cuda`
+  (или `FFGP_BACKEND`) задают выбор явно. В логе видно, что выбрано: `1 GPU(s) [amd]` и
+  `[pearlgpu-amd] gfx1030: amd-a0 udot4 k8192`.
+* Используются только **дискретные** карты Radeon; встроенная графика Ryzen «AMD Radeon(TM) Graphics» пропускается.
+* Один процесс — один производитель: на ПК с картами NVIDIA и AMD запустите два майнера (`--backend cuda` и `--backend amd`).
+
+| GPU AMD | Статус |
+|---|---|
+| RX 6000 (RDNA2, напр. RX 6800 XT) | **проверено**: Pearl 34,4 TH/s при ~260 Вт (сток), self-test, шары на пуле; CMFD ~10 FW/s |
+| RX 7000 (RDNA3), RX 9000 (RDNA4) | должно работать на том же ядре, **не проверено** |
+| RX 5000 (RDNA1), Vega и старше, встроенная графика | не поддерживаются |
+| Linux / HiveOS с AMD | **пока нет** (пакеты для Linux и HiveOS — только NVIDIA) |
+
+**Нужно:** Windows 10/11 x64 и драйвер AMD Adrenalin (в нём OpenCL); драйвер NVIDIA не нужен. Запуск — любой `start*.bat`,
+как для NVIDIA. Проверка: `freeforgempear.exe --self-test` (ядро AMD сверяется с эталоном на CPU, `== self-test PASSED ==`).
+
+**Ватты** в строке статистики — от драйвера (ADLX, мощность чипа, только чтение). На риге из нескольких карт AMD ватты
+отдельных карт могут перепутаться между картами (сумма по ригу верна).
+
+**Андервольт (`--auto-uv`) на AMD** устроен иначе, чем у NVIDIA: майнер запускает лежащую рядом утилиту `amduv.exe`, она один
+раз на карту / драйвер / версию AMD-библиотеки (~10–15 мин) подбирает предел частоты ядра на минимальном напряжении (каждая точка
+проверяется побитно на GPU и на CPU), а при следующих запусках применяет результат. Отдельный сторож **возвращает ваши
+настройки частоты / напряжения / лимита мощности**, когда майнер завершается, в том числе после падения или kill. Запуск от
+администратора. На нашей RX 6800 XT: около 32 TH/s при ~172 Вт вместо 34 TH/s при ~260 Вт (+40 % TH/Вт).
+`$FFGP_AMD_UV_GOAL=max` оставляет больше скорости; `--uv-reset` забывает результат. `--uv-offset`, `--lock-cclock`,
+`--lock-mclock` и `--moffset` — только для NVIDIA (с AMD майнер их не принимает).
+
+**CMFD на AMD:** `start-cmfd.bat` / `--pool cmfd+tls://…` работают так же; пакет запускает свой OpenCL-воркер
+`cmfd\cmfd-v4-replay-ocl.exe` и клиент пула `cmfd\cmfd-miner-ffgp.exe` (FreeForgeMiner, пересобранный с небольшим патчем из
+`cmfd/patches/`, чтобы работать без nvidia-smi). Нужно ~7 ГБ свободной видеопамяти. RX 6800 XT: ~10 FW/s при ~275 Вт (RTX 3070 —
+~20 FW/s): CMFD гораздо выгоднее на тензорных ядрах NVIDIA.
+
 ---
 
 ## 中文
@@ -1080,11 +1161,13 @@ FreeForGemPear 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用�
 | RTX 40xx（Ada，sm_89） | 自 1.5.4 起使用专用 SASS 内核（RTX 4070 Ti：算力相同，功耗比 RTX 30xx 内核低约 10 W） |
 | RTX 50xx（Blackwell，sm_120） | 自 1.5.0 起支持，使用编译内核（未调优）；需要驱动 570+ |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX（Turing，sm_75） | 自 1.5.3 起支持，专用 SASS 内核：RTX 2060 SUPER @1605 MHz 约 49.9 TH/s；**显存必须锁定 5001，不是 810** |
-| 更老的显卡、A100（sm_80）、AMD | 不支持 |
+| AMD Radeon RX 6000（RDNA2），Windows | **1.6.0 新增**，自有 OpenCL 内核：RX 6800 XT 上 34.4 TH/s（第 14 节） |
+| 更老的显卡、A100（sm_80）、Linux / HiveOS 上的 AMD | 不支持 |
 
 ### 2. 系统要求
 
-* RTX 30 系列 NVIDIA 显卡（RTX 40 未调优可运行，RTX 50 自 1.5.0 起支持），NVIDIA 驱动 **525 或更新**（RTX 50xx：**570+**）。
+* NVIDIA 显卡：RTX 30 / RTX 40（专用内核）、RTX 20 / GTX 16 / CMP、RTX 50（自 1.5.0 起）；NVIDIA 驱动 **525 或更新**（RTX 50xx：**570+**）。
+* 或者（**仅限 Windows**）使用 **AMD Radeon RX 6000**（RDNA2）显卡及 AMD Adrenalin 驱动（自 1.6.0 起，见第 14 节）。
 * HiveOS、Linux x86_64（glibc 2.31+，Ubuntu 20.04+）或 Windows 10/11 x64。不需要 CUDA toolkit、Python 或 WSL。
 * PRL 钱包地址（`prl1...`）以及到 Pearl stratum 矿池的网络连接。
 * 显存：内核从 L2 缓存工作，几乎不占用显存。
@@ -1096,7 +1179,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1126,8 +1209,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.5.2-linux-x86_64.tar.gz
-cd freeforgempear-1.5.2
+tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
+cd freeforgempear-1.6.0
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1148,8 +1231,8 @@ cd freeforgempear-1.5.2
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.5.2-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgempear-1.5.2-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.6.0-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1191,7 +1274,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.5.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1286,9 +1369,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.5.2-linux-x86_64.tar.gz freeforgempear-1.5.2.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.5.2-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.5.2-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -1536,3 +1619,36 @@ RTX 3070（功耗限制 135 W）14.1 FW/s @ 135 W —— 与同卡上的 FreeFor
 **故障排除：** `out of memory` —— 关闭占用 GPU 的程序，CMFD 需约 7 GB 空闲显存；`illegal memory access` /
 `misaligned address` / `INTEGRITY | ERROR` —— 去掉核心偏移、降低频率；`model preparation ... failed` —— 检查能否访问
 downloads.commonfoundry.ai 和 github.com 以及磁盘空间；矿池不接受地址 —— 从矿池网站获取当前地址（pin）。
+
+### 14. AMD Radeon（Windows），1.6.0 新增
+
+Windows 软件包也可以在 **AMD Radeon** 显卡上挖矿，使用自有的 OpenCL 内核（`pearlgpu_amd.dll`，与 CUDA 内核一样闭源）。
+同一个程序、同样的启动文件、同样的日志；矿工自动选择 GPU 库：
+
+* `--backend auto`（默认）：如果 CUDA 库能看到 NVIDIA 显卡就用 CUDA，否则用 AMD 库。`--backend amd` / `--backend cuda`
+  （或 `FFGP_BACKEND`）可强制指定。日志中显示所选结果：`1 GPU(s) [amd]` 和 `[pearlgpu-amd] gfx1030: amd-a0 udot4 k8192`。
+* 只使用**独立** Radeon 显卡；Ryzen 处理器的集成显卡 “AMD Radeon(TM) Graphics” 会被跳过。
+* 一个进程只驱动一种厂商的显卡：同时有 NVIDIA 和 AMD 显卡的电脑请运行两个矿工（`--backend cuda` 和 `--backend amd`）。
+
+| AMD GPU | 状态 |
+|---|---|
+| RX 6000（RDNA2，例如 RX 6800 XT） | **已测试**：Pearl 34.4 TH/s，约 260 W（默认设置），自检、矿池份额正常；CMFD 约 10 FW/s |
+| RX 7000（RDNA3）、RX 9000（RDNA4） | 应可运行同一内核，**未测试** |
+| RX 5000（RDNA1）、Vega 及更早、集成显卡 | 不支持 |
+| Linux / HiveOS 上的 AMD | **暂不提供**（Linux 和 HiveOS 软件包仅支持 NVIDIA） |
+
+**需要：** Windows 10/11 x64 和 AMD Adrenalin 驱动（自带 OpenCL）；不需要 NVIDIA 驱动。与 NVIDIA 一样运行任意 `start*.bat`。
+自检：`freeforgempear.exe --self-test`（将 AMD 内核与 CPU 参考实现比对，`== self-test PASSED ==`）。
+
+统计行中的**功耗**来自驱动（ADLX，芯片功耗，只读）。在多块 AMD 显卡的矿机上，单卡功耗可能在显卡之间对调（整机总和正确）。
+
+**AMD 上的降压（`--auto-uv`）** 与 NVIDIA 不同：矿工启动同目录下的 `amduv.exe` 工具，它在最低核心电压下调出核心频率上限
+（每个点都在 GPU 和 CPU 上逐位校验），每块卡 / 驱动 / AMD 库版本只做一次（约 10–15 分钟），之后每次启动直接应用结果。独立的守护进程
+在矿工退出时（包括崩溃或被强制结束）**恢复您自己的频率 / 电压 / 功耗限制设置**。请以管理员身份运行。我们的 RX 6800 XT：约
+32 TH/s @ ~172 W，而默认为 34 TH/s @ ~260 W（TH/W 提高约 40 %）。`$FFGP_AMD_UV_GOAL=max` 保留更多速度；`--uv-reset`
+清除结果。`--uv-offset`、`--lock-cclock`、`--lock-mclock` 和 `--moffset` 仅适用于 NVIDIA（AMD 下矿工会拒绝）。
+
+**AMD 上的 CMFD：** `start-cmfd.bat` / `--pool cmfd+tls://…` 用法相同；软件包运行自带的 OpenCL 工作进程
+`cmfd\cmfd-v4-replay-ocl.exe` 和矿池客户端 `cmfd\cmfd-miner-ffgp.exe`（用 `cmfd/patches/` 中的小补丁重新编译的
+FreeForgeMiner，无需 nvidia-smi）。需要约 7 GB 空闲显存。RX 6800 XT：约 10 FW/s @ ~275 W（RTX 3070 约 20 FW/s）：CMFD 在
+NVIDIA 张量核心上效率高得多。
