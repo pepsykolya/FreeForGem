@@ -250,7 +250,28 @@ pub fn engine_dir(given: &Option<PathBuf>) -> Result<PathBuf> {
             dir.join(&f).display()
         );
     }
+    check_glibc()?;
     Ok(dir)
+}
+
+/// The Linux CMFD engine (FreeForgeMiner, built on Ubuntu 22.04) needs glibc 2.34+; Pearl itself runs from glibc 2.31 (Ubuntu
+/// 20.04).  Without this check an older system only shows "GLIBC_2.32 not found" from the engine and a restart loop.
+fn check_glibc() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn gnu_get_libc_version() -> *const std::os::raw::c_char;
+        }
+        let v = unsafe { std::ffi::CStr::from_ptr(gnu_get_libc_version()) }.to_string_lossy().into_owned();
+        let mut it = v.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
+        let (maj, min) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        ensure!(
+            (maj, min) >= (2, 34),
+            "CMFD needs glibc 2.34 or newer (Ubuntu 22.04+, HiveOS on Ubuntu 22.04); this system has glibc {v}. Pearl mining works here; \
+             for CMFD update the OS (HiveOS: a current Ubuntu 22.04 image)"
+        );
+    }
+    Ok(())
 }
 
 /// Engine version line written by cmfd/fetch-engine.* (e.g. "FreeForgeMiner 1.2.4"), for the banner.

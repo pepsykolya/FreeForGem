@@ -463,7 +463,8 @@ CMFD address in either form: `cmfd1...` (63 characters with a checksum, as the C
 (a typo is refused before mining starts) and sent to the pool as hex. Test-network `tcmfd1...` addresses are refused.
 
 **Requirements.** NVIDIA RTX 20xx or newer (tuned for RTX 30/40), about **7 GB of free GPU memory per card** (the model alone
-is 6.4 GB), NVIDIA driver R575+ on Linux/HiveOS, 7 GB of disk for the model.
+is 6.4 GB), NVIDIA driver R575+ on Linux/HiveOS, 7 GB of disk for the model. Linux/HiveOS: **glibc 2.34+** (Ubuntu 22.04 or newer,
+HiveOS on Ubuntu 22.04) — the CMFD engine does not run on Ubuntu 20.04 (Pearl does); the miner says so at start.
 
 **The model** (6.4 GB) is downloaded once from the official Common Foundry servers in authenticated parts and then only
 verified at each start (takes 10–40 s). Location: `--cmfd-model DIR`; default `/hive/miners/custom/cmfd-model` on HiveOS
@@ -1034,7 +1035,8 @@ Common Foundry 1.0.16+) или прежние 64 шестнадцатеричн�
 (опечатка отсекается до начала майнинга) и уходит на пул в hex. Адреса тестовой сети `tcmfd1...` не принимаются.
 
 **Требования.** NVIDIA RTX 20xx и новее (оптимизировано под RTX 30/40), около **7 ГБ свободной видеопамяти на карту**
-(одна модель — 6,4 ГБ), драйвер NVIDIA R575+ на Linux/HiveOS, 7 ГБ на диске под модель.
+(одна модель — 6,4 ГБ), драйвер NVIDIA R575+ на Linux/HiveOS, 7 ГБ на диске под модель. Linux/HiveOS: **glibc 2.34+** (Ubuntu 22.04
+и новее, HiveOS на Ubuntu 22.04) — на Ubuntu 20.04 движок CMFD не запускается (Pearl работает); майнер сообщит об этом при старте.
 
 **Модель** (6,4 ГБ) скачивается один раз с официальных серверов Common Foundry проверяемыми частями, дальше при каждом
 запуске только проверяется (10–40 с). Где лежит: `--cmfd-model DIR`; по умолчанию `/hive/miners/custom/cmfd-model` в HiveOS
@@ -1551,7 +1553,8 @@ FreeForGemPear 负责准备模型、为每块 GPU 启动一个引擎进程、应
 测试网 `tcmfd1...` 地址不被接受。
 
 **系统要求。** NVIDIA RTX 20xx 或更新（针对 RTX 30/40 优化），**每张卡约 7 GB 空闲显存**（仅模型就有 6.4 GB），
-Linux/HiveOS 上 NVIDIA 驱动 R575+，磁盘需 7 GB 存放模型。
+Linux/HiveOS 上 NVIDIA 驱动 R575+，磁盘需 7 GB 存放模型。Linux/HiveOS 需要 **glibc 2.34+**（Ubuntu 22.04 或更新，基于 Ubuntu 22.04 的
+HiveOS）——CMFD 引擎无法在 Ubuntu 20.04 上运行（Pearl 可以）；矿工启动时会提示。
 
 **模型**（6.4 GB）首次从 Common Foundry 官方服务器分块下载并校验，之后每次启动只做校验（10–40 秒）。位置：`--cmfd-model DIR`；
 HiveOS 上默认 `/hive/miners/custom/cmfd-model`（与 FreeForgeMiner 共用，已运行过它的矿机不会重复下载），否则为程序旁的 `cmfd-model`。

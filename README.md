@@ -116,7 +116,8 @@ The CMFD work is done by the **FreeForgeMiner** engine (MIT, <https://github.com
 unchanged in the `cmfd/` folder (release 1.2.4): same consensus code, same speed (RTX 3070 ~20 FW/s, RTX 4070 Ti ~35 FW/s;
 AMD RX 6800 XT ~10 FW/s on Windows). The 6.4 GB
 model is downloaded once from the official Common Foundry servers and then only verified (`--cmfd-model DIR`; on HiveOS it is
-shared with FreeForgeMiner in `/hive/miners/custom/cmfd-model`). Needs about 7 GB of free GPU memory and an RTX 20xx or newer.
+shared with FreeForgeMiner in `/hive/miners/custom/cmfd-model`). Needs about 7 GB of free GPU memory and an RTX 20xx or newer;
+on Linux/HiveOS glibc 2.34+ (Ubuntu 22.04+; the CMFD engine does not run on Ubuntu 20.04, Pearl does).
 `--cmfd-mode eco` = RTX 30 about 13% fewer watts for 2% less hashrate. A Pearl undervolt (positive core offset) makes CMFD
 compute wrong results, so in CMFD mode the miner sets it to 0 for the run and puts it back on exit (needs root/Administrator;
 `--uv-offset N` forces a value at your own risk; `--auto-uv` is Pearl-only).
