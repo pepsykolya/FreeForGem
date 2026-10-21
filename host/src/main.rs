@@ -125,7 +125,9 @@ fn set_job_gpu(job: &Job) -> Result<()> {
     gpu::set_job(&job.br_t, &job.q1, &job.q2, N, k())
 }
 
-fn self_test(device: i32) -> Result<()> {
+/// Pearl self-test: the CPU reference checks once, then the GPU checks on every device of `devices` (default: all visible),
+/// one device after another, each in its own thread (the library state is per thread).
+fn self_test(devices: Option<&[i32]>) -> Result<()> {
     println!("== self-test ==");
     let t0 = Instant::now();
     let job = Job::new(&test_header(7), 3, m())?;
@@ -141,19 +143,8 @@ fn self_test(device: i32) -> Result<()> {
         println!("[ok] incremental == full hash_a for nonce {c}: {}", hex(&inc));
     }
 
-    gpu::init(device)?;
-    println!("backend: {} ({}), kernel {}", gpu::backend().name(), gpu::device_name(device), gpu::kernel_label());
-    // item 5: GPU A_L == reference
     let row0 = job.nonce_row(0);
     let seed = job.a_noise_seed(&row0);
-    for first in [0usize, m() - 4] {
-        let g = gpu::debug_al(&seed, m(), first, 4)?;
-        let rows: Vec<usize> = (first..first + 4).collect();
-        let r: Vec<i8> = zk_pow::circuit::pearl_noise::generate_uniform_random_matrix(&LABEL_A, &seed, &rows, RANK).concat();
-        ensure!(g == r, "A_L mismatch for rows {first}..{}", first + 4);
-        println!("[ok] GPU A_L == generate_uniform_random_matrix for rows {first}..{}", first + 4);
-    }
-
     // serial permutation == official
     for s in 0..4u8 {
         let mut sd = seed;
@@ -168,16 +159,59 @@ fn self_test(device: i32) -> Result<()> {
     }
     println!("[ok] a_perm == official; host prep per attempt {:?}", t.elapsed() / 1000);
 
+    let count = gpu::device_count();
+    ensure!(count > 0, "no GPU devices visible to the {} backend", gpu::backend().name());
+    let devs: Vec<i32> = match devices {
+        Some(d) => d.to_vec(),
+        None => (0..count as i32).collect(),
+    };
+    for &d in &devs {
+        ensure!((d as usize) < count, "device {d} does not exist ({count} {} device(s) visible)", gpu::backend().name());
+    }
+    let mut failed = Vec::new();
+    for &dev in &devs {
+        let r = std::thread::scope(|s| s.spawn(|| gpu_self_test(dev, &job, &row0, &seed)).join());
+        match r {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                println!("[FAIL] GPU{dev}: {e:#}");
+                failed.push(dev);
+            }
+            Err(_) => {
+                println!("[FAIL] GPU{dev}: the check thread panicked");
+                failed.push(dev);
+            }
+        }
+    }
+    ensure!(failed.is_empty(), "self-test FAILED on GPU {failed:?} (of {devs:?})");
+    println!("GPUs checked: {devs:?}");
+    println!("== self-test PASSED ==");
+    Ok(())
+}
+
+/// GPU part of the self-test on one device (runs in its own thread).
+fn gpu_self_test(device: i32, job: &Job, row0: &[u8], seed: &[u8; 32]) -> Result<()> {
+    gpu::init(device)?;
+    println!("GPU{device}: backend {} ({}), kernel {}", gpu::backend().name(), gpu::device_name(device), gpu::kernel_label());
+    // item 5: GPU A_L == reference
+    for first in [0usize, m() - 4] {
+        let g = gpu::debug_al(seed, m(), first, 4)?;
+        let rows: Vec<usize> = (first..first + 4).collect();
+        let r: Vec<i8> = zk_pow::circuit::pearl_noise::generate_uniform_random_matrix(&LABEL_A, seed, &rows, RANK).concat();
+        ensure!(g == r, "A_L mismatch for rows {first}..{}", first + 4);
+        println!("[ok] GPU{device} A_L == generate_uniform_random_matrix for rows {first}..{}", first + 4);
+    }
+
     // end-to-end with an easy target
-    set_job_gpu(&job)?;
-    let (p1, p2) = a_perm(&seed);
+    set_job_gpu(job)?;
+    let (p1, p2) = a_perm(seed);
     let mut target = [0xffff_ffffu32; 8];
     target[7] = 0x00ff_ffff;
     let tgt = U256::from_little_endian(&target_words_bytes(&target));
     let mut hits = vec![gpu::Hit::default(); 256];
     let t = Instant::now();
-    let (total, stored) = gpu::attempt(&seed, &p1, &p2, m(), &target, &mut hits)?;
-    println!("attempt: {total} hits reported ({stored} stored) in {:?}", t.elapsed());
+    let (total, stored) = gpu::attempt(seed, &p1, &p2, m(), &target, &mut hits)?;
+    println!("GPU{device} attempt: {total} hits reported ({stored} stored) in {:?}", t.elapsed());
     let hits = &hits[..stored];
     let row0_hits = hits.iter().filter(|h| h.row == 0).count();
     println!("     hits with row==0 (dropped): {row0_hits}; rows<8: {}", hits.iter().filter(|h| h.row < 8).count());
@@ -189,11 +223,12 @@ fn self_test(device: i32) -> Result<()> {
     ensure!(!picks.is_empty(), "no usable hit with the easy target");
     for h in picks {
         let t = Instant::now();
-        let proof = prove_hit(&job, &row0, h, &seed, tgt)?;
+        let proof = prove_hit(job, row0, h, seed, tgt)?;
         let bytes = bincode::serialize(&proof)?;
         PlainProof::deserialize_compat(&bytes)?;
         println!(
-            "[ok] hit tile=({}, {}) jackpot={}: GPU == CPU, verify_plain_proof passed, proof {} B ({:?})",
+            "[ok] GPU{} hit tile=({}, {}) jackpot={}: GPU == CPU, verify_plain_proof passed, proof {} B ({:?})",
+            device,
             h.row,
             h.col,
             hex(&hit_hash(h)),
@@ -201,7 +236,6 @@ fn self_test(device: i32) -> Result<()> {
             t.elapsed()
         );
     }
-    println!("== self-test PASSED ==");
     Ok(())
 }
 
@@ -900,7 +934,7 @@ fn main() -> Result<()> {
         return mine_cmfd(a);
     }
     if test {
-        return self_test(a.devices.as_ref().map_or(0, |d| d[0]));
+        return self_test(a.devices.as_deref());
     }
     ensure!(!a.wallet.is_empty(), "--wallet is required (see --help)");
     a.pool = stratum::pool_addr(&a.pool).map_err(anyhow::Error::msg)?;
