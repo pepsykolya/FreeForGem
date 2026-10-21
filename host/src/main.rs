@@ -674,8 +674,8 @@ OPTIONS:
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL eff|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
-    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx 225,
-                         CMP 30HX/40HX/50HX 150, all others 495
+    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
+                         CMP 30HX/40HX 150, all others 495
     --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120;
                          RTX 40: at least 200, RTX 50: at least 300)
                          --uv-max, --uv-min and --uv-offset take one value for all GPUs, or one per GPU in --devices

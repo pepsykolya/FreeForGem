@@ -260,6 +260,12 @@ impl Nvml {
         Ok((p.domain, p.bus, p.device))
     }
 
+    /// PCI device id of the GPU (e.g. 0x1e09 = TU102 of the CMP 50HX); NVML reports (device << 16) | vendor.
+    pub fn pci_device_id(&self, d: Dev) -> Option<u16> {
+        let mut p: PciInfo = unsafe { std::mem::zeroed() };
+        (unsafe { (self.get_pci)(d.0, &mut p) } == 0).then_some((p.pci_device_id >> 16) as u16)
+    }
+
     pub fn power_w(&self, d: Dev) -> Option<f64> {
         let mut mw = 0;
         (unsafe { (self.get_power)(d.0, &mut mw) } == 0).then(|| mw as f64 / 1000.0)

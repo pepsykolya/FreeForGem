@@ -31,7 +31,8 @@ const BLACKWELL_MIN: i32 = 300; // default search start on RTX 50 (sm_120): they
 pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-offset say (the driver range c.hi caps it too)
 pub const DEFAULT_MAX: i32 = 495; // default --uv-max (RTX 30 / 40 / 50 and everything not listed in card_defaults)
 const TURING_MAX: i32 = 225; // default --uv-max on Turing (RTX 20 / GTX 16, sm_75): +200..260 measured, 225 keeps a margin
-const CMP_MAX: i32 = 150; // default --uv-max on Turing CMP (30HX / 40HX / 50HX): a CMP 40HX hit Xid at +255, rigs run +150
+const CMP_MAX: i32 = 150; // default --uv-max on CMP 30HX / 40HX (TU116 / TU106): a CMP 40HX hit Xid at +255, rigs run +150
+const CMP_50HX_PCI_ID: u16 = 0x1e09; // TU102 of the CMP 50HX: holds +220 and more (owner's rigs), so it gets the Turing limit
 const DISABLE_SECS: u64 = 24 * 3600;
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
@@ -179,13 +180,14 @@ pub struct Defaults {
     pub start_src: &'static str,
 }
 
-/// Card type from the NVML name and compute capability (`cc`; None when NVML does not report it).
-///  * Turing CMP (30HX / 40HX / 50HX, sm_75): max +150 (a CMP 40HX hit Xid at +255; user rigs run +150)
-///  * Turing (RTX 20xx / GTX 16xx, sm_75): max +225 (+200..260 measured on a 2060 SUPER)
+/// Card type from the NVML name, compute capability (`cc`) and PCI device id (`pci_id`); None when NVML does not report it.
+///  * CMP 30HX / 40HX (Turing, sm_75): max +150 (a CMP 40HX hit Xid at +255; user rigs run +150)
+///  * CMP 50HX (TU102, PCI id 0x1e09, or "50HX" in the name) and Turing RTX 20xx / GTX 16xx: max +225 (+200..260 measured
+///    on a 2060 SUPER; CMP 50HX rigs hold +220 and more)
 ///  * RTX 50 (Blackwell, sm_120): search starts at +300 at least (they hold +390..480; a shorter search)
 ///  * RTX 40 (Ada, sm_89): search starts at +200 at least
 ///  * everything else (RTX 30, Ampere CMP 70HX / 90HX): max +495, start at the current offset or +120
-pub fn card_defaults(name: &str, cc: Option<(i32, i32)>) -> Defaults {
+pub fn card_defaults(name: &str, cc: Option<(i32, i32)>, pci_id: Option<u16>) -> Defaults {
     let n = name.to_ascii_uppercase();
     let words: Vec<&str> = n.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let cmp = words.contains(&"CMP");
@@ -196,8 +198,11 @@ pub fn card_defaults(name: &str, cc: Option<(i32, i32)>) -> Defaults {
         Some(c) => c == (7, 5),
         None => turing_name || (cmp && !ampere_cmp), // no compute capability: the name decides, a CMP counts as Turing
     };
+    let cmp50 = pci_id == Some(CMP_50HX_PCI_ID) || (cmp && words.contains(&"50HX"));
     let base = Defaults { max: DEFAULT_MAX, max_src: "default", start_floor: None, start_src: "current offset or +120" };
-    if turing && cmp {
+    if turing && cmp50 {
+        Defaults { max: TURING_MAX, max_src: "CMP 50HX default", ..base }
+    } else if turing && cmp {
         Defaults { max: CMP_MAX, max_src: "CMP default", ..base }
     } else if turing {
         Defaults { max: TURING_MAX, max_src: "Turing default", ..base }
@@ -762,9 +767,9 @@ fn map_card(nv: &Nvml, dev: i32, pos: usize, o: &Opts) -> Result<Card> {
     let name = nv.name(h).unwrap_or_else(|_| cuda_name.clone());
     ensure!(name == cuda_name, "name mismatch: NVML {name:?}, CUDA {cuda_name:?}");
     let (mode, cur, lo, hi) = nv.probe_offset(h)?;
-    let cc = nv.compute_capability(h);
+    let (cc, pci_id) = (nv.compute_capability(h), nv.pci_device_id(h));
     let m = crate::mining::device_m(gpu::sm_count(dev));
-    Ok(new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, lo, hi, cc, m }, pos, o))
+    Ok(new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, lo, hi, cc, pci_id, m }, pos, o))
 }
 
 /// What NVML/CUDA tell about one mining GPU.
@@ -779,12 +784,13 @@ struct CardHw {
     lo: i32,
     hi: i32,
     cc: Option<(i32, i32)>,
+    pci_id: Option<u16>,
     m: usize,
 }
 
 /// The card with its limits: --uv-max / --uv-min / --uv-offset at position `pos` of the lists, else the card type's defaults.
 fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
-    let def = card_defaults(&hw.name, hw.cc);
+    let def = card_defaults(&hw.name, hw.cc, hw.pci_id);
     let (max_wanted, max_src) = match o.max_offset.get(pos) {
         Some(v) => (v.min(HARD_CAP), "--uv-max"),
         None => (def.max, def.max_src),
@@ -1868,13 +1874,19 @@ mod tests {
 
     #[test]
     fn defaults_by_card() {
-        let t = |name: &str, cc: Option<(i32, i32)>| card_defaults(name, cc);
-        // Turing CMP
-        for n in ["NVIDIA CMP 40HX", "NVIDIA CMP 30HX", "NVIDIA CMP 50HX"] {
+        let t = |name: &str, cc: Option<(i32, i32)>| card_defaults(name, cc, None);
+        // CMP 30HX / 40HX: 150
+        for n in ["NVIDIA CMP 40HX", "NVIDIA CMP 30HX"] {
             assert_eq!(t(n, Some((7, 5))).max, 150, "{n}");
             assert_eq!(t(n, Some((7, 5))).max_src, "CMP default");
             assert_eq!(t(n, None).max, 150, "{n} without compute capability");
         }
+        // CMP 50HX (TU102): 225, by name or by PCI device id 0x1e09
+        assert_eq!(t("NVIDIA CMP 50HX", Some((7, 5))).max, 225);
+        assert_eq!(t("NVIDIA CMP 50HX", Some((7, 5))).max_src, "CMP 50HX default");
+        assert_eq!(t("NVIDIA CMP 50HX", None).max, 225);
+        assert_eq!(card_defaults("NVIDIA Graphics Device", Some((7, 5)), Some(0x1e09)).max, 225);
+        assert_eq!(card_defaults("NVIDIA CMP 40HX", Some((7, 5)), Some(0x1f0b)).max, 150); // TU106 id: still 150
         // Turing GeForce
         for n in ["NVIDIA GeForce RTX 2060 SUPER", "NVIDIA GeForce RTX 2080 Ti", "NVIDIA GeForce GTX 1660 Ti", "NVIDIA GeForce GTX 1650"] {
             let d = t(n, Some((7, 5)));
@@ -1911,12 +1923,12 @@ mod tests {
             ("NVIDIA GeForce RTX 3070 Laptop GPU", (8, 6)),
             ("NVIDIA CMP 40HX", (7, 5)),
         ];
-        let caps: Vec<i32> = rig.iter().map(|(n, cc)| card_defaults(n, Some(*cc)).max).collect();
+        let caps: Vec<i32> = rig.iter().map(|(n, cc)| card_defaults(n, Some(*cc), None).max).collect();
         assert_eq!(caps, vec![225, 225, 495, 495, 495, 150]);
     }
 
     fn card(name: &str, cc: (i32, i32), cur: i32, pos: usize, o: &Opts) -> Card {
-        let hw = CardHw { dev: pos as i32, name: name.into(), bus: format!("0000:0{pos}:00.0"), uuid: format!("GPU-{pos}"), nv: Dev(std::ptr::null_mut()), mode: OffMode::Gpc, cur, lo: -1000, hi: 1000, cc: Some(cc), m: 0 };
+        let hw = CardHw { dev: pos as i32, name: name.into(), bus: format!("0000:0{pos}:00.0"), uuid: format!("GPU-{pos}"), nv: Dev(std::ptr::null_mut()), mode: OffMode::Gpc, cur, lo: -1000, hi: 1000, cc: Some(cc), pci_id: None, m: 0 };
         new_card(hw, pos, o)
     }
 
@@ -1934,6 +1946,8 @@ mod tests {
         assert_eq!(l.len(), 1, "{l:?}");
         assert!(l[0].ends_with("range +120..+150 (max: CMP default; start: default)"), "{}", l[0]);
         assert_eq!(card(TU.0, TU.1, 0, 0, &o).max, 225);
+        let c50 = card("NVIDIA CMP 50HX", (7, 5), 0, 1, &o);
+        assert!(c50.range_lines(true)[0].ends_with("range +120..+225 (max: CMP 50HX default; start: default)"), "{:?}", c50.range_lines(true));
         assert_eq!(card(AMP.0, AMP.1, 0, 2, &o).max, 495);
         // the HiveOS offset is the start
         assert_eq!(card(TU.0, TU.1, 150, 0, &o).start(), (150, "current offset"));
