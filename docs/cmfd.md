@@ -120,3 +120,22 @@ Not done / open: dev-fee slice not observed (first slot is 5–65 min after star
 process not tested (both wrappers share one lock, nesting deadlocks — needs a two-GPU wrapper); live CMFD mining on Windows
 (no 8 GB-free NVIDIA card here); a real HiveOS rig; release builds in the glibc-2.31 container; Aria share statistics are thin
 (1 share per ~25 min on a 3070), longer runs for reject statistics need a pool with a lower share difficulty or hours.
+
+## 1.6.0 release integration (21.10, branch `rel-1.6.0`)
+
+Base `cmfd-amd` 6875658 (= `cmfd` bdb6d6d + `amd-uv-host` + AMD CMFD), plus: rc3 RAM gate for `--auto-uv` (4182700),
+engine pin FreeForgeMiner **1.2.4** (cmfd1 addresses, random nonce start), AMD prebuilts from pearl-miner `rel-1.6.0`
+(amd 665e5a8 saddr kernel + cmfd-amd 114946c ADLX power/UUID + amd-uv 6bedabf amduv.exe), AMD host feeding fix (eda9785).
+
+Found and fixed during QA:
+* `amduv.exe` was not packed into the Windows zip (missing copy; then a `\a` escape in the edit) — packed now.
+* Windows start files failed on AMD-only PCs (`nvidia-smi.exe not found`) — AMD cards are detected and listed now.
+* AMD CMFD mining used the CUDA worker path (`no CUDA-capable device`) — fixed in 6875658 (cmfd-amd agent), re-checked here.
+* Linux CMFD engine (FreeForgeMiner release, built on Ubuntu 22.04) needs glibc 2.34: on Ubuntu 20.04 HiveOS images CMFD
+  could not start (`GLIBC_2.32 not found`). `cmfd/build-engine-compat.sh` builds cmfd-miner / cmfd-v4-replay / cmfd-launch from
+  the same pinned source tree (ec8dbc17… = FreeForgeMiner 1.2.4) inside ubuntu:20.04 (nvcc 12.9, same flags): need glibc 2.30
+  (replay 2.17). build.sh ships them in the Linux/HiveOS packages and writes their SHA-256 into `cmfd/ENGINE`; the host checks
+  the glibc need from that file and says so clearly instead of a restart loop.
+* Mining start line per GPU now names backend and kernel (`GPU 0: … (cuda backend, kernel t256 t256s-F2c dcc8446f)`).
+* Minor, not fixed (engine side): a read-only model folder makes `production-v4-inputs.py` wait forever ("Another miner is
+  preparing the shared model"); HiveOS folders are writable.
