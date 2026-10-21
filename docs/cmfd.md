@@ -79,3 +79,44 @@ into the host build. Instead:
   on the reference binary — that old bench is not valid for 1.2.3; not used.
 * Not tested yet: dev-fee slice (first slot 5–65 min after start, runs were 5 min), Windows model download/live mining,
   HiveOS package on a real rig, multi-GPU in one process, eco mode, `--per-gpu-workers`, long runs.
+
+## 2026-10-21 (2) — towards rc 1.6.0 (Claude, Opus 5.5)
+
+Owner decisions: default pool Aria, Midas Mining second (Kavatar and cmfd-pool.online in the examples); a Pearl undervolt is
+reset by the host in CMFD mode; checks on Aria (Kavatar's connection is unstable); GPU2 (4070 Ti) not away from Pearl for long.
+
+Done (commits e33d280, 260704b and the one with this entry):
+* **Offset reset** (`host/src/cmfd_offset.rs`): a positive core V/F offset → 0 before the engine starts, put back on exit;
+  crash marker `cmfd-offset-restore.json` undone at the next start; `--uv-offset N` forces N (user's risk); negative offsets
+  untouched; no root → warning, mining goes on. Also used by `--self-test` when it runs the test vector.
+* **Midas Mining**: URL from its API `https://midasmining.net/api/v1/pool` → `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a0…e80e`
+  (the landing page says :29445 — wrong); pin checked = SHA-256 of the DER certificate it serves (openssl, one handshake).
+* **cmfd1 addresses** (Common Foundry wallet 1.0.16): `wallet_hex` decodes bech32m (BIP-350, HRP `cmfd`; `tcmfd` refused) to the
+  hex key the pool/engine take; codec after `crates/cmfd-node/src/address.rs` 1.0.16; unit test with the upstream fixed
+  vectors (`cmfd10xlxvl…4yhywr` = generator x), checksum/case/junk errors, round-trip of real keys.
+* **Test vector**: `cmfd/fixtures/mainnet-template-nonce0-count32.coefficients.bin` from the CF 1.0.16 AMD HIP qualification
+  (MIT, attribution in fixtures/README.md, NOTICE); `--self-test --algo cmfd` runs RUNBATCH 32 twice when the model is present,
+  SHA-256 must be `fe67b80a…f4a7a7`.
+* Windows: `PREPARE-V4-INPUTS.ps1` failed under a pwsh-7 parent (inherited PSModulePath → Get-FileHash missing) → removed for
+  the child. `start-cmfd.bat`: pools, UV_OFFSET; `start.ps1`: cmfd1 wallets; README-WINDOWS.txt.
+* MANUAL.md section 13 (EN/RU/ZH), README, HIVEOS.md, cmfd/README.md.
+
+Checks (Shahtyor through gpu1/gpu2-test.sh; Clawa):
+| check | result |
+|---|---|
+| unit tests | 7/7 (incl. `cmfd1_addresses`) |
+| crash: `kill -9` of the host while mining (4070 Ti) | offset stayed 0 with the marker; no engine left behind; next start: "+345 put back", then 0 again |
+| Midas Mining, 2 min, 4070 Ti | 26 accepted / 0 rejected / 2 stale, 36.7 FW/s |
+| HiveOS package (build.sh tarball unpacked, h-config/h-run/h-stats with redirected paths), eco, 4 min, 4070 Ti | ok; h-stats `{"hs":[37.24],"hs_units":"hs","ar":[50,0],"algo":"forgematrix_v4"}`; 61/0/3 |
+| long run 4070 Ti, Kavatar, stopped at 30 min (owner wanted the card back) | 36.94 FW/s @ 189.7 W, 443 acc / 0 rej / 58 stale, offset +345 put back |
+| 3070 on **Aria**, 25 min | 14.34 FW/s @ 134.7 W (PL 135 W), 1 acc / 0 rej (Aria's share difficulty is high: ~1 share per 20k FW) |
+| test vector on CUDA (FFM 1.2.3 replay, 3070, 3 runs) | `fe67b80a…f4a7a7` ×3, 2.18 s per batch of 32 |
+| `--self-test --algo cmfd` with the model (3070) | EXACT + test vector 2/2 `fe67b80a…` (24 s with model load), offset +200 → 0 → +200 |
+| Aria 10 min with a **cmfd1** wallet (3070) | key decoded to 307df1d1…05f8, payout correct, 14.32 FW/s, 1/0 |
+| Windows: model download via the host (pwsh 7 parent) | 23.5 min first download, 15 s verify on the next start; engine stopped cleanly, no orphans |
+| Windows package (build-windows.ps1) | zip with cmfd/ (engine, fixtures, licenses), start-cmfd.bat |
+
+Not done / open: dev-fee slice not observed (first slot is 5–65 min after start; runs were ≤30 min); several GPUs in one
+process not tested (both wrappers share one lock, nesting deadlocks — needs a two-GPU wrapper); live CMFD mining on Windows
+(no 8 GB-free NVIDIA card here); a real HiveOS rig; release builds in the glibc-2.31 container; Aria share statistics are thin
+(1 share per ~25 min on a 3070), longer runs for reject statistics need a pool with a lower share difficulty or hours.

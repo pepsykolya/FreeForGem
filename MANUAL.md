@@ -524,7 +524,7 @@ is left alone and the log says why (no endless reconnects that could get the IP 
 **Dev fee for CMFD: 1 %**, inside the engine: 36 seconds per hour per GPU, random slot, on the pool you selected, worker
 `ffm-fee`, log lines `DEV FEE | ...`. The Pearl fee of section 10 is not run in CMFD mode (total 1 %).
 
-**Hashrate** (measured on the Kavatar pool, 5-minute windows, stock offset, auto batch): RTX 4070 Ti (power limit 190 W)
+**Hashrate** (measured on the Aria and Kavatar pools, 5–30-minute runs, offset 0, auto batch): RTX 4070 Ti (power limit 190 W)
 36.8 FW/s at 187 W; RTX 3070 (power limit 135 W) 14.1 FW/s at 135 W; same as FreeForgeMiner 1.2.3 on the same cards
 (36.8 / 14.2 FW/s). With the default power limit an RTX 3070 does about 20 FW/s.
 
@@ -1055,7 +1055,7 @@ HiveOS показывает FW/s по каждой карте; первый за
 **Комиссия для CMFD: 1 %**, внутри движка: 36 секунд в час на GPU, в случайный момент, на выбранном вами пуле, воркер
 `ffm-fee`, строки лога `DEV FEE | ...`. Комиссия Pearl из раздела 10 в режиме CMFD не работает (итого 1 %).
 
-**Хешрейт** (пул Kavatar, окна по 5 минут, смещение 0, батч авто): RTX 4070 Ti (лимит 190 Вт) 36,8 FW/s при 187 Вт;
+**Хешрейт** (пулы Aria и Kavatar, прогоны 5–30 минут, смещение 0, батч авто): RTX 4070 Ti (лимит 190 Вт) 36,8 FW/s при 187 Вт;
 RTX 3070 (лимит 135 Вт) 14,1 FW/s при 135 Вт — столько же, сколько FreeForgeMiner 1.2.3 на тех же картах (36,8 / 14,2 FW/s).
 Со стоковым лимитом мощности RTX 3070 даёт около 20 FW/s.
 
@@ -1529,7 +1529,7 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 **CMFD 开发者抽水：1 %**，在引擎内部：每块 GPU 每小时 36 秒，随机时刻，在您选择的矿池上，worker 为 `ffm-fee`，日志行
 `DEV FEE | ...`。CMFD 模式下不运行第 10 节的 Pearl 抽水（合计 1 %）。
 
-**算力**（Kavatar 矿池，5 分钟窗口，偏移 0，自动批量）：RTX 4070 Ti（功耗限制 190 W）36.8 FW/s @ 187 W；
+**算力**（Aria 与 Kavatar 矿池，5–30 分钟运行，偏移 0，自动批量）：RTX 4070 Ti（功耗限制 190 W）36.8 FW/s @ 187 W；
 RTX 3070（功耗限制 135 W）14.1 FW/s @ 135 W —— 与同卡上的 FreeForgeMiner 1.2.3 相同（36.8 / 14.2 FW/s）。
 默认功耗限制下 RTX 3070 约 20 FW/s。
 
