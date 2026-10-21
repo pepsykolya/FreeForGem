@@ -122,6 +122,7 @@ pub fn spawn(
             return;
         }
         crate::mining::warn_m_align(dev, m_dev, gpu::row_align());
+        crate::wintune::feed_thread();
         let _ = ready.send(Ok(()));
         let (work_tx, work_rx) = mpsc::sync_channel::<Work>(WORK_QUEUE);
         let prover = {
@@ -147,6 +148,7 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
     let mut slot = 0i32;
     let mut counter = (gs.dev as u64 + 1) << 40; // disjoint nonce ranges per GPU; never reset
     let mut hit_buf = vec![gpu::Hit::default(); MAX_HITS];
+    let mut fd = FeedDiag::new(dev);
     while !sh.stop.load(Ordering::Relaxed) {
         if gs.pause.load(Ordering::Acquire) {
             // the undervolt tuner wants the GPU for a check (its own process): finish what is in flight and wait
@@ -192,21 +194,83 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
         };
         let job = loaded.as_ref().expect("job loaded whenever an assignment is current");
         // prepare and enqueue the next attempt, then collect the previous one
+        let t_prep = Instant::now();
         let row0 = job.nonce_row(counter);
         let a_seed = job.a_noise_seed(&row0);
         // the kernel derives P_A and A_L from a_seed itself: no host-side permutation (a_perm = 512 hashes per attempt)
+        let t_launch = Instant::now();
         gpu::launch(slot, &a_seed, &[], &[], m_dev, &target_words(c.target))?;
+        fd.launched(t_prep, t_launch);
         let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: job.clone(), row0, a_seed, target: c.target, counter };
         counter += 1;
         slot ^= 1;
         if let Some(p) = pending.replace(next) {
+            let t_wait = Instant::now();
             finish(p, &mut hit_buf, sh, gs, work_tx)?;
+            fd.finished(t_wait);
         }
     }
     if let Some(p) = pending.take() {
         finish(p, &mut hit_buf, sh, gs, work_tx)?;
     }
     Ok(())
+}
+
+/// FFGP_FEED_DIAG=1: per 10 s window, how the GPU-feeding thread spends its time (prep = nonce row + A seed,
+/// launch = enqueue, wait = collecting the previous attempt incl. its hits) and the largest gap between two launches.
+/// A launch gap longer than one attempt's GPU time means the two-slot queue ran dry (GPU idle).
+struct FeedDiag {
+    on: bool,
+    dev: i32,
+    t0: Instant,
+    last_launch: Option<Instant>,
+    n: u32,
+    prep: f64,
+    launch: f64,
+    wait: f64,
+    gap_max: f64,
+    gap_sum: f64,
+    quick_waits: u32,
+}
+
+impl FeedDiag {
+    fn new(dev: i32) -> FeedDiag {
+        let on = std::env::var("FFGP_FEED_DIAG").map(|v| v != "0").unwrap_or(false);
+        FeedDiag { on, dev, t0: Instant::now(), last_launch: None, n: 0, prep: 0.0, launch: 0.0, wait: 0.0, gap_max: 0.0, gap_sum: 0.0, quick_waits: 0 }
+    }
+    fn launched(&mut self, t_prep: Instant, t_launch: Instant) {
+        if !self.on {
+            return;
+        }
+        let now = Instant::now();
+        self.prep += (t_launch - t_prep).as_secs_f64();
+        self.launch += (now - t_launch).as_secs_f64();
+        if let Some(l) = self.last_launch {
+            let g = (t_launch - l).as_secs_f64();
+            self.gap_sum += g;
+            self.gap_max = self.gap_max.max(g);
+        }
+        self.last_launch = Some(t_launch);
+        self.n += 1;
+    }
+    fn finished(&mut self, t_wait: Instant) {
+        if !self.on {
+            return;
+        }
+        let w = t_wait.elapsed().as_secs_f64();
+        self.wait += w;
+        if w < 0.0003 {
+            self.quick_waits += 1;
+        }
+        if self.t0.elapsed().as_secs_f64() >= 10.0 && self.n > 1 {
+            let n = self.n as f64;
+            println!(
+                "[feed {}] n {} | prep {:.3} launch {:.3} wait {:.3} ms/att | launch gap avg {:.3} max {:.3} ms | waits<0.3ms {}",
+                self.dev, self.n, 1e3 * self.prep / n, 1e3 * self.launch / n, 1e3 * self.wait / n, 1e3 * self.gap_sum / (n - 1.0), 1e3 * self.gap_max, self.quick_waits
+            );
+            *self = FeedDiag { last_launch: self.last_launch, ..FeedDiag::new(self.dev) };
+        }
+    }
 }
 
 /// Waits for an attempt and queues its hits for the proof thread (never blocks on proving).

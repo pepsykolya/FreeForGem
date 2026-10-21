@@ -14,6 +14,7 @@ mod mining;
 mod nvml;
 mod stratum;
 mod uv;
+mod wintune;
 mod worker;
 
 use anyhow::{Result, bail, ensure};
@@ -252,6 +253,7 @@ fn mode_name(m: TargetMode) -> &'static str {
 }
 
 fn mine(a: Args) -> Result<()> {
+    wintune::process(gpu::backend() == gpu::Backend::Amd);
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = stop.clone();
@@ -802,6 +804,13 @@ fn main() -> Result<()> {
         }
     }
     let _ = uv_given;
+    // AMD (OpenCL) library: busy-wait for attempt completion unless the user chose otherwise.  Must be set before the
+    // library is loaded (its CRT copies the environment at load); the CUDA library does not read it.  Under full CPU load
+    // from other Normal-priority processes (e.g. a CPU miner) a blocking wait wakes the feeding thread late and the
+    // two-slot queue (one ~9 ms attempt ahead) runs dry; measured on a 6800 XT next to xmrig.
+    if std::env::var_os("PEARL_AMD_SPIN").is_none() {
+        unsafe { std::env::set_var("PEARL_AMD_SPIN", "1") };
+    }
     gpu::select(a.backend.as_deref())?;
     if let Some(mut c) = child {
         c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
