@@ -101,6 +101,7 @@ pub struct Opts {
     pub batch: Option<u32>,
     pub per_gpu_workers: bool,
     pub skip_prepare: bool,
+    pub uv_offset: Option<i32>,
     pub state_dir: PathBuf,
     pub clocks: clocks::ClockOpts,
 }
@@ -188,6 +189,9 @@ fn prepare_model(engine: &Path, model: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(model).with_context(|| format!("create {}", model.display()))?;
     if cfg!(windows) {
         let mut c = Command::new("powershell.exe");
+        // a PSModulePath inherited from PowerShell 7 (start.bat prefers pwsh) hides the 5.1 modules (Get-FileHash not found):
+        // without it powershell.exe uses its own default module path
+        c.env_remove("PSModulePath");
         c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(engine.join("PREPARE-V4-INPUTS.ps1"))
             .args(["-Role", "PoolMiner", "-Destination"])
@@ -391,6 +395,9 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
     clocks::recover(&o.state_dir);
     let _clock_guard = clocks::apply(&devs, &o.clocks, &o.state_dir);
+    // a Pearl undervolt offset makes the engine fail: stock (0) for the run, or the explicit --uv-offset
+    crate::cmfd_offset::recover(&o.state_dir);
+    let _offset_guard = crate::cmfd_offset::apply(&devs, o.uv_offset, &o.state_dir);
 
     let nv = nvml::Nvml::load().ok();
     let mut slots: Vec<Slot> = gpus

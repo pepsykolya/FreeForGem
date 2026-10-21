@@ -47,7 +47,8 @@ if ($Cmfd) {
     }
     if ($CmfdMode -and $CmfdMode -notin 'speed', 'eco') { Fail 'MODE must be speed or eco.' }
     if (-not (Test-Path -LiteralPath (Join-Path $root 'cmfd\cmfd-miner.exe'))) { Fail 'cmfd\cmfd-miner.exe is missing - unpack the whole archive again.' }
-    if ($AutoUv -eq '1' -or $UvOffset) { Write-Host 'NOTE: AUTO_UV / UV_OFFSET are Pearl-only and are ignored for CMFD.' -ForegroundColor Yellow; $AutoUv = ''; $UvOffset = '' }
+    # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk)
+    if ($AutoUv -eq '1') { Write-Host 'NOTE: AUTO_UV is Pearl-only and is ignored for CMFD.' -ForegroundColor Yellow; $AutoUv = '' }
 } elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
 if (-not $Cmfd -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow

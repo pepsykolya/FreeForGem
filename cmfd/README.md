@@ -22,6 +22,8 @@ from this folder and prints the usual FreeForGemPear stats line (FW/s per GPU, w
 `a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c` on the pool you selected, worker `ffm-fee`,
 log lines `DEV FEE | …`. The Pearl dev fee of FreeForGemPear is not run in CMFD mode.
 
+Pools, HiveOS/Windows setup, clocks (a positive core offset is set to 0 for CMFD) and the log: `MANUAL.md`, section 13.
+
 Building: `cmfd/fetch-engine.sh` / `cmfd\fetch-engine.ps1` put the pinned release binaries into the package
 (the build scripts call them); `cmfd/build-engine.sh` rebuilds the same engine from source.
 

@@ -6,6 +6,7 @@
 //!   freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet 64HEX   (Common Foundry, see cmfd.rs)
 mod clocks;
 mod cmfd;
+mod cmfd_offset;
 mod devfee;
 mod gpu;
 mod mining;
@@ -590,7 +591,9 @@ COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ 
     --cmfd-dir DIR       engine folder (default: cmfd next to the binary)
     --per-gpu-workers    one pool worker per GPU (WORKER.gpuN) instead of one per rig
     CMFD needs about 7 GB of free GPU memory per card and an RTX 20xx or newer GPU. --lock-cclock/--lock-mclock/--moffset
-    work as for Pearl; --auto-uv/--uv-offset are Pearl-only. Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
+    work as for Pearl. A positive core (undervolt) offset is set to 0 for the run and put back on exit (CMFD computes wrong
+    results with it); --uv-offset N sets N instead (at your own risk); --auto-uv is Pearl-only.
+    Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
 
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
 A 1% developer fee (Pearl: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool) is part of the license terms.
@@ -614,8 +617,8 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
 fn mine_cmfd(a: Args) -> Result<()> {
     ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
     ensure!(!a.wallet.is_empty(), "--wallet is required: your 64-character CMFD payout address (see --help)");
-    if a.uv.enabled() {
-        eprintln!("WARNING: --auto-uv / --uv-offset are Pearl-only and are ignored for CMFD (the CMFD engine is sensitive to undervolting; use stock clocks, a power limit or --lock-cclock)");
+    if a.uv.auto {
+        eprintln!("WARNING: --auto-uv is Pearl-only and is ignored for CMFD (CMFD needs stock clocks: a positive core offset is set to 0 for the run; --uv-offset N forces a value at your own risk)");
     }
     if a.password != "x" {
         eprintln!("WARNING: --password is not used by CMFD pools; ignored");
@@ -627,6 +630,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
             if stop.swap(true, Ordering::SeqCst) {
                 eprintln!("second interrupt: exiting at once");
                 cmfd::kill_all();
+                cmfd_offset::restore_all();
                 clocks::restore_all();
                 std::process::exit(130);
             }
@@ -658,6 +662,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
             batch: a.cmfd_batch,
             per_gpu_workers: a.per_gpu_workers,
             skip_prepare: a.cmfd_skip_prepare,
+            uv_offset: a.uv.fixed,
             state_dir,
             clocks,
         },

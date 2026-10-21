@@ -84,9 +84,12 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 The same package mines CMFD (engine: FreeForgeMiner, MIT, in `cmfd/`). Flight sheet: *Hash algorithm* `forgematrix_v4`,
 *Wallet and worker template* `%WAL%.%WORKER_NAME%` with your 64-character CMFD address as the wallet, *Pool URL*
-`cmfd+tls://IP:PORT?pin=64HEX` exactly as your pool publishes it. Optional *Extra config*: `--cmfd-mode eco`, `--devices 0,1`,
-`--per-gpu-workers`. The 6.4 GB model goes to `/hive/miners/custom/cmfd-model` (shared with FreeForgeMiner; downloaded once).
-Stock clocks or a power limit; no undervolt. Dev fee 1% inside the engine (36 s per hour per GPU, worker `ffm-fee`).
+Aria `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` or
+Midas Mining `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`
+(other pools: MANUAL.md section 13). Optional *Extra config*: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu-workers`.
+The 6.4 GB model goes to `/hive/miners/custom/cmfd-model` (shared with FreeForgeMiner; downloaded once).
+Stock clocks or a power limit: a positive core offset of the OC profile is set to 0 by the miner for the run (and put back);
+`--uv-offset N` forces a value at your own risk. Dev fee 1% inside the engine (36 s per hour per GPU, worker `ffm-fee`).
 
 ## Русский
 
@@ -165,10 +168,13 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.5.2/freeforgem
 ### Common Foundry (CMFD), с 1.6.0
 
 Тот же пакет майнит CMFD (движок FreeForgeMiner, MIT, папка `cmfd/`). Полётный лист: *Hash algorithm* `forgematrix_v4`,
-шаблон `%WAL%.%WORKER_NAME%`, кошелёк — 64-символьный адрес CMFD, *Pool URL* `cmfd+tls://IP:PORT?pin=64HEX` как его публикует пул.
+шаблон `%WAL%.%WORKER_NAME%`, кошелёк — 64-символьный адрес CMFD, *Pool URL* — Aria
+`cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9` или Midas Mining
+`cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e` (другие пулы — MANUAL.md, раздел 13).
 Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu-workers`. Модель 6,4 ГБ — в `/hive/miners/custom/cmfd-model`
-(общая с FreeForgeMiner, скачивается один раз). Стоковые частоты или лимит мощности, без андервольта. Комиссия 1% внутри движка
-(36 с в час на GPU, воркер `ffm-fee`).
+(общая с FreeForgeMiner, скачивается один раз). Стоковые частоты или лимит мощности: положительное смещение ядра из профиля
+разгона майнер на время работы сам ставит в 0 (и возвращает); `--uv-offset N` — своё значение на ваш риск. Комиссия 1% внутри
+движка (36 с в час на GPU, воркер `ffm-fee`).
 
 ### Комиссия разработчика
 
