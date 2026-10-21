@@ -22,13 +22,17 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const STEP: i32 = 15;
 const NEWGEN_MIN: i32 = 200; // default --uv-min on RTX 40 / 50
 pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-offset say (the driver range c.hi caps it too)
 const DISABLE_SECS: u64 = 24 * 3600;
+// a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
+// together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
+const CHECK_MB: u64 = 2400;
+const CHECK_RESERVE_MB: u64 = 600;
 
 #[derive(Clone, Debug)]
 pub struct Opts {
@@ -332,6 +336,49 @@ pub struct Manager {
     /// test hook: FFGP_UV_TEST_INJECT_BAD=<secs> reports one CPU-verification failure after that many seconds of mining
     inject_bad: Option<u64>,
     injected: AtomicBool,
+}
+
+/// RAM the OS can still hand out, MB (Linux: MemAvailable; Windows: available physical memory)
+fn mem_available_mb() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let t = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let l = t.lines().find(|l| l.starts_with("MemAvailable:"))?;
+        return l.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024);
+    }
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct MemStatus { len: u32, load: u32, total_phys: u64, avail_phys: u64, total_pf: u64, avail_pf: u64, total_virt: u64, avail_virt: u64, avail_ext: u64 }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GlobalMemoryStatusEx(b: *mut MemStatus) -> i32;
+        }
+        let mut m = MemStatus { len: std::mem::size_of::<MemStatus>() as u32, load: 0, total_phys: 0, avail_phys: 0, total_pf: 0, avail_pf: 0, total_virt: 0, avail_virt: 0, avail_ext: 0 };
+        return if unsafe { GlobalMemoryStatusEx(&mut m) } != 0 { Some(m.avail_phys / (1024 * 1024)) } else { None };
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn check_mb() -> u64 {
+    std::env::var("FFGP_UV_CHECK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(CHECK_MB)
+}
+
+/// running check processes; a new one starts only when the free RAM covers it on top of the ones already running
+fn check_slots() -> &'static (Mutex<u64>, Condvar) {
+    static S: OnceLock<(Mutex<u64>, Condvar)> = OnceLock::new();
+    S.get_or_init(|| (Mutex::new(0), Condvar::new()))
+}
+
+struct CheckSlot;
+
+impl Drop for CheckSlot {
+    fn drop(&mut self) {
+        let (m, cv) = check_slots();
+        *m.lock().unwrap() -= 1;
+        cv.notify_all();
+    }
 }
 
 static ACTIVE: OnceLock<Mutex<Option<Arc<Manager>>>> = OnceLock::new();
@@ -910,7 +957,30 @@ impl Manager {
         r
     }
 
+    fn check_slot(&self, c: &Card) -> CheckSlot {
+        let (m, cv) = check_slots();
+        let need = check_mb();
+        let mut running = m.lock().unwrap();
+        let mut said = false;
+        loop {
+            // already-running checks may not have reached their peak yet: count each of them in full
+            let fits = *running == 0
+                || self.stopped()
+                || mem_available_mb().is_none_or(|a| a.saturating_sub(*running * need) >= need + CHECK_RESERVE_MB);
+            if fits {
+                *running += 1;
+                return CheckSlot;
+            }
+            if !said {
+                said = true;
+                lg(format!("{} waits for RAM: {} check(s) running, {} MB free, a check needs ~{} MB", c.label(), *running, mem_available_mb().unwrap_or(0), need));
+            }
+            running = cv.wait_timeout(running, Duration::from_secs(1)).unwrap().0;
+        }
+    }
+
     fn run_check_inner(&self, c: &Card, sp: &Spec) -> Result<Res> {
+        let _slot = self.check_slot(c);
         let exe = std::env::current_exe()?;
         let mut cmd = Command::new(exe);
         cmd.args(["--uv-check", "--devices", &c.dev.to_string(), "--uv-secs", &sp.secs.to_string(), "--uv-min-reruns", &sp.min_reruns.to_string(), "--uv-cpu", &sp.cpu.to_string(), "--uv-measure", &sp.measure.to_string(), "--uv-expect-bus", &c.bus]);
@@ -946,6 +1016,8 @@ impl Manager {
         let mut result: Option<String> = None;
         let mut xid: Option<u64> = None;
         let mut killed: Option<&str> = None;
+        #[allow(unused_mut)]
+        let mut signal: Option<i32> = None;
         let mut last_sample = Instant::now();
         let exit: Option<i32> = loop {
             if self.stopped() {
@@ -977,6 +1049,13 @@ impl Manager {
                 }
             }
             if let Some(s) = child.try_wait()? {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt;
+                    if let Some(sig) = s.signal() {
+                        signal = Some(sig);
+                    }
+                }
                 break s.code();
             }
         };
@@ -993,7 +1072,13 @@ impl Manager {
         if let Some(line) = &result {
             parse_result(line, &mut res);
         } else {
-            res.reason = format!("check process ended without a result (exit {:?}){}", exit, {
+            let how = match (exit, signal) {
+                (_, Some(9)) => "killed by signal 9 (out of memory? see dmesg)".to_string(),
+                (_, Some(sig)) => format!("killed by signal {sig}"),
+                (Some(code), None) => format!("exit {code}"),
+                (None, None) => "no exit code".to_string(),
+            };
+            res.reason = format!("check process ended without a result ({how}){}", {
                 std::thread::sleep(Duration::from_millis(200));
                 let t = errtail.lock().unwrap().clone();
                 if t.is_empty() { String::new() } else { format!(": {t}") }
