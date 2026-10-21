@@ -8,7 +8,7 @@ rem  FreeForGemPear for Windows - Common Foundry (CMFD, ForgeMatrix V4) - EDIT T
 rem  Engine: FreeForgeMiner (MIT) in the cmfd folder. Needs about 7 GB of free GPU memory per card (6.4 GB model,
 rem  downloaded once into cmfd-model from the official Common Foundry servers) and an RTX 20xx or newer GPU.
 rem ================================================================
-rem Your CMFD wallet address (64 hexadecimal characters)
+rem Your CMFD wallet address: cmfd1... (wallet 1.0.16+) or the 64-hex form; both work
 set "WALLET="
 rem Pool URL: cmfd+tls://IP:PORT?pin=64_HEX exactly as your pool publishes it. Default: Aria / AriaBrain (pool.ariabrain.com).
 set "POOL=cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"

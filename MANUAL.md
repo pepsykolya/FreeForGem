@@ -455,7 +455,9 @@ The same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**. The CMFD w
 settings, prints its usual stats line and restarts an engine that exits.
 
 **The coin follows the pool URL**: a `cmfd+tls://` URL means CMFD (`--algo cmfd|pearl` forces it). The wallet is your
-64-character hexadecimal CMFD address.
+CMFD address in either form: `cmfd1...` (63 characters with a checksum, as the Common Foundry wallet
+1.0.16+ shows it) or the older 64 hexadecimal characters; both are the same key. A `cmfd1...` address is checked
+(a typo is refused before mining starts) and sent to the pool as hex. Test-network `tcmfd1...` addresses are refused.
 
 **Requirements.** NVIDIA RTX 20xx or newer (tuned for RTX 30/40), about **7 GB of free GPU memory per card** (the model alone
 is 6.4 GB), NVIDIA driver R575+ on Linux/HiveOS, 7 GB of disk for the model.
@@ -480,11 +482,12 @@ means a changed certificate: take the new line from the pool, never disable the 
 **Linux:**
 ```
 ./freeforgempear --pool 'cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9' \
-    --wallet YOUR_64_HEX_CMFD_ADDRESS --worker rig1
+    --wallet cmfd1YOUR_ADDRESS --worker rig1
 # Midas Mining:
 ./freeforgempear --pool 'cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e' \
-    --wallet YOUR_64_HEX_CMFD_ADDRESS --worker rig1
-./freeforgempear --algo cmfd --self-test        # GPU check: exact comparison with the reference path, no pool, no model
+    --wallet cmfd1YOUR_ADDRESS --worker rig1
+./freeforgempear --algo cmfd --self-test        # GPU check, no pool: exact comparison with the reference path; with the model
+                                                # also the official Common Foundry 1.0.16 test vector (32 nonces, SHA-256)
 ```
 Quote the URL in a shell (`?` is a wildcard). Run as root if the miner should reset an undervolt offset (see below).
 
@@ -983,7 +986,9 @@ FreeForGemPear готовит модель, запускает по процес
 обычную строку статистики и перезапускает упавший движок.
 
 **Монета определяется по адресу пула**: адрес `cmfd+tls://` — это CMFD (`--algo cmfd|pearl` задаёт явно). Кошелёк —
-ваш 64-символьный шестнадцатеричный адрес CMFD.
+ваш адрес CMFD в любой форме: `cmfd1...` (63 символа с контрольной суммой, так его показывает кошелёк
+Common Foundry 1.0.16+) или прежние 64 шестнадцатеричных символа — это один и тот же ключ. Адрес `cmfd1...` проверяется
+(опечатка отсекается до начала майнинга) и уходит на пул в hex. Адреса тестовой сети `tcmfd1...` не принимаются.
 
 **Требования.** NVIDIA RTX 20xx и новее (оптимизировано под RTX 30/40), около **7 ГБ свободной видеопамяти на карту**
 (одна модель — 6,4 ГБ), драйвер NVIDIA R575+ на Linux/HiveOS, 7 ГБ на диске под модель.
@@ -1008,11 +1013,12 @@ FreeForGemPear готовит модель, запускает по процес
 **Linux:**
 ```
 ./freeforgempear --pool 'cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9' \
-    --wallet ВАШ_64_HEX_АДРЕС_CMFD --worker rig1
+    --wallet cmfd1ВАШ_АДРЕС --worker rig1
 # Midas Mining:
 ./freeforgempear --pool 'cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e' \
-    --wallet ВАШ_64_HEX_АДРЕС_CMFD --worker rig1
-./freeforgempear --algo cmfd --self-test        # проверка GPU: точное сравнение с эталонным путём, без пула и модели
+    --wallet cmfd1ВАШ_АДРЕС --worker rig1
+./freeforgempear --algo cmfd --self-test        # проверка GPU без пула: точное сравнение с эталонным путём; при наличии модели
+                                                # ещё официальный тест-вектор Common Foundry 1.0.16 (32 nonce, SHA-256)
 ```
 В оболочке адрес берите в кавычки (`?` — шаблон). Запускайте от root, если майнер должен сбросить андервольт-смещение (ниже).
 
@@ -1457,7 +1463,9 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 （MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.3 版），原样放在软件包的 `cmfd/` 文件夹中。
 FreeForGemPear 负责准备模型、为每块 GPU 启动一个引擎进程、应用您的频率设置、打印常规统计行，并在引擎退出时重新启动。
 
-**币种由矿池地址决定**：`cmfd+tls://` 地址即为 CMFD（`--algo cmfd|pearl` 可强制指定）。钱包为您的 64 位十六进制 CMFD 地址。
+**币种由矿池地址决定**：`cmfd+tls://` 地址即为 CMFD（`--algo cmfd|pearl` 可强制指定）。钱包为您的 CMFD 地址，两种形式均可：`cmfd1...`（63 个字符，带校验和，Common Foundry 1.0.16+ 钱包显示的格式）
+或旧的 64 位十六进制——它们是同一个密钥。`cmfd1...` 地址会被校验（输错会在开始挖矿前被拒绝），并以十六进制发送给矿池。
+测试网 `tcmfd1...` 地址不被接受。
 
 **系统要求。** NVIDIA RTX 20xx 或更新（针对 RTX 30/40 优化），**每张卡约 7 GB 空闲显存**（仅模型就有 6.4 GB），
 Linux/HiveOS 上 NVIDIA 驱动 R575+，磁盘需 7 GB 存放模型。
@@ -1481,11 +1489,12 @@ HiveOS 上默认 `/hive/miners/custom/cmfd-model`（与 FreeForgeMiner 共用，
 **Linux：**
 ```
 ./freeforgempear --pool 'cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9' \
-    --wallet 您的64位十六进制CMFD地址 --worker rig1
+    --wallet cmfd1您的地址 --worker rig1
 # Midas Mining：
 ./freeforgempear --pool 'cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e' \
-    --wallet 您的64位十六进制CMFD地址 --worker rig1
-./freeforgempear --algo cmfd --self-test        # GPU 自检：与参考路径逐位比较，无需矿池和模型
+    --wallet cmfd1您的地址 --worker rig1
+./freeforgempear --algo cmfd --self-test        # GPU 自检（无需矿池）：与参考路径逐位比较；若已有模型，
+                                                # 还会运行 Common Foundry 1.0.16 官方测试向量（32 个 nonce，SHA-256）
 ```
 在 shell 中请给地址加引号（`?` 是通配符）。如需由矿工自动清除降压偏移（见下文），请以 root 运行。
 

@@ -75,9 +75,103 @@ pub fn validate_pool(url: &str) -> Result<()> {
     Ok(())
 }
 
+// CMFD address text forms, ported from Common Foundry 1.0.16 crates/cmfd-node/src/address.rs (MIT,
+// Copyright (c) 2026 CommonFoundry contributors): the 32-byte x-only key as 64 hex characters, or bech32m (BIP-350) with
+// the network prefix ("cmfd" mainnet, "tcmfd" test networks), "1", 52 key symbols and a 6-symbol checksum, no witness version.
+const BECH32_CHARSET: &[u8; 32] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const BECH32M_CONST: u32 = 0x2bc8_30a3;
+const MAINNET_HRP: &str = "cmfd";
+const TEST_NETWORK_HRP: &str = "tcmfd";
+
+fn bech32_polymod(values: &[u8]) -> u32 {
+    const GEN: [u32; 5] = [0x3b6a_57b2, 0x2650_8e6d, 0x1ea1_19fa, 0x3d42_33dd, 0x2a14_62b3];
+    let mut chk: u32 = 1;
+    for &v in values {
+        let top = chk >> 25;
+        chk = ((chk & 0x01ff_ffff) << 5) ^ u32::from(v);
+        for (i, g) in GEN.iter().enumerate() {
+            if (top >> i) & 1 == 1 {
+                chk ^= g;
+            }
+        }
+    }
+    chk
+}
+
+fn hrp_expand(hrp: &str) -> Vec<u8> {
+    let b = hrp.as_bytes();
+    b.iter().map(|c| c >> 5).chain(std::iter::once(0)).chain(b.iter().map(|c| c & 31)).collect()
+}
+
+/// `cmfd1...` address of a 32-byte key (used by the tests; the pool gets hex).
+#[cfg(test)]
+fn encode_address(hrp: &str, key: &[u8; 32]) -> String {
+    let (mut sym, mut buf, mut bits) = (Vec::new(), 0u32, 0u32);
+    for &byte in key {
+        buf = ((buf << 8) | u32::from(byte)) & 0xfff;
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            sym.push(((buf >> bits) & 31) as u8);
+        }
+    }
+    if bits > 0 {
+        sym.push(((buf << (5 - bits)) & 31) as u8);
+    }
+    let mut v = hrp_expand(hrp);
+    v.extend(&sym);
+    v.extend([0u8; 6]);
+    let pm = bech32_polymod(&v) ^ BECH32M_CONST;
+    sym.extend((0..6).map(|i| ((pm >> (5 * (5 - i))) & 31) as u8));
+    format!("{hrp}1{}", sym.iter().map(|&s| BECH32_CHARSET[s as usize] as char).collect::<String>())
+}
+
+/// The payout key as 64 lowercase hex characters (what the pool and the engine take) from either text form:
+/// 64 hex characters, or a checksummed mainnet `cmfd1...` address. A test-network `tcmfd1...` address is refused.
+pub fn wallet_hex(w: &str) -> Result<String> {
+    let w = w.trim();
+    if w.bytes().all(|b| b.is_ascii_hexdigit()) {
+        ensure!(w.len() == 64, "CMFD wallet: expected a cmfd1... address or 64 hexadecimal characters (got {} hex characters)", w.len());
+        return Ok(w.to_ascii_lowercase());
+    }
+    ensure!(w.len() <= 90 && w.bytes().all(|b| (33..=126).contains(&b)), "CMFD wallet: not a cmfd1... address (wrong length or characters)");
+    ensure!(
+        !(w.bytes().any(|b| b.is_ascii_lowercase()) && w.bytes().any(|b| b.is_ascii_uppercase())),
+        "CMFD wallet: the address mixes upper and lower case"
+    );
+    let lower = w.to_ascii_lowercase();
+    let sep = lower.rfind('1').ok_or_else(|| anyhow::anyhow!("CMFD wallet: expected a cmfd1... address or 64 hexadecimal characters"))?;
+    let (hrp, data) = (&lower[..sep], &lower[sep + 1..]);
+    ensure!(!hrp.is_empty() && data.len() >= 6, "CMFD wallet: the address has the wrong length");
+    let sym: Vec<u8> = data
+        .bytes()
+        .map(|c| BECH32_CHARSET.iter().position(|&x| x == c).map(|p| p as u8))
+        .collect::<Option<_>>()
+        .ok_or_else(|| anyhow::anyhow!("CMFD wallet: the address contains a character that is not used in addresses"))?;
+    let mut v = hrp_expand(hrp);
+    v.extend(&sym);
+    ensure!(bech32_polymod(&v) == BECH32M_CONST, "CMFD wallet: address checksum does not match: the address is mistyped or incomplete");
+    if hrp == TEST_NETWORK_HRP {
+        anyhow::bail!("CMFD wallet: {hrp}1... is a test-network address; mainnet pools need a {MAINNET_HRP}1... address");
+    }
+    ensure!(hrp == MAINNET_HRP, "CMFD wallet: address is for another network: expected {MAINNET_HRP}1..., found {hrp}1...");
+    let key = &sym[..sym.len() - 6];
+    ensure!(key.len() == 52, "CMFD wallet: the address does not hold a 32-byte key");
+    let (mut hex, mut buf, mut bits) = (String::new(), 0u32, 0u32);
+    for &s in key {
+        buf = ((buf << 5) | u32::from(s)) & 0xfff;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            hex.push_str(&format!("{:02x}", (buf >> bits) & 0xff));
+        }
+    }
+    ensure!(bits == 4 && buf & 0xf == 0, "CMFD wallet: the address does not hold a 32-byte key");
+    Ok(hex)
+}
+
 pub fn validate_wallet(w: &str) -> Result<()> {
-    ensure!(is_hex64(w), "CMFD wallet must be the 64-character hexadecimal payout address (got {} characters)", w.len());
-    Ok(())
+    wallet_hex(w).map(|_| ())
 }
 
 pub fn validate_worker(w: &str, per_gpu: bool) -> Result<()> {
@@ -250,11 +344,93 @@ fn select_devices(devices: &Option<Vec<i32>>) -> Result<Vec<(i32, String, String
 
 /// `--self-test --algo cmfd`: the engine's GPU self-test on each selected device (small exact differential of the
 /// tensor-core path against the DP4A reference path; no model, no pool).
-pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, mode: &str) -> Result<()> {
+/// Official test vector of Common Foundry 1.0.16 (AMD HIP worker qualification, MIT, Copyright (c) 2026 Common Foundry AMD HIP
+/// contributors): the mainnet template at nonce 0, 32 nonces; the final activations of one RUNBATCH 32 hash to REF_SHA256.
+const REF_COEFFICIENTS: &str = "fixtures/mainnet-template-nonce0-count32.coefficients.bin";
+const REF_SHA256: &str = "fe67b80af4671210cd33306d0976c7dbb285dd55203d8eff733866cd7ef4a7a7";
+const REF_RUNS: usize = 2;
+
+fn sha256_hex(path: &Path) -> Result<String> {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    let mut f = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    std::io::copy(&mut f, &mut h)?;
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Loads the model on the GPU and runs the official 32-nonce vector REF_RUNS times through the engine's CUDA worker
+/// (`--server` protocol: RUNBATCH -> CMFD_V4_REPLAY_DONE). Returns the SHA-256 of every run.
+fn reference_vector(engine: &Path, uuid: &str, mode: &str, bank: &Path, work: &Path) -> Result<Vec<String>> {
+    use std::io::Write;
+    std::fs::create_dir_all(work)?;
+    let coef = engine.join(REF_COEFFICIENTS);
+    ensure!(coef.is_file(), "test vector {} missing", coef.display());
+    let mut child = engine_cmd(engine, "cmfd-v4-replay", Some(uuid), mode)
+        .arg("--server")
+        .arg(bank)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().unwrap();
+    let (tx, rx) = mpsc::channel::<(usize, String)>();
+    pipe(child.stdout.take().unwrap(), 0, tx.clone());
+    pipe(child.stderr.take().unwrap(), 0, tx);
+    let wait_for = |tag: &str, secs: u64| -> Result<()> {
+        let end = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok((_, l)) if l.contains(tag) => return Ok(()),
+                Ok((_, l)) if l.starts_with("error") => anyhow::bail!("CUDA worker: {l}"),
+                Ok(_) => {}
+                Err(_) => anyhow::bail!("CUDA worker: no {tag} within {secs} s"),
+            }
+        }
+    };
+    let res = (|| -> Result<Vec<String>> {
+        wait_for("CMFD_V4_REPLAY_READY", 300)?;
+        let mut hashes = Vec::new();
+        for run in 1..=REF_RUNS {
+            let out = work.join(format!("refvec-run{run}"));
+            writeln!(stdin, "RUNBATCH\t32\t{}\t{}", coef.display(), out.display())?;
+            stdin.flush()?;
+            wait_for("CMFD_V4_REPLAY_DONE", 300)?;
+            let file = work.join(format!("refvec-run{run}-final-activation.bin"));
+            hashes.push(sha256_hex(&file)?);
+            let _ = std::fs::remove_file(&file);
+        }
+        Ok(hashes)
+    })();
+    let _ = writeln!(stdin, "QUIT");
+    drop(stdin);
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(20) {
+        if let Ok(Some(_)) = child.try_wait() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    res
+}
+
+/// `--self-test --algo cmfd`: per GPU, (1) the engine's own GPU self-test (small exact differential of the tensor-core path
+/// against the DP4A reference, no model) and, when the model is present, (2) the official Common Foundry 1.0.16 test vector
+/// (mainnet template, 32 nonces, SHA-256 of the final activations) run twice on the real model.
+pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, mode: &str, model_opt: &Option<PathBuf>, state_dir: &Path) -> Result<()> {
     let engine = engine_dir(engine_dir_opt)?;
     println!("== CMFD self-test (engine {}) ==", engine_label(&engine));
+    let gpus = select_devices(devices)?;
+    let bank = model_dir(model_opt).join("MODEL-V2.bank");
+    let with_model = bank.is_file();
+    let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
+    // the same stock-offset rule as for mining: a Pearl undervolt would fail the test vector
+    crate::cmfd_offset::recover(state_dir);
+    let _offset_guard = if with_model { crate::cmfd_offset::apply(&devs, None, state_dir) } else { None };
     let mut failed = 0;
-    for (dev, uuid, name) in select_devices(devices)? {
+    for (dev, uuid, name) in gpus {
         let t = Instant::now();
         let out = engine_cmd(&engine, "cmfd-v4-replay", Some(&uuid), mode).arg("--self-test").stderr(Stdio::piped()).stdout(Stdio::piped()).output()?;
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -266,7 +442,32 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
         } else {
             println!("[FAIL] GPU{dev} ({name}): {}", out.status);
             failed += 1;
+            continue;
         }
+        if !with_model {
+            continue;
+        }
+        let t = Instant::now();
+        let work = std::env::temp_dir().join(format!("ffgp-cmfd-selftest-{}", std::process::id()));
+        match reference_vector(&engine, &uuid, mode, &bank, &work) {
+            Ok(h) if h.iter().all(|x| x == REF_SHA256) => println!(
+                "[ok] GPU{dev}: official Common Foundry 1.0.16 test vector (32 nonces, {} runs) sha256 {REF_SHA256} ({:?}, model load included)",
+                h.len(),
+                t.elapsed()
+            ),
+            Ok(h) => {
+                println!("[FAIL] GPU{dev}: test vector sha256 {h:?}, expected {REF_SHA256}: the GPU computes wrongly (offset/clocks?)");
+                failed += 1;
+            }
+            Err(e) => {
+                println!("[FAIL] GPU{dev}: test vector: {e:#}");
+                failed += 1;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    if !with_model {
+        println!("(test vector skipped: no model at {}; it runs once the model is downloaded, or give --cmfd-model DIR)", bank.display());
     }
     ensure!(failed == 0, "CMFD self-test FAILED on {failed} GPU(s)");
     println!("== CMFD self-test PASSED ==");
@@ -360,7 +561,10 @@ fn stop_child(c: &mut Child) {
 
 pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     validate_pool(&o.pool)?;
-    validate_wallet(&o.wallet)?;
+    let wallet = wallet_hex(&o.wallet)?;
+    if wallet != o.wallet.trim() {
+        println!("cmfd: wallet {} = payout key {wallet}", o.wallet.trim());
+    }
     validate_worker(&o.worker, o.per_gpu_workers)?;
     ensure!(matches!(o.mode.as_str(), "speed" | "eco"), "--cmfd-mode must be speed or eco");
     if let Some(b) = o.batch {
@@ -470,7 +674,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                 std::fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
                 let mut c = engine_cmd(&engine, "cmfd-miner", Some(&s.uuid), &o.mode);
                 c.arg("pool")
-                    .args(["--pool", &o.pool, "--miner", &o.wallet, "--worker", &o.worker, "--gpu", &s.uuid])
+                    .args(["--pool", &o.pool, "--miner", &wallet, "--worker", &o.worker, "--gpu", &s.uuid])
                     .arg("--production-v4-bank")
                     .arg(&bank)
                     .arg("--production-v4-replay-worker")
@@ -647,6 +851,45 @@ mod tests {
         assert!(validate_pool(&format!("cmfd+tls://188.35.20.44:0?pin={pin}")).is_err());
         assert!(validate_wallet(pin).is_ok());
         assert!(validate_wallet("prl1abc").is_err());
+    }
+
+    fn key_of(hex: &str) -> [u8; 32] {
+        let mut k = [0u8; 32];
+        for (i, b) in k.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap();
+        }
+        k
+    }
+
+    #[test]
+    fn cmfd1_addresses() {
+        // fixed vectors of Common Foundry 1.0.16 (crates/cmfd-node/src/address.rs tests): x of the secp256k1 generator
+        let g = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let main = "cmfd10xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq4yhywr";
+        let test = "tcmfd10xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq236tfw";
+        assert_eq!(encode_address(MAINNET_HRP, &key_of(g)), main);
+        assert_eq!(encode_address(TEST_NETWORK_HRP, &key_of(g)), test);
+        assert_eq!(wallet_hex(main).unwrap(), g);
+        assert_eq!(wallet_hex(&main.to_ascii_uppercase()).unwrap(), g);
+        assert_eq!(wallet_hex(g).unwrap(), g);
+        assert_eq!(wallet_hex(&g.to_ascii_uppercase()).unwrap(), g);
+        assert!(wallet_hex(test).unwrap_err().to_string().contains("test-network"));
+        // a changed checksum symbol, a dropped symbol, mixed case, junk
+        assert!(wallet_hex(&main.replace("4yhywr", "4yhywq")).unwrap_err().to_string().contains("checksum"));
+        assert!(wallet_hex(&main[..main.len() - 1]).is_err());
+        assert!(wallet_hex("cmfd10XLXVLhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq4yhywr").is_err());
+        for junk in ["", "cmfd", "cmfd1", &g[..63], "not an address", "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr"] {
+            assert!(wallet_hex(junk).is_err(), "{junk}");
+        }
+        // the test payout key and the dev-fee key round-trip through their cmfd1 form
+        for hex in [
+            "307df1d1ac94b025c2768ef48ac9e739d7b74a8920a57d3393d21d025c8005f8",
+            "a6b0915b0620997b2606574726fcf05628da6dc9ae9f2ff5bffe6d0a33ea9f2c",
+        ] {
+            let a = encode_address(MAINNET_HRP, &key_of(hex));
+            assert!(a.starts_with("cmfd1") && a.len() == 63, "{a}");
+            assert_eq!(wallet_hex(&a).unwrap(), hex);
+        }
         assert!(validate_worker("rig-1.a_b", false).is_ok());
         assert!(validate_worker("bad name", false).is_err());
         assert!(validate_worker(&"x".repeat(30), true).is_err());

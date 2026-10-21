@@ -98,11 +98,11 @@ in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**
 ## Common Foundry (CMFD)
 
 Since 1.6.0 (branch `cmfd`, not released yet) the same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**:
-give it a CMFD pool URL and your 64-character CMFD address, everything else works as for Pearl
+give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ shows it, or the older 64-hex form), everything else works as for Pearl
 (one process for all GPUs, `--devices`, `--lock-cclock/--lock-mclock/--moffset`, `--minutes`, the stats line, HiveOS, Windows):
 
 ```
-./freeforgempear --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet YOUR_64_HEX_CMFD_ADDRESS --worker rig1
+./freeforgempear --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1
 ./freeforgempear --algo cmfd --self-test
 ```
 

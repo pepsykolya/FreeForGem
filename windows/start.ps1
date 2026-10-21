@@ -41,7 +41,10 @@ if ([string]::IsNullOrWhiteSpace($Wallet)) {
 }
 $Wallet = ($Wallet -replace '\s', '')
 if ($Cmfd) {
-    if ($Wallet -cnotmatch '^[0-9a-fA-F]{64}$') { Fail 'WALLET must be your CMFD address: exactly 64 hexadecimal characters.' }
+    # both forms of the wallet: cmfd1... (checksummed, wallet 1.0.16+) or 64 hex; the miner checks the checksum
+    if ($Wallet -cnotmatch '^[0-9a-fA-F]{64}$' -and $Wallet -cnotmatch '^(cmfd1[02-9ac-hj-np-z]{58}|CMFD1[02-9AC-HJ-NP-Z]{58})$') {
+        Fail 'WALLET must be your CMFD address: cmfd1... (63 characters) or 64 hexadecimal characters.'
+    }
     if ($Pool -cnotmatch '^cmfd\+tls://[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}\?pin=[0-9A-Fa-f]{64}$') {
         Fail 'POOL must look like cmfd+tls://IP:PORT?pin=64_HEX (your pool publishes this line).'
     }

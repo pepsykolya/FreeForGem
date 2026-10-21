@@ -25,6 +25,9 @@ try {
     Copy-Item -LiteralPath (Join-Path $s 'LICENSE') -Destination (Join-Path $Dest 'LICENSE-FreeForgeMiner')
     Copy-Item -Path (Join-Path $s 'production-mainnet\*') -Destination (Join-Path $Dest 'production-mainnet')
     Copy-Item -LiteralPath (Join-Path $here 'README.md') -Destination $Dest
+    # official test vector for --self-test (MIT, Common Foundry 1.0.16)
+    New-Item -ItemType Directory -Force -Path (Join-Path $Dest 'fixtures') | Out-Null
+    Copy-Item -Path (Join-Path $here 'fixtures\*') -Destination (Join-Path $Dest 'fixtures')
     "$($lock.ENGINE_NAME) $($lock.ENGINE_VERSION)`nsource $($lock.WINDOWS_URL)`nsha256 $($lock.WINDOWS_SHA256)" | Set-Content -Encoding ascii (Join-Path $Dest 'ENGINE')
     Write-Host "CMFD engine $($lock.ENGINE_NAME) $($lock.ENGINE_VERSION) -> $Dest"
 } finally {

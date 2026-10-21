@@ -3,7 +3,7 @@
 //!
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
-//!   freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet 64HEX   (Common Foundry, see cmfd.rs)
+//!   freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1...   (Common Foundry, see cmfd.rs)
 mod clocks;
 mod cmfd;
 mod cmfd_offset;
@@ -551,11 +551,12 @@ fn mine(a: Args) -> Result<()> {
 }
 
 const HELP: &str = "\
-FreeForGemPear - Pearl (PRL) GPU miner
+FreeForGemPear - Pearl (PRL) and Common Foundry (CMFD) GPU miner
 
 USAGE:
-    freeforgempear --pool HOST:PORT --wallet ADDRESS [OPTIONS]
-    freeforgempear --self-test [--devices N]
+    freeforgempear --pool HOST:PORT --wallet ADDRESS [OPTIONS]                     Pearl (PRL)
+    freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]   Common Foundry (CMFD)
+    freeforgempear --self-test [--algo cmfd] [--devices N]
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360)
@@ -616,7 +617,7 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
 /// the log format with Pearl; the undervolt tuner is Pearl-only (it validates with the Pearl kernel) and is ignored here.
 fn mine_cmfd(a: Args) -> Result<()> {
     ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
-    ensure!(!a.wallet.is_empty(), "--wallet is required: your 64-character CMFD payout address (see --help)");
+    ensure!(!a.wallet.is_empty(), "--wallet is required: your CMFD address, cmfd1... or 64 hex (see --help)");
     if a.uv.auto {
         eprintln!("WARNING: --auto-uv is Pearl-only and is ignored for CMFD (CMFD needs stock clocks: a positive core offset is set to 0 for the run; --uv-offset N forces a value at your own risk)");
     }
@@ -804,7 +805,8 @@ fn main() -> Result<()> {
     };
     if algo == "cmfd" {
         if test {
-            return cmfd::self_test(&a.devices, &a.cmfd_dir, &a.cmfd_mode);
+            let state_dir = a.uv.dir.clone().or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into)).unwrap_or_else(|| std::path::PathBuf::from("."));
+            return cmfd::self_test(&a.devices, &a.cmfd_dir, &a.cmfd_mode, &a.cmfd_model, &state_dir);
         }
         return mine_cmfd(a);
     }

@@ -20,6 +20,7 @@ flate2 = "1"
 rand = "0.9"
 ctrlc = { version = "3", features = ["termination"] }
 socket2 = { version = "0.5", features = ["all"] }
+sha2 = "0.10"   # CMFD self-test: SHA-256 of the official test vector output
 
 [profile.release]
 opt-level = 3

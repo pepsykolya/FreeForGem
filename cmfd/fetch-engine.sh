@@ -21,6 +21,7 @@ cp "$S"/LICENSE "$DEST/LICENSE-FreeForgeMiner"
 cp "$S"/lib/* "$DEST/lib/"
 cp -p "$S"/production-mainnet/* "$DEST/production-mainnet/"
 cp "$HERE/README.md" "$DEST/README.md"
+mkdir -p "$DEST/fixtures"; cp "$HERE"/fixtures/* "$DEST/fixtures/"   # official test vector for --self-test (MIT, CF 1.0.16)
 printf '%s %s\nsource %s\nsha256 %s\n' "$ENGINE_NAME" "$ENGINE_VERSION" "$LINUX_URL" "$LINUX_SHA256" > "$DEST/ENGINE"
 chmod +x "$DEST"/cmfd-miner "$DEST"/cmfd-v4-replay "$DEST"/cmfd-launch
 echo "CMFD engine $ENGINE_NAME $ENGINE_VERSION -> $DEST"
