@@ -167,3 +167,32 @@ ignored, which tee inherits, so the launcher must reset SIGINT to default or tee
   self-test PASSED; Windows reader-gone test: 1.6.0 exits 101 (panic) at once, 1.6.1 mines on and ends normally (exit 0).
 * cargo test --release: 7/7. Packages: libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/* byte-identical to 1.6.0.
 * Not tested on hardware: the Windows console-close restore (needs an Administrator session with an offset/clock lock set).
+
+## 1.6.2 (branch `rel-1.6.2`): per-card undervolt limits
+
+* `--uv-max`, `--uv-min`, `--uv-offset` (and `UV_MAX` / `UV_MIN` / `UV_OFFSET` in the .bat files): one value for all GPUs or a
+  comma list with exactly one value per mining GPU in `--devices` order (`-` = that GPU's default); a wrong length is an error.
+  CMFD uses the `--uv-offset` list the same way.
+* Without `--uv-max`: Turing CMP 30HX/40HX/50HX +150, Turing RTX 20xx / GTX 16xx +225, others +495 (compute capability 7.5
+  decides; the name when NVML gives none). Search start: RTX 50 (sm_120) at least +300, RTX 40 at least +200 (a default start
+  at or above a lower `--uv-max` is dropped). An explicit `--uv-max` above the card default is used, with a WARNING.
+* Start log: `auto-uv: GPUn (bus .., NAME): range +A..+B (max: <source>; start: <source>)`.
+* uv.json gets `cap` (the limit of the tuning). Saved offset above the current limit: run at the limit after a quick check, the
+  saved result stays; saved offset = old limit and the limit is higher now: tuned again. Entries without `cap` (1.6.1) are never
+  re-tuned for it, but a lower limit is respected (1.6.1 applied a saved offset above a lowered `--uv-max` as is).
+* "restored twice" on Rig02: not a duplicate. The 1.6.0 run before the 1.6.1 update ended without restore lines (the 1.6.0 bug)
+  and left GPU1-3 at +270/+270/+315; the 1.6.1 start put them back from uv-restore.json. Recovery lines are now worded
+  differently (`(bus 04, RTX 3070) offset +270 -> +0 put back (left changed by the previous run)`, unchanged cards: `already at`).
+
+Checks (Shahtyor GPU1 3070 + GPU2 4070 Ti in one process under gpu1-test.sh, GPU2 units paused under the same lock for 318 s;
+own state dir, offsets set to 0 for the test, owner's +200/+300 and the units back at the end, GPU0 untouched):
+* cargo test --release: 14/14 (new: list parsing, lengths, validation, defaults by name/cc incl. the 2060S/3070L/CMP rig,
+  per-card ranges and warnings, saved result vs limit, uv.json `cap`).
+* dry run, no `--uv-max`: 3070 `+120..+495 (max: default)`, 4070 Ti `+200..+495 (start: RTX 40 default)`.
+* `--uv-max 150,330`: ranges +120..+150 / +200..+330; 3 values for 2 GPUs and `--uv-min 200,-` above 150 are refused at start.
+* short tune (`--uv-step 30`): 3070 stopped at +150 (cap), 4070 Ti +200 -> +320 (next step +350 > 330); uv.json cap 150 / 330.
+* `--uv-max 120,330`: 3070 "saved +150 is above the limit +120, limited to it", quick check ok, uv.json still 150; 4070 Ti +320.
+* GPU1 alone `--uv-max 180`: "the limit was raised (+150 when tuned, +180 now) ... tuning again" -> +180, cap 180.
+* Linux build in ffgp-build (glibc 2.30 max); Windows build; libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/*
+  byte-identical to 1.6.1. Windows chain start.bat -> start.ps1 -> exe passes `UV_MAX=225,-,150` intact.
+* Not tested on hardware: Turing / CMP defaults (no such card; unit tests only), RTX 50 start +300.
