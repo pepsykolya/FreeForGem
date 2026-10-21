@@ -22,9 +22,10 @@ rem Read MANUAL.md, section 12 ("Windows: step by step") first; also lock the co
 rem set "AUTO_UV=1"
 rem Undervolt tuner settings (used with AUTO_UV=1; empty = default). Examples per card: MANUAL.md, section 12.
 rem Lowest offset, MHz: the search starts here and never goes below (empty = the card's current offset, else +120;
-rem RTX 40/50: at least +200). RTX 50: a higher start, e.g. 300, makes the tuning shorter:
+rem RTX 40: at least +200, RTX 50: at least +300). One value for all GPUs, or a comma list in DEVICES order:
 set "UV_MIN="
-rem Highest offset the tuner tries, MHz (empty = 495; RTX 40/50 often hold +450..480, at most 600):
+rem Highest offset the tuner tries, MHz (at most 600). Empty = per card: RTX 20xx/GTX 16xx 225, CMP 30HX-50HX 150,
+rem others 495. One value for all GPUs, or a comma list in DEVICES order, e.g. 225,495,150 (- = that GPU's default):
 set "UV_MAX="
 rem MHz per tuning step (empty = 15; 30 = about half the tuning time, coarser result):
 set "UV_STEP="
@@ -32,7 +33,7 @@ rem 1 = after a failed step keep the last good step (empty = last good step minu
 set "UV_KEEP_LAST="
 rem Re-check the offset every N hours while mining (empty = 6, 0 = never):
 set "UV_REVAL_HOURS="
-rem Fixed offset instead of tuning, MHz (checked once, no search; leave AUTO_UV off). Example: 240
+rem Fixed offset instead of tuning, MHz (checked once, no search; leave AUTO_UV off). Example: 240  or per GPU: 240,-,150
 set "UV_OFFSET="
 rem Any other miner options, e.g. --uv-reset to forget the saved undervolt results once:
 set "EXTRA="

@@ -32,6 +32,7 @@ set "LOCK_CCLOCK="
 set "LOCK_MCLOCK="
 set "MOFFSET="
 rem Force a core offset for CMFD instead of 0, MHz (AT YOUR OWN RISK: wrong results / no shares are likely). Example: 100
+rem (one value for all GPUs, or a comma list in DEVICES order; - = the default 0 for that GPU)
 set "UV_OFFSET="
 rem Any other miner options, e.g. --per-gpu-workers (one pool worker per GPU) or --cmfd-batch 32:
 set "EXTRA="

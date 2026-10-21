@@ -100,14 +100,15 @@ if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " 
 if ($LockCclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-cclock $LockCclock" }
 if ($LockMclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-mclock $LockMclock" }
 if ($Moffset -match '^[+-]?[0-9]+(,[+-]?[0-9]*)*$') { $cmdLine += " --moffset $Moffset" }
-if ($UvOffset -match '^[+-]?[0-9]+$') {
+# UV_OFFSET / UV_MIN / UV_MAX: one value, or a comma list per GPU in DEVICES order ('-' or empty = that GPU's default)
+if ($UvOffset -match '^[+-]?[0-9]+$' -or ($UvOffset -match '^([+-]?[0-9]+|-)?(,([+-]?[0-9]+|-)?)+$' -and $UvOffset -match '[0-9]')) {
     # a fixed offset excludes the tuner
     $cmdLine += " --uv-offset $UvOffset"
     if ($AutoUv -eq '1') { Write-Host 'UV_OFFSET is set: using the fixed offset, AUTO_UV is ignored.' -ForegroundColor Yellow }
 } elseif ($AutoUv -eq '1') {
     $cmdLine += ' --auto-uv'
-    if ($UvMin -match '^[+]?[0-9]+$') { $cmdLine += " --uv-min $UvMin" }
-    if ($UvMax -match '^[+]?[0-9]+$') { $cmdLine += " --uv-max $UvMax" }
+    if ($UvMin -match '^([+]?[0-9]+|-)?(,([+]?[0-9]+|-)?)*$' -and $UvMin -match '[0-9]') { $cmdLine += " --uv-min $UvMin" }
+    if ($UvMax -match '^([+]?[0-9]+|-)?(,([+]?[0-9]+|-)?)*$' -and $UvMax -match '[0-9]') { $cmdLine += " --uv-max $UvMax" }
     if ($UvStep -match '^[0-9]+$') { $cmdLine += " --uv-step $UvStep" }
     if ($UvKeepLast -eq '1') { $cmdLine += ' --uv-keep-last' }
 }
