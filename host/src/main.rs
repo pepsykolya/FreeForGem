@@ -4,6 +4,40 @@
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
 //!   freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1...   (Common Foundry, see cmfd.rs)
+
+// Console output must never stop the miner.  The std println!/eprintln! panic when stdout/stderr is gone: HiveOS
+// `miner stop` sends SIGINT to the whole pipeline of h-run.sh and the `tee` behind the miner can exit first; on Windows
+// Ctrl+C ends the PowerShell pipeline of start.ps1 that reads the miner's output.  A panic in the shutdown path killed
+// the miner after the first GPU's undervolt was put back and left the others changed (1.5.x, 1.6.0).  These macros shadow
+// the std ones in the whole crate (every module below) and drop write errors; SIGPIPE is ignored by the Rust runtime on
+// unix, so a write to a closed pipe only returns EPIPE.
+macro_rules! println {
+    () => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout());
+    }};
+    ($($t:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($t)*);
+    }};
+}
+macro_rules! print {
+    ($($t:tt)*) => {{
+        use std::io::Write as _;
+        let _ = write!(std::io::stdout(), $($t)*);
+    }};
+}
+macro_rules! eprintln {
+    () => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr());
+    }};
+    ($($t:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($t)*);
+    }};
+}
+
 mod amd_uv;
 mod clocks;
 mod cmfd;
@@ -259,14 +293,19 @@ fn mine(a: Args) -> Result<()> {
         let stop = stop.clone();
         ctrlc::set_handler(move || {
             if stop.swap(true, Ordering::SeqCst) {
-                eprintln!("second interrupt: exiting at once");
                 uv::restore_all();
                 clocks::restore_all();
+                eprintln!("second interrupt: exiting at once");
                 std::process::exit(130);
             }
             eprintln!("shutting down (finishing in-flight work)...");
         })?;
     }
+    // Windows: closing the console window ends the process as soon as the console handlers return
+    wintune::on_console_close(|| {
+        uv::restore_all();
+        clocks::restore_all();
+    });
     let count = gpu::device_count();
     ensure!(count > 0, "no GPU devices visible to the {} backend (check the driver{})", gpu::backend().name(), if gpu::backend() == gpu::Backend::Cuda { " and CUDA_VISIBLE_DEVICES" } else { "" });
     let devices = match &a.devices {
@@ -553,8 +592,12 @@ fn mine(a: Args) -> Result<()> {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    // shutdown: workers finish their in-flight attempts, provers drain their queues
+    // shutdown.  The owner's offsets and clocks go back first, on every card, before anything more is printed (the log pipe
+    // may be gone already, see the macros at the top); raising the voltage back while the last attempts finish is safe.
+    // Then workers finish their in-flight attempts, provers drain their queues.
     stop.store(true, Ordering::SeqCst);
+    uv::restore_all();
+    clocks::restore_all();
     for h in handles {
         let _ = h.join();
     }
@@ -656,15 +699,21 @@ fn mine_cmfd(a: Args) -> Result<()> {
         let stop = stop.clone();
         ctrlc::set_handler(move || {
             if stop.swap(true, Ordering::SeqCst) {
-                eprintln!("second interrupt: exiting at once");
                 cmfd::kill_all();
                 cmfd_offset::restore_all();
                 clocks::restore_all();
+                eprintln!("second interrupt: exiting at once");
                 std::process::exit(130);
             }
             eprintln!("shutting down (stopping the CMFD engine)...");
         })?;
     }
+    // Windows: closing the console window ends the process as soon as the console handlers return
+    wintune::on_console_close(|| {
+        cmfd::kill_all();
+        cmfd_offset::restore_all();
+        clocks::restore_all();
+    });
     let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
     let state_dir = a
         .uv

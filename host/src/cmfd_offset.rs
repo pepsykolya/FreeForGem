@@ -124,13 +124,24 @@ pub fn apply(devices: &[i32], fixed: Option<i32>, dir: &Path) -> Option<Guard> {
 /// Puts the original offsets back and removes the marker. Safe to call more than once.
 pub fn restore_all() {
     let Some(st) = state().lock().ok().and_then(|mut g| g.take()) else { return };
+    let mut lines = Vec::new();
+    let mut failed = false;
     for it in &st.items {
         match st.nv.set_offset(it.dev, it.mode, it.orig) {
-            Ok(()) => lg(format!("GPU bus {}: core offset {:+} MHz put back", it.bus, it.orig)),
-            Err(e) => lg(format!("GPU bus {}: cannot put back offset {:+} ({e:#})", it.bus, it.orig)),
+            Ok(()) => lines.push(format!("GPU bus {}: core offset {:+} MHz put back", it.bus, it.orig)),
+            Err(e) => {
+                failed = true;
+                lines.push(format!("GPU bus {}: cannot put back offset {:+} ({e:#}); the marker stays and the next start puts it back", it.bus, it.orig));
+            }
         }
     }
-    let _ = std::fs::remove_file(&st.marker);
+    if !failed {
+        let _ = std::fs::remove_file(&st.marker);
+    }
+    // logged only after every card is set back (the log pipe may be gone at shutdown)
+    for l in lines {
+        lg(l);
+    }
 }
 
 pub struct Guard;

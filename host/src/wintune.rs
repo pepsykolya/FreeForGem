@@ -21,6 +21,7 @@ mod sys {
         pub fn GetCurrentProcess() -> *mut c_void;
         pub fn SetProcessInformation(h: *mut c_void, class: i32, info: *const c_void, size: u32) -> i32;
         pub fn SetPriorityClass(h: *mut c_void, class: u32) -> i32;
+        pub fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
     }
     #[repr(C)]
     pub struct PowerThrottlingState {
@@ -75,4 +76,30 @@ pub fn feed_thread() {
             println!("wintune: feed thread priority {p} -> {}", if r != 0 { "ok" } else { "failed" });
         }
     }
+}
+
+/// Windows: runs `f` (put the owner's GPU settings back) when the console window is closed or the user logs off / the PC
+/// shuts down.  For these events Windows ends the process as soon as the console handlers return, so the normal shutdown
+/// (the stop flag set by the Ctrl+C handler) never runs; `f` runs synchronously inside the handler instead (Windows waits
+/// up to 5 s).  Ctrl+C / Ctrl+Break are left to the ctrlc handler.  No-op elsewhere.
+pub fn on_console_close(f: fn()) {
+    #[cfg(windows)]
+    {
+        static ON_CLOSE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+        unsafe extern "system" fn handler(kind: u32) -> i32 {
+            // CTRL_CLOSE_EVENT 2, CTRL_LOGOFF_EVENT 5, CTRL_SHUTDOWN_EVENT 6
+            if matches!(kind, 2 | 5 | 6) {
+                if let Some(f) = ON_CLOSE.get() {
+                    f();
+                }
+            }
+            0 // FALSE: the next handler (ctrlc: sets the stop flag) runs too
+        }
+        if ON_CLOSE.set(f).is_ok() {
+            // registered after ctrlc's handler, so it is called first (Windows calls the handlers last-registered first)
+            unsafe { sys::SetConsoleCtrlHandler(Some(handler), 1) };
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = f;
 }

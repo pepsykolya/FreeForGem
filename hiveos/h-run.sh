@@ -11,4 +11,6 @@ export CUDA_DEVICE_ORDER=PCI_BUS_ID
 # no filename globbing of the arguments: a CMFD pool URL contains '?' (cmfd+tls://IP:PORT?pin=...)
 set -f
 # CMFD: the 6.4 GB model is shared with FreeForgeMiner in /hive/miners/custom/cmfd-model (downloaded once per rig)
-./freeforgempear $(< "$CUSTOM_CONFIG_FILENAME") 2>&1 | tee --append "${CUSTOM_LOG_BASENAME}.log"
+# tee -i: `miner stop` sends SIGINT to the whole pipeline; tee must outlive the miner so that its shutdown (the owner's
+# offsets/clocks put back on every GPU) is logged and never writes into a closed pipe
+./freeforgempear $(< "$CUSTOM_CONFIG_FILENAME") 2>&1 | tee -i --append "${CUSTOM_LOG_BASENAME}.log"

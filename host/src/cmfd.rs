@@ -623,27 +623,32 @@ fn pipe<R: Read + Send + 'static>(r: R, idx: usize, tx: mpsc::Sender<(usize, Str
     });
 }
 
-fn stop_child(c: &mut Child) {
-    if let Ok(mut v) = CHILDREN.lock() {
-        v.retain(|&p| p != c.id());
-    }
-    if let Ok(Some(_)) = c.try_wait() {
-        return;
-    }
-    // ask politely first: the engine stops its CUDA worker and closes the pool session
-    #[cfg(unix)]
-    let _ = Command::new("kill").args(["-INT", &c.id().to_string()]).status(); // the engine stops gracefully on SIGINT (ctrlc)
-    #[cfg(windows)]
-    let _ = Command::new("taskkill").args(["/PID", &c.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(10) {
-        if let Ok(Some(_)) = c.try_wait() {
-            return;
+/// Stops every running engine process: all are asked at once, then waited for together (10 s, then killed).
+fn stop_children(slots: &mut [Slot]) {
+    let mut kids: Vec<&mut Child> = slots.iter_mut().filter_map(|s| s.child.as_mut()).collect();
+    for c in kids.iter_mut() {
+        if let Ok(mut v) = CHILDREN.lock() {
+            v.retain(|&p| p != c.id());
         }
+        if let Ok(Some(_)) = c.try_wait() {
+            continue;
+        }
+        // ask politely first: the engine stops its CUDA worker and closes the pool session
+        #[cfg(unix)]
+        let _ = Command::new("kill").args(["-INT", &c.id().to_string()]).status(); // the engine stops gracefully on SIGINT (ctrlc)
+        #[cfg(windows)]
+        let _ = Command::new("taskkill").args(["/PID", &c.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(10) && kids.iter_mut().any(|c| !matches!(c.try_wait(), Ok(Some(_)))) {
         std::thread::sleep(Duration::from_millis(100));
     }
-    let _ = c.kill();
-    let _ = c.wait();
+    for c in kids {
+        if !matches!(c.try_wait(), Ok(Some(_))) {
+            let _ = c.kill();
+        }
+        let _ = c.wait();
+    }
 }
 
 pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
@@ -831,11 +836,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         }
         if slots.iter().all(|s| s.disabled) {
             stop.store(true, Ordering::SeqCst);
-            for s in slots.iter_mut() {
-                if let Some(c) = &mut s.child {
-                    stop_child(c);
-                }
-            }
+            stop_children(&mut slots);
             anyhow::bail!("CMFD: every GPU failed {MAX_QUICK_FAILS} starts in a row; see the messages above");
         }
         if last_report.elapsed() >= Duration::from_secs(10) {
@@ -845,12 +846,13 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    println!("cmfd: stopping the engine processes...");
-    for s in slots.iter_mut() {
-        if let Some(c) = &mut s.child {
-            stop_child(c);
-        }
-    }
+    // shutdown: the engines stop first (they must not compute with a Pearl undervolt back), then the owner's offsets and
+    // clocks go back on every card, and only then the log (the log pipe may be gone already under HiveOS `miner stop`;
+    // console writes never fail the miner, see the macros in main.rs)
+    stop_children(&mut slots);
+    crate::cmfd_offset::restore_all();
+    clocks::restore_all();
+    println!("cmfd: engine processes stopped");
     // late output (final stats) of the stopped processes
     std::thread::sleep(Duration::from_millis(300));
     while let Ok((i, line)) = rx.try_recv() {

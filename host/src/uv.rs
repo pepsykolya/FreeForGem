@@ -600,38 +600,54 @@ impl Manager {
         }
     }
 
-    fn restore_card(&self, c: &Card) {
+    /// Puts the owner's offset back on one card (up to 3 tries) without logging; returns the log lines.
+    fn put_back(&self, c: &Card) -> Vec<String> {
+        let mut out = Vec::new();
         if !c.owned.swap(false, Ordering::SeqCst) {
-            return;
+            return out;
         }
         let cur = c.cur.load(Ordering::Relaxed);
         for attempt in 0..3 {
             match self.set_checked(c, c.orig) {
                 Ok(()) => {
-                    lg(format!("{} offset {} -> {} restored", c.label(), signed(cur), signed(c.orig)));
-                    return;
+                    out.push(format!("{} offset {} -> {} restored", c.label(), signed(cur), signed(c.orig)));
+                    return out;
                 }
                 Err(e) => {
-                    lg(format!("{} restore attempt {} failed: {e:#}", c.label(), attempt + 1));
+                    out.push(format!("{} restore attempt {} failed: {e:#}", c.label(), attempt + 1));
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
         }
-        lg(format!("{} COULD NOT RESTORE the offset {}; the restore file stays and is applied at the next start", c.label(), signed(c.orig)));
+        out.push(format!("{} COULD NOT RESTORE the offset {}; the restore file stays and is applied at the next start", c.label(), signed(c.orig)));
         c.owned.store(true, Ordering::SeqCst);
+        out
     }
 
+    /// One card (an error while tuning/mining): put back, then log.
+    fn restore_card(&self, c: &Card) {
+        for l in self.put_back(c) {
+            lg(l);
+        }
+    }
+
+    /// All cards, at shutdown: every card is put back (in parallel) before a single line is logged, so a dead log pipe or
+    /// a slow console cannot leave a GPU undervolted.
     pub fn restore(&self) {
         if self.restored.swap(true, Ordering::SeqCst) {
             return;
         }
-        for c in &self.cards {
-            self.restore_card(c);
-        }
+        let lines: Vec<Vec<String>> = std::thread::scope(|s| {
+            let hs: Vec<_> = self.cards.iter().map(|c| s.spawn(move || self.put_back(c))).collect();
+            hs.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+        });
         if self.cards.iter().all(|c| !c.owned.load(Ordering::SeqCst)) {
             let _ = std::fs::remove_file(restore_path(&self.dir));
         } else {
             self.restored.store(false, Ordering::SeqCst);
+        }
+        for l in lines.into_iter().flatten() {
+            lg(l);
         }
     }
 
@@ -1202,6 +1218,10 @@ impl Manager {
 
     /// One step down (never below the owner's offset); below that: give up and restore.
     fn step_back(&self, c: &Card, why: &str) {
+        // after the shutdown restore (or a failed restore) the card is not ours any more: never set an offset again
+        if !c.owned.load(Ordering::SeqCst) || self.stopped() {
+            return;
+        }
         let cur = c.cur.load(Ordering::Relaxed);
         let new = (cur - self.opts.step).max(c.orig);
         let mut e = self.entry(c).unwrap_or_else(|| self.new_entry(c));

@@ -181,9 +181,12 @@ pub fn restore_all() {
         if it.mem_off {
             let _ = st.nv.set_mem_offset(it.dev, 0);
         }
-        lg(format!("GPU bus {}: clock settings restored to default", it.bus));
     }
     let _ = std::fs::remove_file(&st.marker);
+    // logged only after every card is reset (the log pipe may be gone at shutdown)
+    for it in &st.items {
+        lg(format!("GPU bus {}: clock settings restored to default", it.bus));
+    }
 }
 
 /// Restores clock settings when dropped (normal shutdown).  Signal handlers call `restore_all` directly.
