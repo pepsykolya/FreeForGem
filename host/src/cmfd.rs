@@ -740,7 +740,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     .arg("--production-v4-bank")
                     .arg(&bank)
                     .arg("--production-v4-replay-worker")
-                    .arg(engine.join(bin("cmfd-v4-replay")))
+                    .arg(engine.join(bin(replay_worker())))
                     .arg("--production-v4-scratch")
                     .arg(&scratch)
                     .args(["--stats-seconds", "10"])
