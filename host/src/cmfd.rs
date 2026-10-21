@@ -25,7 +25,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 pub const SCHEME: &str = "cmfd+tls://";
-/// Official Common Foundry download locations of the model (same as FreeForgeMiner 1.2.3 uses).
+/// Official Common Foundry download locations of the model (same as FreeForgeMiner 1.2.4 uses).
 const RELEASE_BASE: &str = "https://downloads.commonfoundry.ai/v0.1.0-rc.1";
 const FALLBACK_BASE: &str = "https://github.com/JustAResearcher/CommonFoundry-Binaries/releases/download/v0.1.0-devnet.16";
 /// A stats sample older than this is not shown as hashrate (the engine reports every 10 s).
@@ -252,7 +252,7 @@ pub fn engine_dir(given: &Option<PathBuf>) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Engine version line written by cmfd/fetch-engine.* (e.g. "FreeForgeMiner 1.2.3"), for the banner.
+/// Engine version line written by cmfd/fetch-engine.* (e.g. "FreeForgeMiner 1.2.4"), for the banner.
 fn engine_label(dir: &Path) -> String {
     std::fs::read_to_string(dir.join("ENGINE"))
         .ok()

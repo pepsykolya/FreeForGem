@@ -450,7 +450,7 @@ value with `--uv-offset N` and do not copy another card's number.
 ### 13. Common Foundry (CMFD), new in 1.6.0
 
 The same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**. The CMFD work is done by the
-**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.3), shipped unchanged in the
+**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.4), shipped unchanged in the
 `cmfd/` folder of the package. FreeForGemPear prepares the model, runs one engine process per GPU, applies your clock
 settings, prints its usual stats line and restarts an engine that exits.
 
@@ -981,7 +981,7 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD), новое в 1.6.0
 
 Тот же бинарник майнит и **Common Foundry (CMFD, ForgeMatrix V4)**. Работу по CMFD делает движок **FreeForgeMiner**
-(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.3), он лежит без изменений в папке `cmfd/` пакета.
+(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.4), он лежит без изменений в папке `cmfd/` пакета.
 FreeForGemPear готовит модель, запускает по процессу движка на каждую GPU, применяет ваши настройки частот, печатает свою
 обычную строку статистики и перезапускает упавший движок.
 
@@ -1460,7 +1460,7 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD)，1.6.0 新增
 
 同一个程序也可以挖 **Common Foundry（CMFD，ForgeMatrix V4）**。CMFD 的计算由 **FreeForgeMiner** 引擎完成
-（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.3 版），原样放在软件包的 `cmfd/` 文件夹中。
+（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.4 版），原样放在软件包的 `cmfd/` 文件夹中。
 FreeForGemPear 负责准备模型、为每块 GPU 启动一个引擎进程、应用您的频率设置、打印常规统计行，并在引擎退出时重新启动。
 
 **币种由矿池地址决定**：`cmfd+tls://` 地址即为 CMFD（`--algo cmfd|pearl` 可强制指定）。钱包为您的 CMFD 地址，两种形式均可：`cmfd1...`（63 个字符，带校验和，Common Foundry 1.0.16+ 钱包显示的格式）
