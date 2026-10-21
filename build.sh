@@ -22,7 +22,7 @@ if [ "${FFGP_NO_CMFD:-0}" != 1 ] && [ "${FFGP_CMFD_COMPAT:-1}" != 0 ]; then
   if [ -x "$C/cmfd-miner" ] && [ -x "$C/cmfd-v4-replay" ] && [ -x "$C/cmfd-launch" ]; then
     cp "$C"/cmfd-miner "$C"/cmfd-v4-replay "$C"/cmfd-launch "$E/"
     g=$(objdump -T "$E"/cmfd-miner "$E"/cmfd-v4-replay "$E"/cmfd-launch | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
-    { echo "linux binaries: built from this source on Ubuntu 20.04 (cmfd/build-engine-compat.sh), need $g"
+    { echo "linux binaries: built on Ubuntu 20.04 from the FreeForgeMiner source at commit $(. cmfd/ENGINE.lock; echo $ENGINE_COMMIT) (cmfd/build-engine-compat.sh), need $g"
       (cd "$E" && sha256sum cmfd-miner cmfd-v4-replay cmfd-launch); } >> "$E/ENGINE"
     echo "CMFD engine: Ubuntu 20.04 build from $C ($g)"
   else
