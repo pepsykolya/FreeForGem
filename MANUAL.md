@@ -41,7 +41,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -71,8 +71,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
-cd freeforgempear-1.6.0
+tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
+cd freeforgempear-1.6.1
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -93,8 +93,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.6.0-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
+1. Download **`freeforgempear-1.6.1-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -145,7 +145,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -256,9 +256,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -313,7 +313,8 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
    If a found result fails the CPU verification, or a burst of rejected shares appears, the offset goes one step down (never
    below your own value) and is saved. If somebody else changes the offset (for example HiveOS re-applies its OC), auto-uv
    stands down on that GPU and does not fight.
-6. On exit (Ctrl+C, SIGTERM, normal end) your offset is restored. If the miner was killed (`kill -9`, crash), the next start
+6. On exit (Ctrl+C, SIGTERM, HiveOS `miner stop`, closing the Windows console, normal end) your offset is restored on every
+   GPU (before 1.6.1 a `miner stop` on HiveOS could restore only GPU0). If the miner was killed (`kill -9`, crash), the next start
    restores your offset first, from the restore file `uv-restore.json`. A reboot resets the offset in the driver anyway.
 
 Only the V/F offset is changed: locked clocks, power limit and memory are not touched. Only the GPUs the miner mines on are
@@ -502,6 +503,8 @@ template* `%WAL%.%WORKER_NAME%` with your CMFD address as the wallet, *Pool URL*
 (Midas: `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`).
 *Extra config* (optional): `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu-workers`, `--lock-cclock 1560`.
 HiveOS shows FW/s per card; the first start of a rig downloads the model (watch the miner log).
+Give the CMFD flight sheet **its own OC profile without the memory lock** (see *Memory clock* below): the Pearl OC
+cuts CMFD about 6×.
 
 **Windows:** `start-cmfd.bat` — set `WALLET`, keep `POOL` (Aria) or remove `rem` from the Midas line (or another one),
 optionally `DEVICES`, `MODE`, clock locks. Run it as Administrator if the card has an undervolt offset.
@@ -519,6 +522,13 @@ back first). This needs root/Administrator; without it the log says so and you m
 the OC profile of the CMFD flight sheet). `--uv-offset N` sets N instead — **at your own risk**. `--auto-uv` is Pearl-only.
 Safe settings: stock clocks, a power limit, or a core lock (`--lock-cclock`).
 
+**Memory clock: no memory lock for CMFD.** Pearl hardly needs the memory, CMFD does. The usual Pearl OC with the memory
+clock locked low (HiveOS OC *Mem lock* 810, `nvidia-smi -lmc 810`, `--lock-mclock 810`) cuts CMFD about **6×**: on a HiveOS
+rig with 4× RTX 3070 one card gave **3.7 FW/s** with the memory locked at 810 MHz and **21.8 FW/s** (~237 W, power limit
+240 W) with the memory free. Use a **separate OC profile for CMFD**: no memory lock, core offset 0, a power limit as you
+like. Since 1.6.1 the miner checks this once per GPU after 30 s of mining and warns
+(`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`); it never changes your OC itself.
+
 **Log.** The engine's lines are shown with a `[GPUn]` prefix (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` = harmless, a new
 block arrived in flight; `SHARE REJECTED` = wrong result, lower clocks). Every 10 s FreeForGemPear prints
 `[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
@@ -531,7 +541,8 @@ is left alone and the log says why (no endless reconnects that could get the IP 
 
 **Hashrate** (measured on the Aria and Kavatar pools, 5–30-minute runs, offset 0, auto batch): RTX 4070 Ti (power limit 190 W)
 36.8 FW/s at 187 W; RTX 3070 (power limit 135 W) 14.1 FW/s at 135 W; same as FreeForgeMiner 1.2.3 on the same cards
-(36.8 / 14.2 FW/s). With the default power limit an RTX 3070 does about 20 FW/s.
+(36.8 / 14.2 FW/s). With the default power limit an RTX 3070 does about 20 FW/s (HiveOS, power limit 240 W, memory not
+locked: 21.8 FW/s at ~237 W).
 
 **Troubleshooting:** `out of memory` — close programs using the GPU, CMFD needs ~7 GB free; `illegal memory access` /
 `misaligned address` / `INTEGRITY | ERROR` — remove the core offset, lower clocks; `model preparation ... failed` — check
@@ -615,7 +626,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -645,8 +656,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
-cd freeforgempear-1.6.0
+tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
+cd freeforgempear-1.6.1
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -667,8 +678,8 @@ cd freeforgempear-1.6.0
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.6.0-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.6.1-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -719,7 +730,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -828,9 +839,9 @@ auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Tu
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -886,7 +897,8 @@ auto-uv начинает поиск на них с +200 (RTX 30 — с +120). Tu
    примерно на 30 с). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
    снижается на шаг (но не ниже вашего значения) и сохраняется. Если offset изменил кто-то другой (например, HiveOS заново
    применил разгон), auto-uv отступает на этой карте и не воюет.
-6. При выходе (Ctrl+C, SIGTERM, обычное завершение) ваш offset возвращается. Если майнер был убит (`kill -9`, сбой), то при
+6. При выходе (Ctrl+C, SIGTERM, `miner stop` в HiveOS, закрытие окна консоли в Windows, обычное завершение) ваш offset
+   возвращается на всех GPU (до 1.6.1 `miner stop` в HiveOS мог вернуть только GPU0). Если майнер был убит (`kill -9`, сбой), то при
    следующем запуске ваш offset сначала восстанавливается из файла `uv-restore.json`. Перезагрузка в любом случае сбрасывает
    offset в драйвере.
 
@@ -1080,6 +1092,8 @@ template* `%WAL%.%WORKER_NAME%`, кошелёк — ваш адрес CMFD, *Poo
 (Midas: `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`).
 *Extra config* по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu-workers`, `--lock-cclock 1560`.
 HiveOS показывает FW/s по каждой карте; первый запуск на риге качает модель (смотрите лог майнера).
+Дайте полётному листу CMFD **отдельный профиль разгона без лока памяти** (см. ниже *Частота памяти*): разгон под Pearl
+режет CMFD примерно в 6 раз.
 
 **Windows:** `start-cmfd.bat` — впишите `WALLET`, оставьте `POOL` (Aria) или уберите `rem` у строки Midas (или другой),
 по желанию `DEVICES`, `MODE`, локи частот. Если на карте стоит андервольт-смещение — запускайте от имени администратора.
@@ -1097,6 +1111,13 @@ HiveOS показывает FW/s по каждой карте; первый за
 смещение надо убрать самому (HiveOS — профиль разгона полётного листа CMFD). `--uv-offset N` ставит N — **на ваш риск**.
 `--auto-uv` только для Pearl. Безопасно: стоковые частоты, лимит мощности или лок ядра (`--lock-cclock`).
 
+**Частота памяти: для CMFD без лока памяти.** Pearl память почти не нужна, CMFD — нужна. Обычный разгон под Pearl с низким
+локом памяти (в HiveOS *Mem lock* 810, `nvidia-smi -lmc 810`, `--lock-mclock 810`) режет CMFD примерно **в 6 раз**: на риге
+HiveOS с 4× RTX 3070 карта с памятью, залоченной на 810 МГц, дала **3,7 FW/s**, со свободной памятью — **21,8 FW/s** (~237 Вт
+при лимите 240 Вт). Сделайте для CMFD **отдельный профиль разгона**: без лока памяти, смещение ядра 0, лимит мощности по
+вкусу. С 1.6.1 майнер один раз на каждую GPU через 30 с майнинга проверяет это и предупреждает
+(`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`); сам ваш разгон он не меняет.
+
 **Лог.** Строки движка идут с префиксом `[GPUn]` (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` — безвредно, пока шара
 летела, пришёл новый блок; `SHARE REJECTED` — неверный результат, снизьте частоты). Раз в 10 с FreeForGemPear печатает
 `[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
@@ -1109,7 +1130,7 @@ HiveOS показывает FW/s по каждой карте; первый за
 
 **Хешрейт** (пулы Aria и Kavatar, прогоны 5–30 минут, смещение 0, батч авто): RTX 4070 Ti (лимит 190 Вт) 36,8 FW/s при 187 Вт;
 RTX 3070 (лимит 135 Вт) 14,1 FW/s при 135 Вт — столько же, сколько FreeForgeMiner 1.2.3 на тех же картах (36,8 / 14,2 FW/s).
-Со стоковым лимитом мощности RTX 3070 даёт около 20 FW/s.
+Со стоковым лимитом мощности RTX 3070 даёт около 20 FW/s (HiveOS, лимит 240 Вт, память без лока: 21,8 FW/s при ~237 Вт).
 
 **Проблемы:** `out of memory` — закройте программы, занимающие GPU, CMFD нужно ~7 ГБ свободных; `illegal memory access` /
 `misaligned address` / `INTEGRITY | ERROR` — уберите смещение ядра, снизьте частоты; `model preparation ... failed` — проверьте
@@ -1192,7 +1213,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1222,8 +1243,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.6.0-linux-x86_64.tar.gz
-cd freeforgempear-1.6.0
+tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
+cd freeforgempear-1.6.1
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1244,8 +1265,8 @@ cd freeforgempear-1.6.0
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.6.0-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.6.1-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1287,7 +1308,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.0-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1382,9 +1403,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.6.0-linux-x86_64.tar.gz freeforgempear-1.6.0.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.6.0-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.6.0-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -1432,7 +1453,8 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
 5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
    或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。如果别人修改了偏移（例如 HiveOS 重新应用超频），
    auto-uv 会在该显卡上退让，不会与之对抗。
-6. 退出时（Ctrl+C、SIGTERM、正常结束）恢复你的偏移。如果矿工被强制终止（`kill -9`、崩溃），下次启动会先根据恢复文件
+6. 退出时（Ctrl+C、SIGTERM、HiveOS `miner stop`、关闭 Windows 控制台窗口、正常结束）在所有 GPU 上恢复你的偏移
+   （1.6.1 之前 HiveOS 的 `miner stop` 可能只恢复 GPU0）。如果矿工被强制终止（`kill -9`、崩溃），下次启动会先根据恢复文件
    `uv-restore.json` 恢复你的偏移。重启本身也会重置驱动中的偏移。
 
 只修改 V/F 偏移：锁定频率、功耗上限和显存都不会被改动。只会改动矿工正在挖矿的显卡。NVML 设备编号与 CUDA 编号不同，
@@ -1601,6 +1623,7 @@ HiveOS 上默认 `/hive/miners/custom/cmfd-model`（与 FreeForgeMiner 共用，
 （Midas：`cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`）。
 *Extra config*（可选）：`--cmfd-mode eco`、`--devices 0,1`、`--per-gpu-workers`、`--lock-cclock 1560`。
 HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工日志）。
+请为 CMFD 飞行表使用**单独的、不锁定显存频率的超频配置**（见下文"显存频率"）：Pearl 的超频会让 CMFD 慢约 6 倍。
 
 **Windows：** `start-cmfd.bat` —— 填写 `WALLET`，保留 `POOL`（Aria）或去掉 Midas（或其他）那一行前的 `rem`，
 可选 `DEVICES`、`MODE`、频率锁定。若显卡设置了降压偏移，请以管理员身份运行。
@@ -1616,6 +1639,12 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 这需要 root/管理员权限；没有权限时日志会提示，需要您自己去掉偏移（HiveOS：CMFD 飞行表的超频配置）。
 `--uv-offset N` 则设置为 N —— **风险自负**。`--auto-uv` 仅用于 Pearl。安全的做法：默认频率、功耗限制或锁定核心频率（`--lock-cclock`）。
 
+**显存频率：CMFD 不要锁定显存。** Pearl 几乎不需要显存带宽，CMFD 则需要。常见的 Pearl 超频把显存频率锁得很低（HiveOS 超频
+*Mem lock* 810、`nvidia-smi -lmc 810`、`--lock-mclock 810`），会让 CMFD 慢约 **6 倍**：在一台 4× RTX 3070 的 HiveOS 矿机上，
+显存锁定在 810 MHz 时单卡 **3.7 FW/s**，不锁显存时 **21.8 FW/s**（约 237 W，功耗限制 240 W）。请为 CMFD 使用**单独的超频配置**：
+不锁显存，核心偏移 0，功耗限制随意。自 1.6.1 起，矿工在每块 GPU 挖矿 30 秒后检查一次并给出警告
+（`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`）；它不会自行修改您的超频。
+
 **日志。** 引擎输出带 `[GPUn]` 前缀（`MINER STATS`、`INTEGRITY | ok`、`SHARE STALE` = 份额传输途中出了新区块，无害；
 `SHARE REJECTED` = 结果错误，请降低频率）。FreeForGemPear 每 10 秒打印一行
 `[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
@@ -1628,7 +1657,7 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 
 **算力**（Aria 与 Kavatar 矿池，5–30 分钟运行，偏移 0，自动批量）：RTX 4070 Ti（功耗限制 190 W）36.8 FW/s @ 187 W；
 RTX 3070（功耗限制 135 W）14.1 FW/s @ 135 W —— 与同卡上的 FreeForgeMiner 1.2.3 相同（36.8 / 14.2 FW/s）。
-默认功耗限制下 RTX 3070 约 20 FW/s。
+默认功耗限制下 RTX 3070 约 20 FW/s（HiveOS，功耗限制 240 W，显存不锁定：21.8 FW/s @ 约 237 W）。
 
 **故障排除：** `out of memory` —— 关闭占用 GPU 的程序，CMFD 需约 7 GB 空闲显存；`illegal memory access` /
 `misaligned address` / `INTEGRITY | ERROR` —— 去掉核心偏移、降低频率；`model preparation ... failed` —— 检查能否访问

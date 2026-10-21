@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.6.0):**
+**Installation URL (1.6.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
 ```
 
 ### Flight sheet
@@ -90,16 +90,19 @@ Midas Mining `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b7
 The 6.4 GB model goes to `/hive/miners/custom/cmfd-model` (shared with FreeForgeMiner; downloaded once).
 Stock clocks or a power limit: a positive core offset of the OC profile is set to 0 by the miner for the run (and put back);
 `--uv-offset N` forces a value at your own risk. Dev fee 1% inside the engine (36 s per hour per GPU, worker `ffm-fee`).
+**Use a separate OC profile for CMFD without the memory lock.** The Pearl OC (memory locked at 810) cuts CMFD about 6×:
+an RTX 3070 gave 3.7 FW/s with *Mem lock* 810 and 21.8 FW/s (~237 W, power limit 240 W) with the memory free. The miner
+warns about a low memory clock in the log (once per GPU, since 1.6.1) but does not change your OC.
 CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in the package needs glibc 2.30+).
 
 ## Русский
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.6.0):**
+**Ссылка для установки (1.6.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.0/freeforgempear-1.6.0.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
 ```
 
 ### Полётный лист
@@ -176,6 +179,9 @@ Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu
 (общая с FreeForgeMiner, скачивается один раз). Стоковые частоты или лимит мощности: положительное смещение ядра из профиля
 разгона майнер на время работы сам ставит в 0 (и возвращает); `--uv-offset N` — своё значение на ваш риск. Комиссия 1% внутри
 движка (36 с в час на GPU, воркер `ffm-fee`).
+**Для CMFD — отдельный профиль разгона без лока памяти.** Разгон под Pearl (память залочена на 810) режет CMFD примерно в 6 раз:
+RTX 3070 с *Mem lock* 810 дала 3,7 FW/s, со свободной памятью — 21,8 FW/s (~237 Вт при лимите 240 Вт). О низкой частоте памяти
+майнер предупреждает в логе (один раз на GPU, с 1.6.1), но разгон сам не меняет.
 CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04 (движку в пакете нужна glibc 2.30+).
 
 ### Комиссия разработчика
