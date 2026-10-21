@@ -19,7 +19,8 @@ param(
     [string]$Password = '',
     [string]$LockCclock = '',
     [string]$LockMclock = '',
-    [string]$Moffset = ''
+    [string]$Moffset = '',
+    [string]$CmfdMode = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -31,13 +32,28 @@ if ($root -match '\s|[^\x00-\x7F]') {
     Write-Host "WARNING: the folder path contains spaces or non-English letters: $root" -ForegroundColor Yellow
     Write-Host "         If the miner fails to start, move the folder to e.g. C:\FreeForGemPear" -ForegroundColor Yellow
 }
+# Common Foundry (CMFD): the coin follows the pool URL (cmfd+tls://IP:PORT?pin=HEX), see start-cmfd.bat
+$Cmfd = $Pool -match '^cmfd\+tls://'
 if ([string]::IsNullOrWhiteSpace($Wallet)) {
-    Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your PRL address (prl1...).'
+    if ($Cmfd) { Write-Host 'WALLET is empty. Right-click start-cmfd.bat -> Edit, and set WALLET to your 64-character CMFD address.' }
+    else { Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your PRL address (prl1...).' }
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
 $Wallet = ($Wallet -replace '\s', '')
-if ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
-if ($Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
+if ($Cmfd) {
+    # both forms of the wallet: cmfd1... (checksummed, wallet 1.0.16+) or 64 hex; the miner checks the checksum
+    if ($Wallet -cnotmatch '^[0-9a-fA-F]{64}$' -and $Wallet -cnotmatch '^(cmfd1[02-9ac-hj-np-z]{58}|CMFD1[02-9AC-HJ-NP-Z]{58})$') {
+        Fail 'WALLET must be your CMFD address: cmfd1... (63 characters) or 64 hexadecimal characters.'
+    }
+    if ($Pool -cnotmatch '^cmfd\+tls://[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}\?pin=[0-9A-Fa-f]{64}$') {
+        Fail 'POOL must look like cmfd+tls://IP:PORT?pin=64_HEX (your pool publishes this line).'
+    }
+    if ($CmfdMode -and $CmfdMode -notin 'speed', 'eco') { Fail 'MODE must be speed or eco.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $root 'cmfd\cmfd-miner.exe'))) { Fail 'cmfd\cmfd-miner.exe is missing - unpack the whole archive again.' }
+    # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk)
+    if ($AutoUv -eq '1') { Write-Host 'NOTE: AUTO_UV is Pearl-only and is ignored for CMFD.' -ForegroundColor Yellow; $AutoUv = '' }
+} elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
+if (-not $Cmfd -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Write-Host ' WALLET is still the developer address from the example: you are mining' -ForegroundColor Yellow
     Write-Host ' to the developer, not to yourself. Right-click the .bat -> Edit and put' -ForegroundColor Yellow
@@ -45,8 +61,8 @@ if ($Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Start-Sleep -Seconds 15
 }
-if ($Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
-if ($Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
+if (-not $Cmfd -and $Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
+if (-not $Cmfd -and $Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
     Write-Host 'NOTE: PRL+NOCK merge mining works on LuckyPool only: on this pool the miner mines PRL to the prl1... part and ignores +NOCK.' -ForegroundColor Yellow
 }
 if ([string]::IsNullOrWhiteSpace($Worker)) { $Worker = 'rig' }
@@ -69,7 +85,9 @@ Get-ChildItem -LiteralPath $logs -Filter 'miner-*.log' | Sort-Object LastWriteTi
     Remove-Item -Force -ErrorAction SilentlyContinue
 
 $exe = Join-Path $root 'freeforgempear.exe'
+# a CMFD URL (with '?' and '=') needs no quoting: cmd passes it to the miner as is; more quotes would make cmd /c strip the outer pair
 $cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
+if ($Cmfd -and $CmfdMode) { $cmdLine += " --cmfd-mode $CmfdMode" }
 if ($Devices) { $cmdLine += " --devices $Devices" }
 if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " --password $Password" }
 if ($LockCclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-cclock $LockCclock" }

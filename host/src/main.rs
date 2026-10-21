@@ -3,8 +3,11 @@
 //!
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
+//!   freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1...   (Common Foundry, see cmfd.rs)
 mod amd_uv;
 mod clocks;
+mod cmfd;
+mod cmfd_offset;
 mod devfee;
 mod gpu;
 mod mining;
@@ -188,6 +191,14 @@ struct Args {
     lock_mclock: Option<String>, // --lock-mclock: memory clock MHz
     moffset: Option<String>,     // --moffset: memory clock offset MHz (may be negative)
     backend: Option<String>,     // --backend auto|cuda|amd
+    algo: Option<String>,        // --algo pearl|cmfd (default: cmfd for a cmfd+tls:// pool, else pearl)
+    pool_given: bool,
+    cmfd_dir: Option<std::path::PathBuf>,
+    cmfd_model: Option<std::path::PathBuf>,
+    cmfd_mode: String,
+    cmfd_batch: Option<u32>,
+    per_gpu_workers: bool,
+    cmfd_skip_prepare: bool,
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -563,11 +574,12 @@ fn mine(a: Args) -> Result<()> {
 }
 
 const HELP: &str = "\
-FreeForGemPear - Pearl (PRL) GPU miner
+FreeForGemPear - Pearl (PRL) and Common Foundry (CMFD) GPU miner
 
 USAGE:
-    freeforgempear --pool HOST:PORT --wallet ADDRESS [OPTIONS]
-    freeforgempear --self-test [--devices N]
+    freeforgempear --pool HOST:PORT --wallet ADDRESS [OPTIONS]                     Pearl (PRL)
+    freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]   Common Foundry (CMFD)
+    freeforgempear --self-test [--algo cmfd] [--devices N]
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360)
@@ -596,8 +608,21 @@ OPTIONS:
     --help               show this text
     --version            show the version
 
+COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ folder):
+    --algo pearl|cmfd    coin (default: cmfd for a cmfd+tls:// pool URL, else pearl)
+    --cmfd-mode speed|eco  speed = maximum hashrate (default); eco = RTX 30 about -13% power for -2% hashrate
+    --cmfd-batch N       forwards per GPU pass, 1-64 (default: automatic by GPU memory)
+    --cmfd-model DIR     folder of the 6.4 GB model (default: /hive/miners/custom/cmfd-model on HiveOS, else cmfd-model
+                         next to the binary); downloaded once from the official Common Foundry servers, then verified
+    --cmfd-dir DIR       engine folder (default: cmfd next to the binary)
+    --per-gpu-workers    one pool worker per GPU (WORKER.gpuN) instead of one per rig
+    CMFD needs about 7 GB of free GPU memory per card and an RTX 20xx or newer GPU. --lock-cclock/--lock-mclock/--moffset
+    work as for Pearl. A positive core (undervolt) offset is set to 0 for the run and put back on exit (CMFD computes wrong
+    results with it); --uv-offset N sets N instead (at your own risk); --auto-uv is Pearl-only.
+    Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
+
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
-A 1% developer fee (60 s in every 100 min, on the same pool) is part of the license terms.
+A 1% developer fee (Pearl: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool) is part of the license terms.
 ";
 
 fn parse_devices(s: &str) -> Result<Vec<i32>> {
@@ -611,6 +636,64 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
     }
     ensure!(!v.is_empty(), "--devices needs at least one device id");
     Ok(v)
+}
+
+/// `--algo cmfd`: Common Foundry through the FreeForgeMiner engine (cmfd.rs). Shares the command line, the clock options and
+/// the log format with Pearl; the undervolt tuner is Pearl-only (it validates with the Pearl kernel) and is ignored here.
+fn mine_cmfd(a: Args) -> Result<()> {
+    ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
+    ensure!(!a.wallet.is_empty(), "--wallet is required: your CMFD address, cmfd1... or 64 hex (see --help)");
+    if a.uv.auto {
+        eprintln!("WARNING: --auto-uv is Pearl-only and is ignored for CMFD (CMFD needs stock clocks: a positive core offset is set to 0 for the run; --uv-offset N forces a value at your own risk)");
+    }
+    if a.password != "x" {
+        eprintln!("WARNING: --password is not used by CMFD pools; ignored");
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = stop.clone();
+        ctrlc::set_handler(move || {
+            if stop.swap(true, Ordering::SeqCst) {
+                eprintln!("second interrupt: exiting at once");
+                cmfd::kill_all();
+                cmfd_offset::restore_all();
+                clocks::restore_all();
+                std::process::exit(130);
+            }
+            eprintln!("shutting down (stopping the CMFD engine)...");
+        })?;
+    }
+    let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
+    let state_dir = a
+        .uv
+        .dir
+        .clone()
+        .or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let clocks = clocks::ClockOpts {
+        core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, n, "--lock-cclock")?, None => vec![] },
+        mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, n, "--lock-mclock")?, None => vec![] },
+        mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, n, "--moffset")?, None => vec![] },
+    };
+    cmfd::mine(
+        cmfd::Opts {
+            pool: a.pool.trim().to_string(),
+            wallet: a.wallet.trim().to_string(),
+            worker: a.worker,
+            devices: a.devices,
+            minutes: a.minutes,
+            engine_dir: a.cmfd_dir,
+            model_dir: a.cmfd_model,
+            mode: a.cmfd_mode,
+            batch: a.cmfd_batch,
+            per_gpu_workers: a.per_gpu_workers,
+            skip_prepare: a.cmfd_skip_prepare,
+            uv_offset: a.uv.fixed,
+            state_dir,
+            clocks,
+        },
+        stop,
+    )
 }
 
 /// Build identifier: stays in the binary, never read for any purpose.
@@ -633,6 +716,14 @@ fn main() -> Result<()> {
         lock_mclock: None,
         moffset: None,
         backend: None,
+        algo: None,
+        pool_given: false,
+        cmfd_dir: None,
+        cmfd_model: None,
+        cmfd_mode: "speed".into(),
+        cmfd_batch: None,
+        per_gpu_workers: false,
+        cmfd_skip_prepare: false,
     };
     let mut test = false;
     let mut child: Option<uv::ChildArgs> = None;
@@ -649,7 +740,17 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "--self-test" => test = true,
-            "--pool" => a.pool = val()?,
+            "--pool" => {
+                a.pool = val()?;
+                a.pool_given = true;
+            }
+            "--algo" => a.algo = Some(val()?.to_ascii_lowercase()),
+            "--cmfd-dir" => a.cmfd_dir = Some(val()?.into()),
+            "--cmfd-model" => a.cmfd_model = Some(val()?.into()),
+            "--cmfd-mode" => a.cmfd_mode = val()?.to_ascii_lowercase(),
+            "--cmfd-batch" => a.cmfd_batch = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--cmfd-batch needs a number 1-64"))?),
+            "--cmfd-skip-prepare" => a.cmfd_skip_prepare = true,
+            "--per-gpu-workers" => a.per_gpu_workers = true,
             "--wallet" => a.wallet = val()?,
             "--worker" => a.worker = val()?,
             "--password" => a.password = val()?,
@@ -722,6 +823,23 @@ fn main() -> Result<()> {
         if a.wallet.is_empty() && !test && !a.uv.enabled() {
             return Ok(());
         }
+    }
+    let algo = match a.algo.as_deref() {
+        Some("pearl") | Some("prl") | Some("pearlhash") => {
+            ensure!(!cmfd::is_cmfd_url(&a.pool), "--algo pearl with a {} pool URL: use --algo cmfd (or drop --algo)", cmfd::SCHEME);
+            "pearl"
+        }
+        Some("cmfd") | Some("forgematrix") | Some("forgematrix_v4") => "cmfd",
+        Some(x) => bail!("unknown --algo {x:?} (pearl or cmfd)"),
+        None if cmfd::is_cmfd_url(&a.pool) => "cmfd",
+        None => "pearl",
+    };
+    if algo == "cmfd" {
+        if test {
+            let state_dir = a.uv.dir.clone().or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into)).unwrap_or_else(|| std::path::PathBuf::from("."));
+            return cmfd::self_test(&a.devices, &a.cmfd_dir, &a.cmfd_mode, &a.cmfd_model, &state_dir);
+        }
+        return mine_cmfd(a);
     }
     if test {
         return self_test(a.devices.as_ref().map_or(0, |d| d[0]));

@@ -29,6 +29,16 @@ their own licenses:
   base64, bincode, flate2, rand and their dependencies) -- each under its own
   license, typically MIT and/or Apache-2.0.
 
+* CMFD engine (folder cmfd/: cmfd-miner, cmfd-v4-replay, cmfd-launch, model preparation scripts) --
+  FreeForgeMiner, https://github.com/pepsykolya/freeforgeminer, MIT License,
+  Copyright (c) 2026 FreeForgeMiner contributors; portions Copyright (c) 2026 CommonFoundry contributors
+  (https://github.com/Common-Foundry-1/CommonFoundry). Shipped unchanged as separate programs; full license texts in
+  cmfd/LICENSE-FreeForgeMiner and cmfd/LICENSE-CommonFoundry, third-party notices in cmfd/THIRD_PARTY_NOTICES.md.
+  The FreeForGemPear License does not apply to the cmfd/ folder.
+  cmfd/fixtures/: test vector (replay coefficients) from the Common Foundry v1.0.16 AMD HIP miner, MIT License,
+  Copyright (c) 2026 Common Foundry AMD HIP contributors (cmfd/fixtures/LICENSE-CommonFoundry-AMD-HIP).
+  host/src/cmfd.rs: the cmfd1 address codec follows crates/cmfd-node/src/address.rs of Common Foundry v1.0.16 (MIT).
+
 * NVIDIA CUDA runtime (cudart) -- statically linked into libpearlgpu.so / pearlgpu.dll
   and redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The
   CUDA driver (libcuda) is not distributed; it comes with the NVIDIA driver.

@@ -95,6 +95,33 @@ Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
 with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself). The step-by-step guide,
 in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**.
 
+## Common Foundry (CMFD)
+
+Since 1.6.0 (branch `cmfd`, not released yet) the same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**:
+give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ shows it, or the older 64-hex form), everything else works as for Pearl
+(one process for all GPUs, `--devices`, `--lock-cclock/--lock-mclock/--moffset`, `--minutes`, the stats line, HiveOS, Windows):
+
+```
+./freeforgempear --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1
+./freeforgempear --algo cmfd --self-test
+```
+
+The CMFD work is done by the **FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>), shipped
+unchanged in the `cmfd/` folder: same consensus code, same speed (RTX 3070 ~20 FW/s, RTX 4070 Ti ~35 FW/s). The 6.4 GB
+model is downloaded once from the official Common Foundry servers and then only verified (`--cmfd-model DIR`; on HiveOS it is
+shared with FreeForgeMiner in `/hive/miners/custom/cmfd-model`). Needs about 7 GB of free GPU memory and an RTX 20xx or newer.
+`--cmfd-mode eco` = RTX 30 about 13% fewer watts for 2% less hashrate. A Pearl undervolt (positive core offset) makes CMFD
+compute wrong results, so in CMFD mode the miner sets it to 0 for the run and puts it back on exit (needs root/Administrator;
+`--uv-offset N` forces a value at your own risk; `--auto-uv` is Pearl-only).
+Pools: **Aria** (default) `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9`,
+**Midas Mining** `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`;
+more in [MANUAL.md](MANUAL.md), section 13.
+HiveOS: the same flight sheet with *Hash algorithm* `forgematrix_v4`, wallet template `%WAL%.%WORKER_NAME%` and the
+`cmfd+tls://` pool URL; Windows: `start-cmfd.bat`. Details: [MANUAL.md](MANUAL.md) section 13, [cmfd/README.md](cmfd/README.md).
+
+**CMFD dev fee: 1%**, inside the engine: 36 s per hour per GPU (random slot) on your pool, worker `ffm-fee`,
+log lines `DEV FEE | ...`. The Pearl fee below is not run in CMFD mode.
+
 ## Developer fee
 
 1% of the mining time: one 60-second slot in every 100 minutes, at a random moment of the cycle,

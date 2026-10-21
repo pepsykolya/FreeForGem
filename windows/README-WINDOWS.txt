@@ -9,6 +9,10 @@ QUICK START
      start-kryptex-eu.bat                 Kryptex Europe     prl-eu.kryptex.network:7048
      start-kryptex-ru / -us / -asia       Kryptex Russia / North America / Singapore
      start-nvidia-smi.bat                 advanced, as Administrator: nvidia-smi clock lock + power limit (MANUAL.md, section 5)
+     start-cmfd.bat                       Common Foundry (CMFD), pool Aria (Midas Mining and others inside the file);
+                                          WALLET = your 64-hex CMFD address; ~7 GB free GPU memory; the 6.4 GB model is
+                                          downloaded once into cmfd-model (MANUAL.md, section 13). Run as Administrator if
+                                          the card has an undervolt offset: the miner sets it to 0 for CMFD and puts it back.
    Right-click it -> Edit and REPLACE WALLET with your own prl1... address: it is preset to the developer's
    example address, and with it you would mine for the developer. Optionally set WORKER and DEVICES. Save.
    LuckyPool also pays NOCK for the same work (merge mining): set WALLET=prl1...+YOUR_NOCK_ADDRESS (LuckyPool files only).
