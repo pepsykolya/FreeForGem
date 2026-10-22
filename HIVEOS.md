@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.6.1):**
+**Installation URL (1.6.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
 ```
 
 ### Flight sheet
@@ -103,10 +103,10 @@ CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in 
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.6.1):**
+**Ссылка для установки (1.6.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
 ```
 
 ### Полётный лист

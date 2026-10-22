@@ -42,7 +42,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -72,8 +72,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
-cd freeforgempear-1.6.1
+tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
+cd freeforgempear-1.6.2
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -94,8 +94,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.6.1-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
+1. Download **`freeforgempear-1.6.2-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -146,7 +146,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -263,9 +263,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -648,7 +648,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -678,8 +678,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
-cd freeforgempear-1.6.1
+tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
+cd freeforgempear-1.6.2
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -700,8 +700,8 @@ cd freeforgempear-1.6.1
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.6.1-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.6.2-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -752,7 +752,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -867,9 +867,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1258,7 +1258,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1288,8 +1288,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.6.1-linux-x86_64.tar.gz
-cd freeforgempear-1.6.1
+tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
+cd freeforgempear-1.6.2
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1310,8 +1310,8 @@ cd freeforgempear-1.6.1
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.6.1-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.1/freeforgempear-1.6.1-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.6.2-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1353,7 +1353,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.1-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1453,9 +1453,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.6.1-linux-x86_64.tar.gz freeforgempear-1.6.1.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.6.1-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.6.1-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
