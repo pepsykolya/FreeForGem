@@ -198,3 +198,35 @@ own state dir, offsets set to 0 for the test, owner's +200/+300 and the units ba
 * Linux build in ffgp-build (glibc 2.30 max); Windows build; libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/*
   byte-identical to 1.6.1. Windows chain start.bat -> start.ps1 -> exe passes `UV_MAX=225,-,150` intact.
 * Not tested on hardware: Turing / CMP defaults (no such card; unit tests only), RTX 50 start +300.
+
+## amd-cmfd-uv (branch from `rel-1.6.2`): undervolt for CMFD on AMD (`--auto-uv`, `AUTO_UV=1` in start-cmfd.bat)
+
+Measured on the owner's RX 6800 XT (Adrenalin 25.5.1, ASIC watts from ADLX; kernel bench 2–2.5 min per point + 45–60 s
+bit-exact check on the real model + CF 1.0.16 test vector):
+
+* Stock (2324 MHz max, 1150 mV): 10.1 FW/s, 280 W, 36 FW/kJ. FW/s follows the core clock; the memory runs at full clock all the
+  time (unlike Pearl), +7.5 % memory clock and fast timings change nothing (and 2150 MHz memory gives wrong results). PL only
+  down to −6 % in ADLX: 9.9 FW/s, 264 W (+4 % FW/W).
+* Voltage floor 881 mV: 1900–2200 MHz max pass (8.4–9.6 FW/s at 182–201 W, 46–48 FW/kJ, +28..33 %); 2250 and 2300 fail at
+  every slider value up to 1000–1025 mV. 2200/881 passed twice and failed once: the edge moves, one step of margin is needed.
+* Owner's clock 2324 with the slider at 1100/1075 mV: 10.2 FW/s at 258/246 W (+9/+15 %); 1050 failed once, passed once; 1000 fails.
+* The official test vector (32 nonces × 2) alone is not enough to judge a point: it passed at 2324/1050 and at memory 2150 where
+  the long check found wrong digests.
+
+Implementation: pearl-miner `amd-cmfd-uv` — the OpenCL worker got `--uvcheck MODEL secs measure [refs]` (two fixed batches of
+32 nonces, final digests must equal the stock ones bit for bit, then FW/s), amduv got `--algo cmfd --model BANK` (own result
+section per card, search A = floor voltage / clock up → `eff`, search B = owner's clock / voltage down → `max`, `bal` = most FW/W
+with ≥ 90 % of stock FW/s, each confirmed by a long check; `apply --goal`). Host: `cmfd.rs` starts `amduv apply --algo cmfd`
+on AMD with `--auto-uv` after the model is prepared (guard restores the owner's settings on exit), goal `$FFGP_AMD_UV_GOAL`
+(default `bal`); NVIDIA unchanged (`--auto-uv` ignored for CMFD with a warning). start-cmfd.bat: `AUTO_UV`, `UV_GOAL`.
+
+Checks (owner PC, test package = 1.6.2 + new freeforgempear.exe / amduv.exe / cmfd-v4-replay-ocl.exe):
+* `amduv tune --algo cmfd`: 16 min; eff = bal = 2100/881 (9.13 FW/s, 193 W, 47.2 FW/kJ), max = 2324/1075 (10.07 FW/s, 248 W,
+  40.6 FW/kJ); owner's settings read back unchanged afterwards.
+* Aria pool through the host with `--auto-uv`: bal 15 min 9.06 FW/s / 191 W (47.4 FW/kJ), max 10 min 10.03 FW/s / 247 W
+  (40.7), stock 10 min 9.86 FW/s / 277 W (35.6); 0 rejected, INTEGRITY ok, the guard restored the owner's settings each time
+  (read back: 500/2324/1150/PL 0/VRAM 2000/timing 0). Shares on Aria are rare (none in these 35 min).
+* Pearl with the new amduv: stock 34.25 TMAC/s, 2200/881 32.2 at 173 W (as before). NVIDIA (Clawa): Pearl self-test PASSED,
+  `--algo cmfd --auto-uv` prints the NVIDIA warning as before. cargo test --release 14/14.
+* Prebuilt: amduv.exe and cmfd/cmfd-v4-replay-ocl.exe replaced (the binaries tested above); pearlgpu.dll/.lib,
+  pearlgpu_amd.dll, cmfd-miner-ffgp.exe, libpearlgpu.so byte-identical to rel-1.6.2.

@@ -199,6 +199,7 @@ pub struct Opts {
     pub uv_offset: crate::uv::PerGpu, // --uv-offset: one value or one per GPU (in `devices` order)
     pub state_dir: PathBuf,
     pub clocks: clocks::ClockOpts,
+    pub auto_uv: bool, // --auto-uv: AMD only (amduv with the CMFD check); NVIDIA keeps stock for CMFD
 }
 
 fn exe_dir() -> PathBuf {
@@ -511,7 +512,7 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
     let with_model = bank.is_file();
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
     // the same stock-offset rule as for mining: a Pearl undervolt would fail the test vector
-    // NVML only; on AMD nothing to reset (the amduv undervolt is only active while Pearl mines and is restored on exit)
+    // NVML only; on AMD nothing to reset (an amduv point is only active while the miner runs and is restored on exit)
     if !amd() {
         crate::cmfd_offset::recover(state_dir);
     }
@@ -722,6 +723,18 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         crate::cmfd_offset::recover(&o.state_dir);
     }
     let _offset_guard = if amd() { None } else { crate::cmfd_offset::apply(&devs, &o.uv_offset, &o.state_dir) };
+    // AMD --auto-uv: amduv applies its CMFD point (tuned on the CMFD load first if there is none) before the engine starts; its
+    // guard process puts the owner's clocks / voltage / power limit back when this process exits (also on a crash or kill)
+    let _amd_uv_guard = if amd() && o.auto_uv {
+        if devs.len() > 1 {
+            println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devs[0]);
+        }
+        let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "bal".into());
+        let worker = engine.join(bin(replay_worker()));
+        crate::amd_uv::start(devs[0], true, &goal, crate::amd_uv::Load::Cmfd { worker: &worker, model: &bank })
+    } else {
+        None
+    };
 
     let nv = if amd() { None } else { nvml::Nvml::load().ok() };
     let mut slots: Vec<Slot> = gpus

@@ -34,13 +34,20 @@ set "MOFFSET="
 rem Force a core offset for CMFD instead of 0, MHz (AT YOUR OWN RISK: wrong results / no shares are likely). Example: 100
 rem (one value for all GPUs, or a comma list in DEVICES order; - = the default 0 for that GPU)
 set "UV_OFFSET="
+rem AMD Radeon only: undervolt tuned for CMFD (amduv.exe, run as Administrator). The first start tunes for ~20 min (every point
+rem checked bit-for-bit on the real model), later starts apply the saved result; your own settings come back when the miner
+rem exits. On NVIDIA it is ignored (CMFD runs at stock there). MANUAL.md, section 14.
+rem set "AUTO_UV=1"
+rem Profile: bal (default; most FW per watt keeping >= 90 %% of the stock FW/s), eff (most FW per watt), max (stock speed, fewer watts)
+rem RX 6800 XT: eff = bal 9.1 FW/s at 193 W, max 10.1 FW/s at 248 W, stock 10.0 FW/s at 280 W (chip watts)
+set "UV_GOAL="
 rem Any other miner options, e.g. --per-gpu-workers (one pool worker per GPU) or --cmfd-batch 32:
 set "EXTRA="
 rem ================================================================
 
 set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -CmfdMode "%MODE%" -Extra "%EXTRA%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -UvOffset "%UV_OFFSET%"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -CmfdMode "%MODE%" -Extra "%EXTRA%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -UvOffset "%UV_OFFSET%" -AutoUv "%AUTO_UV%" -UvGoal "%UV_GOAL%"
 echo.
 echo FreeForGemPear stopped (exit code %ERRORLEVEL%).
 pause
