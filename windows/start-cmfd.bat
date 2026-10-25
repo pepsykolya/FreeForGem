@@ -15,8 +15,6 @@ set "POOL=cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a87879
 rem Other pools (remove "rem" from ONE line to use it instead; MANUAL.md has the full list):
 rem   Midas Mining (midasmining.net, 1 %):
 rem set "POOL=cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e"
-rem   Kavatar (kavatar.kasplay.online, 1 %):
-rem set "POOL=cmfd+tls://188.35.20.44:29445?pin=71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041"
 rem   cmfd-pool.online (3 %):
 rem set "POOL=cmfd+tls://109.199.124.187:29465?pin=ebe88f5e05f3a222208d551d05b6d39057b64ce8239ba7a708d487e15ac711be"
 rem Worker (rig) name: 1-32 letters, numbers, dots, underscores, hyphens

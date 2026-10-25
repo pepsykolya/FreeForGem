@@ -57,7 +57,7 @@ into the host build. Instead:
   `cmfd-v4-replay` **byte-identical** (`cmp`) to FreeForgeMiner 1.2.3 release. Windows: `fetch-engine.ps1` with the 1.2.3 zip ok.
 * Self-test `freeforgempear --algo cmfd --self-test` (= `cmfd-v4-replay --self-test`: small + DP4A differential, `replay_self_test=EXACT`):
   RTX 3070 (GPU1) ok, RTX 4070 Ti (GPU2) ok, Windows RTX 4070 Laptop ok.
-* Live, own pool Kavatar (`cmfd+tls://192.168.1.58:29445`, LAN address of the pool, share = 7 leading zero bits), wallet 307df1d1…,
+* Live, own LAN test pool (`cmfd+tls://192.168.1.58:29445`, share = 7 leading zero bits), wallet 307df1d1…,
   wrappers `gpu1-test.sh`/`gpu2-test.sh`, internal timeouts, 5 min each, same session, auto batch, mode speed,
   **GPC offset 0 for the test** (set via NVML, restored after: GPU1 +200, GPU2 +345 → unit set +330 again):
 
@@ -82,8 +82,8 @@ into the host build. Instead:
 
 ## 2026-10-21 (2) — towards rc 1.6.0 (Claude, Opus 5.5)
 
-Owner decisions: default pool Aria, Midas Mining second (Kavatar and cmfd-pool.online in the examples); a Pearl undervolt is
-reset by the host in CMFD mode; checks on Aria (Kavatar's connection is unstable); GPU2 (4070 Ti) not away from Pearl for long.
+Owner decisions: default pool Aria, Midas Mining second (cmfd-pool.online in the examples); a Pearl undervolt is
+reset by the host in CMFD mode; checks on Aria; GPU2 (4070 Ti) not away from Pearl for long.
 
 Done (commits e33d280, 260704b and the one with this entry):
 * **Offset reset** (`host/src/cmfd_offset.rs`): a positive core V/F offset → 0 before the engine starts, put back on exit;
@@ -108,7 +108,7 @@ Checks (Shahtyor through gpu1/gpu2-test.sh; Clawa):
 | crash: `kill -9` of the host while mining (4070 Ti) | offset stayed 0 with the marker; no engine left behind; next start: "+345 put back", then 0 again |
 | Midas Mining, 2 min, 4070 Ti | 26 accepted / 0 rejected / 2 stale, 36.7 FW/s |
 | HiveOS package (build.sh tarball unpacked, h-config/h-run/h-stats with redirected paths), eco, 4 min, 4070 Ti | ok; h-stats `{"hs":[37.24],"hs_units":"hs","ar":[50,0],"algo":"forgematrix_v4"}`; 61/0/3 |
-| long run 4070 Ti, Kavatar, stopped at 30 min (owner wanted the card back) | 36.94 FW/s @ 189.7 W, 443 acc / 0 rej / 58 stale, offset +345 put back |
+| long run 4070 Ti, own LAN test pool, stopped at 30 min (owner wanted the card back) | 36.94 FW/s @ 189.7 W, 443 acc / 0 rej / 58 stale, offset +345 put back |
 | 3070 on **Aria**, 25 min | 14.34 FW/s @ 134.7 W (PL 135 W), 1 acc / 0 rej (Aria's share difficulty is high: ~1 share per 20k FW) |
 | test vector on CUDA (FFM 1.2.3 replay, 3070, 3 runs) | `fe67b80a…f4a7a7` ×3, 2.18 s per batch of 32 |
 | `--self-test --algo cmfd` with the model (3070) | EXACT + test vector 2/2 `fe67b80a…` (24 s with model load), offset +200 → 0 → +200 |
