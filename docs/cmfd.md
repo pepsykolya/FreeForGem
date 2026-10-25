@@ -57,7 +57,7 @@ into the host build. Instead:
   `cmfd-v4-replay` **byte-identical** (`cmp`) to FreeForgeMiner 1.2.3 release. Windows: `fetch-engine.ps1` with the 1.2.3 zip ok.
 * Self-test `freeforgempear --algo cmfd --self-test` (= `cmfd-v4-replay --self-test`: small + DP4A differential, `replay_self_test=EXACT`):
   RTX 3070 (GPU1) ok, RTX 4070 Ti (GPU2) ok, Windows RTX 4070 Laptop ok.
-* Live, own LAN test pool (`cmfd+tls://192.168.1.58:29445`, share = 7 leading zero bits), wallet 307df1d1…,
+* Live, own LAN test pool (share = 7 leading zero bits), wallet 307df1d1…,
   wrappers `gpu1-test.sh`/`gpu2-test.sh`, internal timeouts, 5 min each, same session, auto batch, mode speed,
   **GPC offset 0 for the test** (set via NVML, restored after: GPU1 +200, GPU2 +345 → unit set +330 again):
 

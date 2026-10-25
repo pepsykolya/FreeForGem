@@ -970,13 +970,13 @@ mod tests {
 
     #[test]
     fn pool_and_wallet() {
-        let pin = "71ab1d2e36cd20226ac16184b91dda5527126fa8b29ee1de2b6f5cd8b7028041";
-        assert!(is_cmfd_url(&format!("cmfd+tls://188.35.20.44:29445?pin={pin}")));
+        let pin = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert!(is_cmfd_url(&format!("cmfd+tls://203.0.113.1:29445?pin={pin}")));
         assert!(!is_cmfd_url("pearl-eu2.luckypool.io:3360"));
-        assert!(validate_pool(&format!("cmfd+tls://188.35.20.44:29445?pin={pin}")).is_ok());
+        assert!(validate_pool(&format!("cmfd+tls://203.0.113.1:29445?pin={pin}")).is_ok());
         assert!(validate_pool(&format!("cmfd+tls://pool.example.com:29445?pin={pin}")).is_err());
-        assert!(validate_pool("cmfd+tls://188.35.20.44:29445").is_err());
-        assert!(validate_pool(&format!("cmfd+tls://188.35.20.44:0?pin={pin}")).is_err());
+        assert!(validate_pool("cmfd+tls://203.0.113.1:29445").is_err());
+        assert!(validate_pool(&format!("cmfd+tls://203.0.113.1:0?pin={pin}")).is_err());
         assert!(validate_wallet(pin).is_ok());
         assert!(validate_wallet("prl1abc").is_err());
     }
