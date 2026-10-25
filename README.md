@@ -1,35 +1,95 @@
 # FreeForGem
 
-GPU miner for **Pearl (PRL)** — pearlhash proof-of-useful-work — with a **1% developer fee**. Since 1.6.0 it also mines
-**Common Foundry (CMFD)** and runs on **AMD Radeon** cards (Windows); since 1.7.0 it mines **NOID (Parano1d)** on NVIDIA.
+**FreeForGem** is a multi-coin GPU miner for **Pearl (PRL)**, **Common Foundry (CMFD)** and **NOID (Parano1d)** with its own
+GPU kernels, a CPU check of every share before it is submitted, a **1% developer fee**, and an optional **per-card automatic
+undervolt** (`--auto-uv`) that finds the lowest safe core voltage of each GPU with bit-exact checks.
 
-> **FreeForGem is the new name of the multi-coin FreeForGemPear** (since 1.7.0: binary `freeforgem`, HiveOS custom miner
-> `freeforgem` — create a new flight sheet; saved `--auto-uv` results are imported automatically). FreeForGemPear continues as
-> the Pearl miner.
+FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear) (since 1.7.0: binary
+`freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
+`--auto-uv` results of FreeForGemPear are imported automatically on the first start.
+
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.0-beta**, pre-release)
+* **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
+* **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
+* **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
+  [FreeForGemPear releases](https://github.com/pepsykolya/FreeForGemPear/releases)
+
+## Supported coins
+
+| Coin | Algorithm (HiveOS hash algorithm) | GPUs | Select with |
+|---|---|---|---|
+| **Pearl (PRL)** | pearlhash (`pearlhash`), proof of useful work, int8 tensor-core GEMM | NVIDIA RTX 20/30/40/50, GTX 16, CMP; AMD Radeon RX 6000+ (Windows) | default |
+| **Common Foundry (CMFD)** | ForgeMatrix V4 (`forgematrix_v4`) | NVIDIA RTX 20xx or newer, AMD Radeon (Windows); ~7 GB free GPU memory | a `cmfd+tls://` pool URL or `--algo cmfd` |
+| **NOID (Parano1d)** | Poseidon2b over GF(2^128) (`parano1d`), pool protocol `parano1d-stratum-v1` over TLS | NVIDIA sm_80+ (RTX 30/40/50, A100/H100), driver **580+** | `--algo noid` (or a NOID pool URL) |
+
+## Quick start
+
+### HiveOS
+
+Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
+
+| Field | Pearl | NOID |
+|---|---|---|
+| Miner name | `freeforgem` | `freeforgem` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz` | same |
+| Hash algorithm | `pearlhash` | `parano1d` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
+| Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
+| Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1400 --auto-uv` |
+
+Use the **HiveOS** file of the release (`freeforgem-1.7.0beta.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
+
+### Windows 10/11 x64
+
+Download `freeforgem-1.7.0-beta-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
+replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
+Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
+`README-WINDOWS.txt`.
+
+### Linux x86_64
+
+```
+tar xzf freeforgem-1.7.0-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.0-beta
+./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
+./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
+./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv                                # NOID
+./freeforgem --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1                 # CMFD
+```
+
+The Linux binary is built on Ubuntu 20.04, so it runs on Ubuntu 20.04+ and HiveOS.
+
+## Automatic undervolt (`--auto-uv`)
+
+Optional, off by default. With `--auto-uv` the miner finds, **per card** (and for NOID per mode), the deepest core V/F offset at
+which that GPU still computes correctly, applies it while mining and puts your own settings back on exit (needs
+root/Administrator). Each GPU gets its own result, saved in `uv.json` together with the driver, kernel, clock lock and power
+limit; if any of them changes, the card is tuned again. Typical gain: RTX 3070 on NOID, eff mode @1400 MHz: 87.5 W → 72.8 W at
+the same hashrate (**+20 % MH/W**); Pearl @1560 MHz: roughly 5–10 W less per card. Mixed rigs: the limits are chosen per card
+automatically. Details: [MANUAL.md](MANUAL.md), section 12 (Pearl), 13 (CMFD), 15 (NOID).
+
+### The silent edge of undervolt
+
+Near the stability limit a GPU does **not** crash and reports **no Xid**, the quick self-test passes — but some results are
+already wrong (NOID, RTX 3070 @1560 MHz, +250: **168 of 5984** launches wrong). That means invalid or never-found shares that the
+miner log does not show. FreeForGem's `--auto-uv` therefore checks every step bit-exactly over thousands of launches under full
+load (Pearl: tile digests + CPU verification; NOID: the long stress check; CMFD: digests on the real model), takes the result one
+step below the first failure and confirms it, and re-checks results while mining (CPU check of every hit; NOID watchdog every
+120 s): a failure steps the offset back automatically. [MANUAL.md](MANUAL.md), section 16.
+
+## Pearl (PRL)
 
 Our own CUDA kernel for NVIDIA Ampere: the A′ matrix is generated on-chip, the int8 tensor-core
 GEMM (`mma.sync m16n8k32`) runs in a persistent kernel, and the jackpot fold and the BLAKE3
 hash are fused into it. The main loop is hand-tuned at SASS level. The host builds and checks
 every share proof with the official `zk-pow` verifier before it is submitted.
 
-## Performance
+RTX 3070 locked at 1560 MHz core / 810 MHz memory: **~70.5 TH/s at ~107 W** (kernel bench: 69.5 TMAC/s, 94.6% of the card's
+int8 tensor peak at 1560 MHz).
 
-RTX 3070 locked at 1560 MHz core / 810 MHz memory, LuckyPool, 5-minute run:
-
-| | Hashrate | Power |
-|---|---|---|
-| FreeForGemPear 1.4.6 | 70.5 TH/s | ~107 W (optional `--auto-uv`: see below) |
-| FreeForGemPear 1.4.5 | 70.2 TH/s | ~107 W |
-| FreeForGemPear 1.3.1 | 70.2 TH/s | ~107 W |
-| FreeForGemPear 1.3.0 | 70.2 TH/s | ~107 W |
-| FreeForGemPear 1.2.0 | 69.1 TH/s | ~107 W |
-| FreeForGemPear 1.1.0 | 68.3 TH/s | ~114 W |
-| FreeForGemPear 1.0.0 | 65.6 TH/s | ~105 W |
-
-Kernel bench (1.3.0, k = 8192): 69.5 TMAC/s, 94.6% of the card's int8 tensor peak at 1560 MHz. The main loop
-is emitted directly as SASS by our own generator.
-
-## Supported hardware
+### Supported hardware
 
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
@@ -46,14 +106,7 @@ is emitted directly as SASS by our own generator.
 
 Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS, Linux, Windows, pools, overclocking, troubleshooting).
 
-## Usage
-
-```
-tar xzf freeforgem-1.7.0-beta-linux-x86_64.tar.gz
-cd freeforgem-1.7.0-beta
-./freeforgem --self-test                      # optional: checks the GPU kernel against the CPU reference
-./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
-```
+### Options
 
 | Option | Meaning |
 |---|---|
@@ -84,26 +137,6 @@ from its SM count (RTX 3070 &rarr; 47104; +0.4% at the same power), so a mixed-S
 **CPU.** The host needs well under 10% of one CPU core per GPU (GPU waits sleep instead of spinning), so
 multi-GPU rigs with older CPUs run at full speed.
 
-## Windows
-
-Download `freeforgem-1.7.0-beta-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
-(`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
-`WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
-exits is restarted after 15 s. Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
-`README-WINDOWS.txt`.
-For a driver clock lock + power limit through `nvidia-smi` there is `start-nvidia-smi.bat` (run as Administrator).
-
-## HiveOS
-
-FreeForGem runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to *Custom* and use
-this *Installation URL*:
-
-```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
-```
-
-Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
-
 **NOCK merge mining (LuckyPool).** Use `prl1...+YOUR_NOCK_ADDRESS` as the wallet and LuckyPool pays NOCK for the same work,
 with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself). The step-by-step guide,
 in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**.
@@ -125,15 +158,6 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 
 `--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
 positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.
-
-### The silent edge of undervolt
-
-Near the stability limit a GPU does **not** crash and reports **no Xid**, the quick self-test passes — but some results are
-already wrong (NOID, RTX 3070 @1560 MHz, +250: **168 of 5984** launches wrong). That means invalid or never-found shares that the
-miner log does not show. FreeForGem's `--auto-uv` therefore checks every step bit-exactly over thousands of launches under full
-load (Pearl: tile digests + CPU verification; NOID: the long stress check; CMFD: digests on the real model), takes the result one
-step below the first failure and confirms it, and re-checks results while mining (CPU check of every hit; NOID watchdog every
-120 s): a failure steps the offset back automatically. [MANUAL.md](MANUAL.md), section 16.
 
 ## Common Foundry (CMFD)
 

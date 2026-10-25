@@ -654,8 +654,7 @@ both use the shared-operand S-box chain x·(x·x²)²):
 | 1650 MHz / +220 | — | **46.16 @ 121.1 (0.381)** |
 
 * **eff** (default, best MH per watt): lock the core at **1400 MHz** and use `--auto-uv`.
-* **speed** (best MH/s): core **1560–1650 MHz** (RTX 30); at 1560 it is faster than the fastest closed miner we measured on
-  the same card at the same clock (42.55 MH/s).
+* **speed** (best MH/s): core **1560–1650 MHz** (RTX 30): 43.65 MH/s at 1560 MHz, 46.16 MH/s at 1650 MHz.
 * RTX 40/50: the same kernels built for sm_89 / sm_120; tune the clock yourself (start at the card's stock clock with `--auto-uv`).
 
 **Command line**
@@ -1403,8 +1402,7 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
 | 1650 МГц / +220 | — | **46.16 @ 121.1 (0.381)** |
 
 * **eff** (по умолчанию, лучшие MH на ватт): лок ядра **1400 МГц** и `--auto-uv`.
-* **speed** (максимум MH/s): ядро **1560–1650 МГц** (RTX 30); на 1560 быстрее самого быстрого закрытого майнера, которого мы
-  мерили на той же карте на той же частоте (42.55 MH/s).
+* **speed** (максимум MH/s): ядро **1560–1650 МГц** (RTX 30): 43.65 MH/s на 1560 МГц, 46.16 MH/s на 1650 МГц.
 * RTX 40/50: те же ядра, собранные под sm_89 / sm_120; частоту подбирайте сами (начните со стоковой и `--auto-uv`).
 
 **Командная строка**
@@ -2075,8 +2073,7 @@ RTX 3070，显存 810 MHz，功耗上限 135 W，每个点 60 秒（`eff` = 每�
 | 1650 MHz / +220 | — | **46.16 @ 121.1（0.381）** |
 
 * **eff**（默认，每瓦 MH 最高）：核心锁定 **1400 MHz** 并使用 `--auto-uv`。
-* **speed**（MH/s 最高）：核心 **1560–1650 MHz**（RTX 30）；在 1560 MHz 时比我们在同一张卡、同一频率下测过的最快
-  闭源矿工（42.55 MH/s）更快。
+* **speed**（MH/s 最高）：核心 **1560–1650 MHz**（RTX 30）：1560 MHz 时 43.65 MH/s，1650 MHz 时 46.16 MH/s。
 * RTX 40/50：同样的内核分别为 sm_89 / sm_120 编译；频率请自行调整（从默认频率加 `--auto-uv` 开始）。
 
 **命令行**
