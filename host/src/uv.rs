@@ -464,6 +464,7 @@ pub struct Card {
     next_readback: Mutex<Instant>,
     last_good: AtomicI32, // highest step that passed in the tuning now running (i32::MIN = none); goes into the crash marker
     oc_resets: Mutex<Vec<Instant>>, // OC applies (HiveOS nvidia-oc ...) that reset the offset while mining, for the rate limit
+    fault: AtomicBool, // a check ended in a driver fault (Xid / hang): its crash marker must survive the shutdown
 }
 
 impl Card {
@@ -602,6 +603,12 @@ pub fn restore_all() {
     let m = active().lock().unwrap().clone();
     if let Some(m) = m {
         m.restore();
+        // a stop (Ctrl-C, SIGTERM, HiveOS miner stop / restart: Ctrl-C, then SIGHUP = "second interrupt" while a check still
+        // runs) is not a crash: without this the check's crash marker stayed, and the next start took the offset under check
+        // for a crash point ("not tuning, keeping +0", saved for good)
+        if m.stopped() {
+            m.forget_trying();
+        }
     }
 }
 
@@ -834,6 +841,7 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
         next_readback: Mutex::new(Instant::now() + Duration::from_secs(30)),
         last_good: AtomicI32::new(i32::MIN),
         oc_resets: Mutex::new(Vec::new()),
+        fault: AtomicBool::new(false),
     }
 }
 
@@ -1244,6 +1252,9 @@ impl Manager {
 
     /// Runs the deterministic GPU check + CPU verification of hits in a child process and samples NVML meanwhile.
     fn run_check(&self, c: &Card, sp: &Spec) -> Res {
+        if self.stopped() {
+            return Res { reason: "interrupted".into(), ..Default::default() };
+        }
         let cur = c.cur.load(Ordering::Relaxed);
         if cur != c.orig {
             self.mark_trying(c, cur);
@@ -1281,10 +1292,21 @@ impl Manager {
         // a driver fault (Xid, hang) often leaves the GPU unusable until a reboot ("GPU requires reset"), and then
         // nothing after this point runs: keep the marker, so the next start tunes below this offset instead of
         // climbing into the same fault again. tune() / apply_*() remove it once a result is saved.
-        if !r.driver_fault {
+        if r.driver_fault {
+            c.fault.store(true, Ordering::SeqCst);
+        } else {
             self.clear_trying(c);
         }
         r
+    }
+
+    /// At a stop: removes the crash markers of checks that were interrupted (not those of a driver fault).
+    fn forget_trying(&self) {
+        for c in &self.cards {
+            if !c.fault.load(Ordering::SeqCst) {
+                self.clear_trying(c);
+            }
+        }
     }
 
     /// A slot for one check process; waits while the free RAM does not cover one more (the GPU keeps mining meanwhile when
