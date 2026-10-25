@@ -645,17 +645,18 @@ or `innovlab`). The pool login is `WALLET.WORKER`.
 
 **Two kernels: `--noid-mode eff` (default) and `--noid-mode speed`**
 
-RTX 3070, memory 810 MHz, power limit 135 W, 60 s per point (`eff` = 512 threads per SM, `speed` = more of the S-box on CLMAD):
+RTX 3070, memory 810 MHz, power limit 135 W, 60 s per point (`eff` = 512 threads per SM, `speed` = more of the S-box on CLMAD;
+both use the shared-operand S-box chain x·(x·x²)²):
 
 | Core clock / offset | eff: MH/s @ W (MH/W) | speed: MH/s @ W (MH/W) |
 |---|---|---|
-| 1400 MHz / +220 | **35.69 @ 76.4 (0.467)** | 38.68 @ 85.3 (0.454) |
-| 1560 MHz / +205 | 39.30 @ 94.6 (0.415) (n2gc) | 42.79 @ 105.1 (0.407) |
-| 1650 MHz / +220 | — | **45.25 @ 121.0 (0.374)** |
+| 1400 MHz / +220 | **34.70 @ 73.2 (0.474)** | — |
+| 1560 MHz / +205 | 38.40 @ 92.2 (0.417) (offset +175) | 43.65 @ 105.3 (0.415) |
+| 1650 MHz / +220 | — | **46.16 @ 121.1 (0.381)** |
 
 * **eff** (default, best MH per watt): lock the core at **1400 MHz** and use `--auto-uv`.
-* **speed** (best MH/s): core **1560–1650 MHz** (RTX 30); at 1650 it is faster than the fastest closed miner we measured on
-  the same card (42.55 MH/s at 1560).
+* **speed** (best MH/s): core **1560–1650 MHz** (RTX 30); at 1560 it is faster than the fastest closed miner we measured on
+  the same card at the same clock (42.55 MH/s).
 * RTX 40/50: the same kernels built for sm_89 / sm_120; tune the clock yourself (start at the card's stock clock with `--auto-uv`).
 
 **Command line**
@@ -696,7 +697,7 @@ wrong NOID results; RTX 4070 Ti: the owner's Pearl +300 crashes NOID). So:
 FreeForGem 1.7.0-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
-[  60s] GPU0 35.690 (76 W, 0.467 MH/W) | total 35.690 MH/s, 76 W, 0.467 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
+[  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
 ```
 
 `hits` = candidates re-checked on the CPU (the kernel reports more than the shares, down to about 1 in 4 million nonces);
@@ -1389,17 +1390,18 @@ FreeForGem майнит **NOID** (Parano1d: Poseidon2b над GF(2^128), proof o
 
 **Два ядра: `--noid-mode eff` (по умолчанию) и `--noid-mode speed`**
 
-RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60 с на точку (`eff` — 512 потоков на SM, `speed` — больше S-box на CLMAD):
+RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60 с на точку (`eff` — 512 потоков на SM, `speed` — больше S-box на CLMAD;
+в обоих — цепочка S-box x·(x·x²)² с общим операндом):
 
 | Частота ядра / offset | eff: MH/s @ Вт (MH/Вт) | speed: MH/s @ Вт (MH/Вт) |
 |---|---|---|
-| 1400 МГц / +220 | **35.69 @ 76.4 (0.467)** | 38.68 @ 85.3 (0.454) |
-| 1560 МГц / +205 | 39.30 @ 94.6 (0.415) (n2gc) | 42.79 @ 105.1 (0.407) |
-| 1650 МГц / +220 | — | **45.25 @ 121.0 (0.374)** |
+| 1400 МГц / +220 | **34.70 @ 73.2 (0.474)** | — |
+| 1560 МГц / +205 | 38.40 @ 92.2 (0.417) (offset +175) | 43.65 @ 105.3 (0.415) |
+| 1650 МГц / +220 | — | **46.16 @ 121.1 (0.381)** |
 
 * **eff** (по умолчанию, лучшие MH на ватт): лок ядра **1400 МГц** и `--auto-uv`.
-* **speed** (максимум MH/s): ядро **1560–1650 МГц** (RTX 30); на 1650 быстрее самого быстрого закрытого майнера, которого мы
-  мерили на той же карте (42.55 MH/s на 1560).
+* **speed** (максимум MH/s): ядро **1560–1650 МГц** (RTX 30); на 1560 быстрее самого быстрого закрытого майнера, которого мы
+  мерили на той же карте на той же частоте (42.55 MH/s).
 * RTX 40/50: те же ядра, собранные под sm_89 / sm_120; частоту подбирайте сами (начните со стоковой и `--auto-uv`).
 
 **Командная строка**
@@ -1440,7 +1442,7 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
 FreeForGem 1.7.0-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
-[  60s] GPU0 35.690 (76 W, 0.467 MH/W) | total 35.690 MH/s, 76 W, 0.467 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
+[  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
 ```
 
 `hits` — кандидаты, перепроверенные на CPU (ядро сообщает больше, чем шар: примерно 1 на 4 млн nonce); `bad` — кандидаты или
@@ -2056,17 +2058,18 @@ FreeForGem 使用自有内核在 NVIDIA 显卡上挖 **NOID**（Parano1d：GF(2^
 
 **两个内核：`--noid-mode eff`（默认）和 `--noid-mode speed`**
 
-RTX 3070，显存 810 MHz，功耗上限 135 W，每个点 60 秒（`eff` = 每个 SM 512 线程，`speed` = 更多 S-box 运算放在 CLMAD 上）：
+RTX 3070，显存 810 MHz，功耗上限 135 W，每个点 60 秒（`eff` = 每个 SM 512 线程，`speed` = 更多 S-box 运算放在 CLMAD 上；
+两者都使用共享操作数的 S-box 链 x·(x·x²)²）：
 
 | 核心频率 / 偏移 | eff：MH/s @ W（MH/W） | speed：MH/s @ W（MH/W） |
 |---|---|---|
-| 1400 MHz / +220 | **35.69 @ 76.4（0.467）** | 38.68 @ 85.3（0.454） |
-| 1560 MHz / +205 | 39.30 @ 94.6（0.415）（n2gc） | 42.79 @ 105.1（0.407） |
-| 1650 MHz / +220 | — | **45.25 @ 121.0（0.374）** |
+| 1400 MHz / +220 | **34.70 @ 73.2（0.474）** | — |
+| 1560 MHz / +205 | 38.40 @ 92.2（0.417）（偏移 +175） | 43.65 @ 105.3（0.415） |
+| 1650 MHz / +220 | — | **46.16 @ 121.1（0.381）** |
 
 * **eff**（默认，每瓦 MH 最高）：核心锁定 **1400 MHz** 并使用 `--auto-uv`。
-* **speed**（MH/s 最高）：核心 **1560–1650 MHz**（RTX 30）；在 1650 MHz 时比我们在同一张卡上测过的最快闭源矿工
-  （1560 MHz 下 42.55 MH/s）更快。
+* **speed**（MH/s 最高）：核心 **1560–1650 MHz**（RTX 30）；在 1560 MHz 时比我们在同一张卡、同一频率下测过的最快
+  闭源矿工（42.55 MH/s）更快。
 * RTX 40/50：同样的内核分别为 sm_89 / sm_120 编译；频率请自行调整（从默认频率加 `--auto-uv` 开始）。
 
 **命令行**
@@ -2106,7 +2109,7 @@ RTX 4070 Ti：机主为 Pearl 设置的 +300 会让 NOID 崩溃）。因此：
 FreeForGem 1.7.0-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
-[  60s] GPU0 35.690 (76 W, 0.467 MH/W) | total 35.690 MH/s, 76 W, 0.467 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
+[  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
 ```
 
 `hits` = 在 CPU 上复核的候选结果（内核报告的数量多于份额，约每 400 万个 nonce 一个）；`bad` = 未通过检查的候选或看门狗启动

@@ -119,9 +119,9 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 
 | RTX 3070, mem 810, PL 135 W | MH/s | W | MH/W |
 |---|---|---|---|
-| `--noid-mode eff` (default) @1400 MHz, +220 | 35.69 | 76.4 | **0.467** |
-| `--noid-mode speed` @1560 MHz, +205 | 42.79 | 105.1 | 0.407 |
-| `--noid-mode speed` @1650 MHz, +220 | **45.25** | 121.0 | 0.374 |
+| `--noid-mode eff` (default) @1400 MHz, +220 | 34.70 | 73.2 | **0.474** |
+| `--noid-mode speed` @1560 MHz, +205 | 43.65 | 105.3 | 0.415 |
+| `--noid-mode speed` @1650 MHz, +220 | **46.16** | 121.1 | 0.381 |
 
 `--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
 positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.

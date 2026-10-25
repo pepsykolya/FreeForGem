@@ -828,6 +828,10 @@ fn import_legacy_uv(dir: &std::path::Path) {
         return;
     }
     let mut cands: Vec<std::path::PathBuf> = vec!["/hive-config/freeforgempear/uv.json".into(), "/hive/miners/custom/freeforgempear/uv.json".into()];
+    // the per-user fallback folder of FreeForGemPear (used when its own folder was not writable)
+    if let Some(h) = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("HOME")) {
+        cands.push(std::path::PathBuf::from(h).join("FreeForGemPear").join("uv.json"));
+    }
     // Windows / plain Linux: a FreeForGemPear folder next to this one (or next to the unpacked archive folder)
     let exe = std::env::current_exe().ok();
     let ups: Vec<std::path::PathBuf> = exe.iter().flat_map(|e| e.ancestors().skip(2).take(2).map(|d| d.to_path_buf())).collect();
