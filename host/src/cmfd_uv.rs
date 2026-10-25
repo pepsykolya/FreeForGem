@@ -211,6 +211,20 @@ struct Live {
 struct Shared {
     db: Db,
     live: Mutex<Vec<Live>>,
+    faulted: Mutex<Vec<String>>, // UUIDs whose check ended in a driver fault: their crash marker must survive a stop
+}
+
+/// At a stop (second Ctrl-C / SIGHUP of HiveOS miner stop while a check runs, console close): the crash markers of interrupted
+/// checks are removed, so the next start does not take the offset under check for a crash point; driver faults keep theirs.
+pub fn forget_trying_on_stop() {
+    let sh = shared().lock().unwrap().clone();
+    if let Some(sh) = sh {
+        let faulted = sh.faulted.lock().unwrap().clone();
+        let ids: Vec<String> = sh.db.v.lock().unwrap()[TRYING].as_object().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+        for id in ids.iter().filter(|id| !faulted.contains(id)) {
+            sh.db.clear_trying(id);
+        }
+    }
 }
 
 fn shared() -> &'static Mutex<Option<Arc<Shared>>> {
@@ -582,6 +596,8 @@ impl Tuner<'_> {
         }
         if !res.driver_fault {
             self.sh.db.clear_trying(&c.uuid);
+        } else {
+            self.sh.faulted.lock().unwrap().push(c.uuid.clone());
         }
         res
     }
@@ -912,7 +928,7 @@ pub fn start(o: &uv::Opts, devices: &[i32], bases: &[Option<i32>], ctx: &Ctx, st
         ));
         return;
     }
-    let sh = Arc::new(Shared { db: Db::load(&dir), live: Mutex::new(Vec::new()) });
+    let sh = Arc::new(Shared { db: Db::load(&dir), live: Mutex::new(Vec::new()), faulted: Mutex::new(Vec::new()) });
     *shared().lock().unwrap() = Some(sh.clone());
     let engine = cmfd::engine_label(&ctx.engine);
     let tag = file_tag(&worker);

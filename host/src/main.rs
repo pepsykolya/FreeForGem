@@ -745,6 +745,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
                 cmfd::kill_all();
                 cmfd_offset::restore_all();
                 clocks::restore_all();
+                cmfd_uv::forget_trying_on_stop();
                 eprintln!("second interrupt: exiting at once");
                 std::process::exit(130);
             }
@@ -756,6 +757,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
         cmfd::kill_all();
         cmfd_offset::restore_all();
         clocks::restore_all();
+        cmfd_uv::forget_trying_on_stop();
     });
     let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
     a.uv.check_counts(n)?; // --uv-max/--uv-min/--uv-offset lists: one value per mining GPU
