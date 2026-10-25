@@ -1,10 +1,10 @@
 @echo off
-rem FreeForGemPear -- see LICENSE
+rem FreeForGem -- see LICENSE
 rem Advanced start file, "the old way": nvidia-smi locks the GPU clocks and sets a power limit, then the miner runs
 rem in a restart loop and writes logs\ffgp.log. Run it AS ADMINISTRATOR (right-click -> Run as administrator):
 rem nvidia-smi -lgc / -lmc / -pl and the undervolt tuner (--auto-uv) all need it. See MANUAL.md, section 5 (Windows).
 setlocal EnableExtensions
-title FreeForGemPear - nvidia-smi clocks + power limit
+title FreeForGem - nvidia-smi clocks + power limit
 
 rem ================================================================
 rem  EDIT THESE VALUES
@@ -54,7 +54,7 @@ if "%AUTO_UV%"=="1" if defined UV_STEP set "ARGS=%ARGS% --uv-step %UV_STEP%"
 if defined EXTRA set "ARGS=%ARGS% %EXTRA%"
 
 :loop
-powershell -NoProfile -Command "& { .\freeforgempear.exe %ARGS% | Tee-Object -Append -FilePath '%~dp0logs\ffgp.log' }"
+powershell -NoProfile -Command "& { .\freeforgem.exe %ARGS% | Tee-Object -Append -FilePath '%~dp0logs\ffgp.log' }"
 echo Miner exited; restarting in 10 s (Ctrl+C to stop).
 timeout /t 10
 goto loop

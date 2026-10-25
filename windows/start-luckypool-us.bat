@@ -1,10 +1,10 @@
 @echo off
-rem FreeForGemPear -- see LICENSE
+rem FreeForGem -- see LICENSE
 setlocal EnableExtensions
-title FreeForGemPear - LuckyPool US East
+title FreeForGem - LuckyPool US East
 
 rem ================================================================
-rem  FreeForGemPear for Windows - pool: LuckyPool US East - EDIT THESE VALUES
+rem  FreeForGem for Windows - pool: LuckyPool US East - EDIT THESE VALUES
 rem ================================================================
 rem Your PRL wallet address (prl1...). REPLACE the address below with YOUR OWN:
 rem as shipped it is the developer's address, and everything you mine would go there.
@@ -52,5 +52,5 @@ set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -UvMin "%UV_MIN%" -UvStep "%UV_STEP%" -UvKeepLast "%UV_KEEP_LAST%" -UvRevalHours "%UV_REVAL_HOURS%" -UvOffset "%UV_OFFSET%" -Extra "%EXTRA%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%"
 echo.
-echo FreeForGemPear stopped (exit code %ERRORLEVEL%).
+echo FreeForGem stopped (exit code %ERRORLEVEL%).
 pause

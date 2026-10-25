@@ -1,10 +1,10 @@
 @echo off
-rem FreeForGemPear -- see LICENSE
+rem FreeForGem -- see LICENSE
 setlocal EnableExtensions
-title FreeForGemPear - Common Foundry (CMFD)
+title FreeForGem - Common Foundry (CMFD)
 
 rem ================================================================
-rem  FreeForGemPear for Windows - Common Foundry (CMFD, ForgeMatrix V4) - EDIT THESE VALUES
+rem  FreeForGem for Windows - Common Foundry (CMFD, ForgeMatrix V4) - EDIT THESE VALUES
 rem  Engine: FreeForgeMiner (MIT) in the cmfd folder. Needs about 7 GB of free GPU memory per card (6.4 GB model,
 rem  downloaded once into cmfd-model from the official Common Foundry servers) and an RTX 20xx or newer GPU.
 rem ================================================================
@@ -42,5 +42,5 @@ set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -CmfdMode "%MODE%" -Extra "%EXTRA%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -UvOffset "%UV_OFFSET%"
 echo.
-echo FreeForGemPear stopped (exit code %ERRORLEVEL%).
+echo FreeForGem stopped (exit code %ERRORLEVEL%).
 pause

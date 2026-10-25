@@ -1,11 +1,12 @@
 # Prebuilt GPU library
 
-The FreeForGemPear GPU kernel is closed source. The miner host program (`host/`) is built from source and
+The FreeForGem GPU kernel is closed source. The miner host program (`host/`) is built from source and
 loads the prebuilt search library from this directory at run time (`--backend auto|cuda|amd`):
 
 | File | Platform |
 |---|---|
 | `linux-x86_64/libpearlgpu.so` | Linux x86_64, glibc 2.31+ (built on Ubuntu 20.04) |
+| `linux-x86_64/libnoidgpu.so`, `windows-x64/noidgpu.dll` | NOID (Parano1d) search library, since 1.7.0: NVIDIA sm_80+ (RTX 30/40/50, A100/H100), **driver R580+**; kernels for sm_80/86/89/90/120 embedded as cubins (ptxas 13.4, `clmad`); exports only `nd_*` (`gpu/noidgpu.h`); depends only on the NVIDIA driver (libcuda / nvcuda). Separate from the Pearl library, which is unchanged |
 | `windows-x64/pearlgpu.dll`, `windows-x64/pearlgpu.lib` | Windows 10/11 x64 (static CUDA runtime and MSVC CRT; `.lib` is the import library) |
 | `windows-x64/pearlgpu_amd.dll` | Windows 10/11 x64, AMD GPUs (OpenCL; RDNA2 and newer — tested on RX 6800 XT), since 1.6.0 |
 | `windows-x64/amduv.exe` | Windows, AMD: clock/voltage tuner for `--auto-uv` (ADLX), since 1.6.0 |

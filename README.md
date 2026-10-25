@@ -1,7 +1,11 @@
-# FreeForGemPear
+# FreeForGem
 
 GPU miner for **Pearl (PRL)** — pearlhash proof-of-useful-work — with a **1% developer fee**. Since 1.6.0 it also mines
-**Common Foundry (CMFD)** and runs on **AMD Radeon** cards (Windows).
+**Common Foundry (CMFD)** and runs on **AMD Radeon** cards (Windows); since 1.7.0 it mines **NOID (Parano1d)** on NVIDIA.
+
+> **FreeForGem is the new name of the multi-coin FreeForGemPear** (since 1.7.0: binary `freeforgem`, HiveOS custom miner
+> `freeforgem` — create a new flight sheet; saved `--auto-uv` results are imported automatically). FreeForGemPear continues as
+> the Pearl miner.
 
 Our own CUDA kernel for NVIDIA Ampere: the A′ matrix is generated on-chip, the int8 tensor-core
 GEMM (`mma.sync m16n8k32`) runs in a persistent kernel, and the jackpot fold and the BLAKE3
@@ -35,7 +39,8 @@ is emitted directly as SASS by our own generator.
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
   Details: [MANUAL.md](MANUAL.md) section 14.
-* **Not supported:** older GPUs (Pascal and earlier), A100 (sm_80), AMD RX 5000 and older, AMD on Linux/HiveOS.
+* **NOID:** NVIDIA sm_80+ only (RTX 30/40/50, A100/H100) with driver 580+; no Turing, no AMD.
+* **Not supported:** older GPUs (Pascal and earlier), A100 (sm_80) for Pearl, AMD RX 5000 and older, AMD on Linux/HiveOS.
 * **System:** Linux x86_64 or Windows 10/11 x64, NVIDIA driver 525 or newer (RTX 50xx: 570 or newer). The Linux binary is built on
   Ubuntu 20.04 (glibc 2.31), so it runs on Ubuntu 20.04+ and HiveOS.
 
@@ -44,10 +49,10 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
-cd freeforgempear-1.6.2
-./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
-./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
+tar xzf freeforgem-1.7.0-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.0-beta
+./freeforgem --self-test                      # optional: checks the GPU kernel against the CPU reference
+./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
 
 | Option | Meaning |
@@ -81,7 +86,7 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.6.2-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+Download `freeforgem-1.7.0-beta-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
 (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
 `WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -90,11 +95,11 @@ For a driver clock lock + power limit through `nvidia-smi` there is `start-nvidi
 
 ## HiveOS
 
-FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to *Custom* and use
+FreeForGem runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to *Custom* and use
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
@@ -103,6 +108,33 @@ Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
 with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself). The step-by-step guide,
 in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**.
 
+## NOID (Parano1d)
+
+Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+, **driver 580+**), pool protocol
+`parano1d-stratum-v1` over TLS, every candidate re-checked on the CPU with the official `noid_poseidon2b` crate, 1% dev fee.
+
+```
+./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1 --lock-cclock 1400 --auto-uv
+```
+
+| RTX 3070, mem 810, PL 135 W | MH/s | W | MH/W |
+|---|---|---|---|
+| `--noid-mode eff` (default) @1400 MHz, +220 | 35.69 | 76.4 | **0.467** |
+| `--noid-mode speed` @1560 MHz, +205 | 42.79 | 105.1 | 0.407 |
+| `--noid-mode speed` @1650 MHz, +220 | **45.25** | 121.0 | 0.374 |
+
+`--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
+positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.
+
+### The silent edge of undervolt
+
+Near the stability limit a GPU does **not** crash and reports **no Xid**, the quick self-test passes — but some results are
+already wrong (NOID, RTX 3070 @1560 MHz, +250: **168 of 5984** launches wrong). That means invalid or never-found shares that the
+miner log does not show. FreeForGem's `--auto-uv` therefore checks every step bit-exactly over thousands of launches under full
+load (Pearl: tile digests + CPU verification; NOID: the long stress check; CMFD: digests on the real model), takes the result one
+step below the first failure and confirms it, and re-checks results while mining (CPU check of every hit; NOID watchdog every
+120 s): a failure steps the offset back automatically. [MANUAL.md](MANUAL.md), section 16.
+
 ## Common Foundry (CMFD)
 
 Since 1.6.0 the same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**:
@@ -110,8 +142,8 @@ give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ 
 (one process for all GPUs, `--devices`, `--lock-cclock/--lock-mclock/--moffset`, `--minutes`, the stats line, HiveOS, Windows):
 
 ```
-./freeforgempear --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1
-./freeforgempear --algo cmfd --self-test
+./freeforgem --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1
+./freeforgem --algo cmfd --self-test
 ```
 
 The CMFD work is done by the **FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>), shipped
@@ -139,7 +171,7 @@ log lines `DEV FEE | ...`. The Pearl fee below is not run in CMFD mode.
 
 1% of the mining time: one 60-second slot in every 100 minutes, at a random moment of the cycle,
 on **the same pool you configured**, under a separate login (worker `ffgp-devfee`; on LuckyPool it also merge-mines NOCK for the developer). The log shows
-`devfee: next slot in N min`, `devfee: mining 60s for FreeForGemPear dev (1%)` and
+`devfee: next slot in N min`, `devfee: mining 60s for FreeForGem dev (1%)` and
 `devfee: back to user`. The first slot comes at a random moment within the first 100 minutes. If the fee login
 can't be served, the slot is skipped; your mining is never blocked.
 
@@ -157,16 +189,16 @@ Requirements: Rust (stable, edition 2024), a C linker (gcc), git, and the NVIDIA
 linker can resolve the library's `libcuda.so.1` dependency. No `nvcc` is needed.
 
 ```
-./build.sh          # -> dist/freeforgempear-<version>-linux-x86_64.tar.gz and dist/freeforgempear-<version>.tar.gz (HiveOS)
+./build.sh          # -> dist/freeforgem-<version>-linux-x86_64.tar.gz and dist/freeforgem-<version>.tar.gz (HiveOS)
 ```
 
 Windows x64 (Visual Studio 2022 or Build Tools with the C++ workload, Rust with the MSVC toolchain, git), in PowerShell:
 
 ```
-.\build-windows.ps1 # -> dist\freeforgempear-<version>-windows-x64.zip (+ .sha256)
+.\build-windows.ps1 # -> dist\freeforgem-<version>-windows-x64.zip (+ .sha256)
 ```
 
-It builds `freeforgempear.exe` with a static MSVC runtime (`PEARLGPU_DIR` points `host/build.rs` at the directory with
+It builds `freeforgem.exe` with a static MSVC runtime (`PEARLGPU_DIR` points `host/build.rs` at the directory with
 `pearlgpu.lib`) and packs it with `pearlgpu.dll`. The only runtime dependency is the NVIDIA driver.
 
 Portable Linux build matching the release binaries (needs Docker):
@@ -181,6 +213,6 @@ The library contains only the tuned search kernel; if it can't be loaded (unsupp
 
 ## License
 
-FreeForGemPear License 1.0 — free to use, study, modify and redistribute, **as long as the
+FreeForGem License 1.0 — free to use, study, modify and redistribute, **as long as the
 developer fee stays intact**. See [LICENSE](LICENSE). Third-party components are listed in
 [NOTICE](NOTICE).

@@ -1,5 +1,5 @@
-FreeForGemPear
-Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE).
+FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID)
+Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE), which applies to FreeForGem.
 
 The GPU kernels, the CUDA library and the host program are original work. The GPU library is
 distributed in binary form only.
@@ -38,6 +38,14 @@ their own licenses:
   cmfd/fixtures/: test vector (replay coefficients) from the Common Foundry v1.0.16 AMD HIP miner, MIT License,
   Copyright (c) 2026 Common Foundry AMD HIP contributors (cmfd/fixtures/LICENSE-CommonFoundry-AMD-HIP).
   host/src/cmfd.rs: the cmfd1 address codec follows crates/cmfd-node/src/address.rs of Common Foundry v1.0.16 (MIT).
+
+* noid_poseidon2b, noid_core -- from https://git.parano1d.org/ignotusnemo/parano1d (commit 5302b3f),
+  Apache License 2.0, Copyright (C) 2026 Paranoid Zero. Used unchanged by the host for the NOID CPU reference
+  (every NOID hit is re-computed with it before it is submitted). The NOID GPU kernels (libnoidgpu.so / noidgpu.dll)
+  are original work; their test vectors were generated with this crate.
+
+* rustls, ring, webpki-roots (TLS for NOID pools) -- Apache-2.0 / ISC / MIT, see each crate; webpki-roots
+  carries the Mozilla CA certificate list (MPL-2.0 data).
 
 * NVIDIA CUDA runtime (cudart) -- statically linked into libpearlgpu.so / pearlgpu.dll
   and redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The

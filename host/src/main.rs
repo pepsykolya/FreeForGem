@@ -1,5 +1,6 @@
 // FreeForGemPear — see LICENSE
-//! FreeForGemPear: Pearl (PRL) GPU miner host: pool client + job/commitment logic around libpearlgpu.
+//! FreeForGem (formerly FreeForGemPear): Pearl (PRL) GPU miner host: pool client + job/commitment logic around libpearlgpu;
+//! Common Foundry (CMFD) through the FreeForgeMiner engine (cmfd.rs); NOID (Parano1d) around libnoidgpu (noid/).
 //!
 //!   freeforgempear --pool host:port --wallet ADDR [--worker NAME] [--devices 0,1] [--minutes N]
 //!   freeforgempear --self-test [--devices 0]
@@ -45,6 +46,7 @@ mod cmfd_offset;
 mod devfee;
 mod gpu;
 mod mining;
+mod noid;
 mod nvml;
 mod stratum;
 mod uv;
@@ -64,6 +66,9 @@ use stratum::{Event, Login, PoolJob, Src, Stats, Submit};
 use worker::{Assignment, GpuStat, Shared};
 use zk_pow::api::sanity_checks::penalized_target_bound;
 use zk_pow::ffi::plain_proof::PlainProof;
+
+/// Product name (the multi-coin miner: Pearl, CMFD, NOID).  The Pearl-only line stays FreeForGemPear.
+pub const PRODUCT: &str = "FreeForGem";
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -268,6 +273,7 @@ struct Args {
     cmfd_batch: Option<u32>,
     per_gpu_workers: bool,
     cmfd_skip_prepare: bool,
+    noid_mode: String,
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -366,7 +372,7 @@ fn mine(a: Args) -> Result<()> {
     } else {
         format!("m per device {device_ms:?} (SM {sms:?})")
     };
-    println!("FreeForGemPear {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), gpu::backend().name(), k());
+    println!("{PRODUCT} {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), gpu::backend().name(), k());
     // optional clock control (lock core/memory clock, memory offset): applied now, restored on any exit
     let clock_dir = a
         .uv
@@ -535,7 +541,7 @@ fn mine(a: Args) -> Result<()> {
             && stats[1].connected.load(Ordering::Relaxed) == 1
             && st[1].cur.as_ref().is_some_and(|(pj, _)| final_target(pj, st[1].pool_diff, mode).is_ok());
         match fee.tick(now, fee_ready) {
-            Change::Started => println!("devfee: mining {}s for FreeForGemPear dev ({}%)", devfee::Params::from_env().slot.as_secs(), devfee::FEE_PERCENT),
+            Change::Started => println!("devfee: mining {}s for FreeForGem dev ({}%)", devfee::Params::from_env().slot.as_secs(), devfee::FEE_PERCENT),
             Change::Finished => println!("devfee: back to user"),
             Change::Aborted => println!("devfee: fee connection lost mid-slot, back to user"),
             Change::Skipped => println!("devfee: fee login unavailable, skipping this slot (user mining continues)"),
@@ -654,12 +660,13 @@ fn mine(a: Args) -> Result<()> {
 }
 
 const HELP: &str = "\
-FreeForGemPear - Pearl (PRL) and Common Foundry (CMFD) GPU miner
+FreeForGem - Pearl (PRL), Common Foundry (CMFD) and NOID (Parano1d) GPU miner (formerly FreeForGemPear)
 
 USAGE:
-    freeforgempear --pool HOST:PORT --wallet ADDRESS [OPTIONS]                     Pearl (PRL)
-    freeforgempear --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]   Common Foundry (CMFD)
-    freeforgempear --self-test [--algo cmfd] [--devices N]
+    freeforgem --pool HOST:PORT --wallet ADDRESS [OPTIONS]                         Pearl (PRL)
+    freeforgem --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]       Common Foundry (CMFD)
+    freeforgem --algo noid --pool stratum+ssl://HOST:PORT --wallet o1... [OPTIONS] NOID (Parano1d)
+    freeforgem --self-test [--algo cmfd|noid] [--devices N]
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360)
@@ -704,8 +711,21 @@ COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ 
     results with it); --uv-offset N sets N instead (at your own risk); --auto-uv is Pearl-only.
     Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
 
+NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R580+):
+    --algo noid          coin (default: noid for a pool host with noid, parano1d or innovlab in its name)
+    --pool URL           stratum+ssl://HOST:PORT (TLS, default for a bare HOST:PORT) or stratum+tcp://HOST:PORT;
+                         add ?insecure for a pool with a self-signed certificate. E.g. stratum+ssl://eu2.innovlab.cc:19601
+    --noid-mode eff|speed  eff = best MH per watt (default; RTX 30: lock the core at 1400 + --auto-uv), speed = best MH/s
+                         (RTX 30: core 1560-1650)
+    --auto-uv            NOID-specific undervolt: every step checked bit-exactly by a 40 s stress check on the NOID kernel,
+                         result per card and mode in uv.json (section noid); --uv-max/--uv-min/--uv-step/--uv-keep-last/--uv-reset as
+                         for Pearl (default first step +120). Without --auto-uv a positive core offset is set to 0 for NOID
+                         (Pearl offsets give silently wrong NOID results) and put back on exit; --uv-offset N forces N.
+    Every candidate is re-computed on the CPU (official noid_poseidon2b crate) before it is submitted; a failed check or a
+    failed in-mining watchdog check (every 120 s) steps the card's offset back. Dev fee: 1% (60 s per 100 min, same pool).
+
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
-A 1% developer fee (Pearl: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool) is part of the license terms.
+A 1% developer fee (Pearl and NOID: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool) is part of the license terms.
 ";
 
 fn parse_devices(s: &str) -> Result<Vec<i32>> {
@@ -790,8 +810,54 @@ fn mine_cmfd(a: Args) -> Result<()> {
 #[used]
 static BUILD_LAYOUT_ID: [u8; 26] = *b"ffgp-5555ad29a64e9e82-2a0d";
 
+/// `--noid-uv-check --devices D --noid-mode M --uv-secs S`: the NOID tuning check (child process of the tuner, noid/tune.rs).
+fn noid_check_main() -> ! {
+    let v: Vec<String> = std::env::args().collect();
+    let get = |k: &str| v.iter().position(|x| x == k).and_then(|i| v.get(i + 1)).cloned();
+    let dev = get("--devices").and_then(|s| s.split(',').next().and_then(|x| x.trim().parse().ok())).unwrap_or(0);
+    let mode = get("--noid-mode").and_then(|m| noid::mode_of(&m).ok()).unwrap_or(0);
+    let secs = get("--uv-secs").and_then(|s| s.parse().ok()).unwrap_or(40.0);
+    std::process::exit(noid::check_child(&noid::CheckArgs { dev, mode, secs }));
+}
+
+/// The multi-coin miner was FreeForGemPear before 1.7.0: on the first start take over its saved undervolt results (uv.json with
+/// the Pearl, CMFD and NOID sections) when this state folder has none.
+fn import_legacy_uv(dir: &std::path::Path) {
+    let dst = dir.join("uv.json");
+    if dst.exists() {
+        return;
+    }
+    let mut cands: Vec<std::path::PathBuf> = vec!["/hive-config/freeforgempear/uv.json".into(), "/hive/miners/custom/freeforgempear/uv.json".into()];
+    // Windows / plain Linux: a FreeForGemPear folder next to this one (or next to the unpacked archive folder)
+    let exe = std::env::current_exe().ok();
+    let ups: Vec<std::path::PathBuf> = exe.iter().flat_map(|e| e.ancestors().skip(2).take(2).map(|d| d.to_path_buf())).collect();
+    for parent in ups {
+        if let Ok(rd) = std::fs::read_dir(&parent) {
+            let mut v: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().starts_with("freeforgempear"))).collect();
+            v.sort();
+            for p in v.into_iter().rev() {
+                cands.push(p.join("uv.json"));
+                cands.push(p.join("freeforgempear").join("uv.json"));
+            }
+        }
+    }
+    for c in cands {
+        if c.is_file() {
+            let _ = std::fs::create_dir_all(dir);
+            match std::fs::copy(&c, &dst) {
+                Ok(_) => println!("auto-uv: imported the saved undervolt results of FreeForGemPear from {} into {}", c.display(), dst.display()),
+                Err(e) => eprintln!("auto-uv: cannot import {} ({e})", c.display()),
+            }
+            return;
+        }
+    }
+}
+
 fn main() -> Result<()> {
     std::hint::black_box(&BUILD_LAYOUT_ID);
+    if std::env::args().any(|x| x == "--noid-uv-check") {
+        noid_check_main();
+    }
     let mut args = std::env::args().skip(1);
     let mut a = Args {
         pool: "pearl-eu2.luckypool.io:3360".into(),
@@ -814,6 +880,7 @@ fn main() -> Result<()> {
         cmfd_batch: None,
         per_gpu_workers: false,
         cmfd_skip_prepare: false,
+        noid_mode: "eff".into(),
     };
     let mut test = false;
     let mut child: Option<uv::ChildArgs> = None;
@@ -826,7 +893,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "--version" | "-V" => {
-                println!("freeforgempear {}", env!("CARGO_PKG_VERSION"));
+                println!("freeforgem {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "--self-test" => test = true,
@@ -840,6 +907,7 @@ fn main() -> Result<()> {
             "--cmfd-mode" => a.cmfd_mode = val()?.to_ascii_lowercase(),
             "--cmfd-batch" => a.cmfd_batch = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--cmfd-batch needs a number 1-64"))?),
             "--cmfd-skip-prepare" => a.cmfd_skip_prepare = true,
+            "--noid-mode" => a.noid_mode = val()?.to_ascii_lowercase(),
             "--per-gpu-workers" => a.per_gpu_workers = true,
             "--wallet" => a.wallet = val()?,
             "--worker" => a.worker = val()?,
@@ -892,12 +960,41 @@ fn main() -> Result<()> {
         }
     }
     let _ = uv_given;
+    if child.is_none() {
+        import_legacy_uv(&uv::state_dir(&a.uv));
+    }
     // undervolt options first: a typo must not wait for the GPU library
     if child.is_none() {
         a.uv.validate()?;
         if let Some(d) = &a.devices {
             a.uv.check_counts(d.len())?; // without --devices: checked once the GPUs are counted
         }
+    }
+    // NOID: its own GPU library (noidgpu); the Pearl library is not needed (only for --lock-cclock/--lock-mclock/--moffset)
+    let noid_algo = match a.algo.as_deref() {
+        Some("noid") | Some("parano1d") | Some("poseidon2b") => true,
+        Some(_) => false,
+        None => a.pool_given && noid::looks_like_noid_pool(&a.pool),
+    };
+    if noid_algo && child.is_none() {
+        let mode = noid::mode_of(&a.noid_mode)?;
+        if test {
+            return noid::self_test(&a.devices);
+        }
+        ensure!(a.pool_given, "--algo noid needs --pool stratum+ssl://HOST:PORT (a NOID pool, see --help)");
+        return noid::mine(noid::Opts {
+            pool: a.pool,
+            wallet: a.wallet.trim().to_string(),
+            worker: a.worker,
+            password: a.password,
+            minutes: a.minutes,
+            devices: a.devices,
+            mode,
+            uv: a.uv,
+            lock_cclock: a.lock_cclock,
+            lock_mclock: a.lock_mclock,
+            moffset: a.moffset,
+        });
     }
     // AMD (OpenCL) library: busy-wait for attempt completion unless the user chose otherwise.  Must be set before the
     // library is loaded (its CRT copies the environment at load); the CUDA library does not read it.  Under full CPU load
@@ -927,7 +1024,7 @@ fn main() -> Result<()> {
             "pearl"
         }
         Some("cmfd") | Some("forgematrix") | Some("forgematrix_v4") => "cmfd",
-        Some(x) => bail!("unknown --algo {x:?} (pearl or cmfd)"),
+        Some(x) => bail!("unknown --algo {x:?} (pearl, cmfd or noid)"),
         None if cmfd::is_cmfd_url(&a.pool) => "cmfd",
         None => "pearl",
     };

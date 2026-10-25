@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 pub const FEE_WALLET: &str = "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr";
 pub const FEE_WORKER: &str = "ffgp-devfee";
+/// NOID (Parano1d) fee address: the same 1% schedule, a second login on the user's NOID pool (noid/mod.rs).
+pub const FEE_WALLET_NOID: &str = "o1qxh67m5rugg8t43gcn47lp775thsq4padlacn2jv9l3d7lmv7cmq4gmhdc";
 /// Nockchain address merge-mined with the fee slot on LuckyPool (`PRL+NOCK` wallet syntax); other pools get FEE_WALLET only.
 pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat4ih";
 

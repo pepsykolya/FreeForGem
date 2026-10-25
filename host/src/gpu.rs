@@ -39,7 +39,7 @@ impl Backend {
     }
 }
 
-mod dl {
+pub(crate) mod dl {
     use std::ffi::{CString, c_void};
     #[cfg(windows)]
     unsafe extern "system" {

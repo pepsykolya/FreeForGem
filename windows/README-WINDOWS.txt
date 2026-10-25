@@ -1,8 +1,8 @@
-FreeForGemPear for Windows 10/11 (x64) - Pearl (PRL) GPU miner for NVIDIA RTX 30xx (RTX 40xx should work, untuned)
-Full manual (EN/RU/ZH): MANUAL.md  (https://github.com/pepsykolya/FreeForGemPear/blob/main/MANUAL.md)
+FreeForGem for Windows 10/11 (x64) - Pearl (PRL) GPU miner for NVIDIA RTX 30xx (RTX 40xx should work, untuned)
+Full manual (EN/RU/ZH): MANUAL.md  (https://github.com/pepsykolya/FreeForGem/blob/main/MANUAL.md)
 
 QUICK START
-1. Unpack this archive to a folder without spaces or non-English letters, e.g. C:\FreeForGemPear
+1. Unpack this archive to a folder without spaces or non-English letters, e.g. C:\FreeForGem
 2. Pick the start file for your pool (all are ready to run):
      start.bat / start-luckypool-eu.bat   LuckyPool Europe   pearl-eu2.luckypool.io:3360
      start-luckypool-ru / -us / -asia     LuckyPool Russia / US East / Singapore
@@ -23,10 +23,10 @@ Needs only the NVIDIA driver 525 or newer (no CUDA, no Python, no WSL). One proc
 AMD Radeon RX 6000 (RDNA2, tested on RX 6800 XT; since 1.6.0): needs only the AMD Adrenalin driver, the same start files work
 (the miner picks the AMD library when no NVIDIA GPU is found; integrated Radeon graphics are skipped). AUTO_UV=1 on AMD runs
 amduv.exe (tunes once ~10-15 min, restores your settings on exit; run as Administrator). MANUAL.md, section 14.
-Self-test (optional): open cmd in this folder and run  freeforgempear.exe --self-test
+Self-test (optional): open cmd in this folder and run  freeforgem.exe --self-test
 If the log says "embedded search kernel could not be loaded", update the NVIDIA driver (525+); the GPU must be Ampere (RTX 30xx) or newer.
 If Defender/SmartScreen blocks the start: "More info -> Run anyway", or add the folder to the exclusions.
-Check the archive SHA-256 against the release page:  certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256
+Check the archive SHA-256 against the release page:  certutil -hashfile freeforgem-1.7.0-beta-windows-x64.zip SHA256
 
 POOLS (POOL=HOST:PORT; ports 3360 / 3361 / 3362 = share difficulty 2M / 4M / 8M)
 pearl-eu2.luckypool.io:3360 (default, Europe); Kryptex prl-eu.kryptex.network:7048; see MANUAL.md for the other regions.
@@ -40,10 +40,10 @@ The tuner tries offsets up to +495 MHz (RTX 20xx/GTX 16xx/CMP 50HX: +225, CMP 30
 DEV FEE 1 %: one 60 s slot in every 100 min on the same pool (worker ffgp-devfee; on LuckyPool also NOCK). See LICENSE.
 
 ------------------------------------------------------------------------------------------------
-FreeForGemPear для Windows 10/11 (x64)
+FreeForGem для Windows 10/11 (x64)
 
 БЫСТРЫЙ СТАРТ
-1. Распакуйте архив в папку без пробелов и русских букв, например C:\FreeForGemPear
+1. Распакуйте архив в папку без пробелов и русских букв, например C:\FreeForGem
 2. Выберите файл запуска под свой пул (все готовы к работе):
      start.bat / start-luckypool-eu.bat   LuckyPool Европа   pearl-eu2.luckypool.io:3360
      start-luckypool-ru / -us / -asia     LuckyPool Россия / США (восток) / Сингапур
@@ -60,15 +60,15 @@ FreeForGemPear для Windows 10/11 (x64)
 AMD Radeon RX 6000 (RDNA2, проверено на RX 6800 XT; с 1.6.0): нужен только драйвер AMD Adrenalin, подходят те же файлы запуска
 (майнер сам берёт AMD-библиотеку, если карт NVIDIA нет; встроенная графика Radeon пропускается). AUTO_UV=1 на AMD запускает
 amduv.exe (подбор один раз ~10-15 мин, при выходе возвращает ваши настройки; запуск от администратора). MANUAL.md, раздел 14.
-Проверка (по желанию): в cmd в этой папке выполните  freeforgempear.exe --self-test
+Проверка (по желанию): в cmd в этой папке выполните  freeforgem.exe --self-test
 Если Defender/SmartScreen блокирует запуск: "Подробнее -> Выполнить в любом случае" или добавьте папку в исключения.
-Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256
+Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgem-1.7.0-beta-windows-x64.zip SHA256
 
 ------------------------------------------------------------------------------------------------
-FreeForGemPear Windows 10/11 (x64) 版
+FreeForGem Windows 10/11 (x64) 版
 
 快速开始
-1. 将压缩包解压到不含空格和中文字符的文件夹，例如 C:\FreeForGemPear
+1. 将压缩包解压到不含空格和中文字符的文件夹，例如 C:\FreeForGem
 2. 选择对应矿池的启动文件（均可直接运行）：
      start.bat / start-luckypool-eu.bat   LuckyPool 欧洲   pearl-eu2.luckypool.io:3360
      start-luckypool-ru / -us / -asia     LuckyPool 俄罗斯 / 美国东部 / 新加坡

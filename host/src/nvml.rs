@@ -97,6 +97,7 @@ pub struct Nvml {
     get_index: Option<FnDevU>,
     get_pci: unsafe extern "C" fn(*mut c_void, *mut PciInfo) -> c_int,
     get_power: FnDevU,
+    get_pl: Option<FnDevU>,
     get_clock: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
     get_max_clock: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int>,
     get_temp: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
@@ -168,6 +169,7 @@ impl Nvml {
             get_index: opt!("nvmlDeviceGetIndex"),
             get_pci: req!("nvmlDeviceGetPciInfo_v3"),
             get_power: req!("nvmlDeviceGetPowerUsage"),
+            get_pl: opt!("nvmlDeviceGetEnforcedPowerLimit"),
             get_clock: req!("nvmlDeviceGetClockInfo"),
             get_max_clock: opt!("nvmlDeviceGetMaxClockInfo"),
             get_temp: req!("nvmlDeviceGetTemperature"),
@@ -269,6 +271,13 @@ impl Nvml {
     pub fn power_w(&self, d: Dev) -> Option<f64> {
         let mut mw = 0;
         (unsafe { (self.get_power)(d.0, &mut mw) } == 0).then(|| mw as f64 / 1000.0)
+    }
+
+    /// Enforced power limit in watts (what the card is held to now).
+    pub fn power_limit_w(&self, d: Dev) -> Option<f64> {
+        let f = self.get_pl?;
+        let mut mw = 0;
+        (unsafe { f(d.0, &mut mw) } == 0).then(|| mw as f64 / 1000.0)
     }
 
     pub fn clock_mhz(&self, d: Dev) -> Option<u32> {

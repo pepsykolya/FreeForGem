@@ -1,15 +1,17 @@
 #!/bin/bash
-# FreeForGemPear — see LICENSE
-# Builds the freeforgempear host binary, links the prebuilt GPU library (prebuilt/linux-x86_64/libpearlgpu.so; the kernel is
-# closed source) and packs both into dist/.  No nvcc needed; the linker must resolve the library's libcuda.so.1 (NVIDIA driver or CUDA stubs).
+# FreeForGem — see LICENSE
+# Builds the freeforgem host binary and packs it with the prebuilt GPU libraries (prebuilt/linux-x86_64/libpearlgpu.so for Pearl,
+# libnoidgpu.so for NOID; the kernels are closed source) into dist/.  No nvcc needed; the linker must resolve the library's libcuda.so.1 (NVIDIA driver or CUDA stubs).
 # Needs: a C compiler/linker (gcc), Rust (cargo, edition 2024), git.
 set -euo pipefail
 cd "$(dirname "$0")"
 LIB=prebuilt/linux-x86_64/libpearlgpu.so
+NLIB=prebuilt/linux-x86_64/libnoidgpu.so
 [ -f "$LIB" ] || { echo "missing $LIB (prebuilt GPU library)"; exit 1; }
+[ -f "$NLIB" ] || { echo "missing $NLIB (prebuilt NOID GPU library)"; exit 1; }
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' host/Cargo.toml)
 
-echo "== freeforgempear (links $LIB)"
+echo "== freeforgem"
 (cd host && cargo build --release)
 
 # CMFD engine (FreeForgeMiner release pinned in cmfd/ENGINE.lock, MIT) goes into the packages as cmfd/; FFGP_NO_CMFD=1 = Pearl only
@@ -30,20 +32,21 @@ if [ "${FFGP_NO_CMFD:-0}" != 1 ] && [ "${FFGP_CMFD_COMPAT:-1}" != 0 ]; then
   fi
 fi
 
-D=dist/freeforgempear-$VERSION
+D=dist/freeforgem-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgempear "$LIB" LICENSE NOTICE README.md HIVEOS.md "$D/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
-tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgempear-$VERSION"
-# HiveOS custom miner package: freeforgempear-<version>.tar.gz with a top-level freeforgempear/ folder.
+tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
+# HiveOS custom miner package: freeforgem-<version>.tar.gz with a top-level freeforgem/ folder.
 # HiveOS splits the file name at its LAST '-' into miner name / version, so <version> must contain no '-'
-# (1.5.0rc1, not 1.5.0-rc1) and the folder must be exactly the miner name.
-H=dist/hive/freeforgempear
+# (1.7.0beta, not 1.7.0-beta: the '-' is dropped here) and the folder must be exactly the miner name.
+HV=${VERSION//-/}
+H=dist/hive/freeforgem
 rm -rf dist/hive; mkdir -p "$H"
-cp host/target/release/freeforgempear "$LIB" LICENSE NOTICE README.md HIVEOS.md hiveos/h-*.sh "$H/"
-sed "s/@VERSION@/$VERSION/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
+cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
+sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"
-chmod +x "$H"/h-*.sh "$H/freeforgempear"
-tar -C dist/hive -czf "dist/freeforgempear-$VERSION.tar.gz" freeforgempear
+chmod +x "$H"/h-*.sh "$H/freeforgem"
+tar -C dist/hive -czf "dist/freeforgem-$HV.tar.gz" freeforgem
 
-(cd dist && sha256sum "freeforgempear-$VERSION-linux-x86_64.tar.gz" "freeforgempear-$VERSION.tar.gz" | tee SHA256SUMS)
+(cd dist && sha256sum "freeforgem-$VERSION-linux-x86_64.tar.gz" "freeforgem-$HV.tar.gz" | tee SHA256SUMS)

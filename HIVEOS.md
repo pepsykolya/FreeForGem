@@ -1,15 +1,20 @@
-# FreeForGemPear on HiveOS
+# FreeForGem on HiveOS
 
 [English](#english) · [Русский](#русский)
 
 ## English
 
-FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
+FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.6.2):**
+**Moving from FreeForGemPear:** since 1.7.0 the multi-coin miner is **FreeForGem** (custom miner `freeforgem`). HiveOS treats it
+as a different miner: **create a new flight sheet** with Miner name `freeforgem` and the URL below (the old `freeforgempear`
+flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
+`/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
+
+**Installation URL (1.7.0-beta):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
 ```
 
 ### Flight sheet
@@ -25,7 +30,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 
    | Field | Value |
    |---|---|
-   | Miner name | `freeforgempear` (filled in automatically after you paste the URL) |
+   | Miner name | `freeforgem` (filled in automatically after you paste the URL) |
    | Installation URL | the link above |
    | Hash algorithm | `pearlhash` (or leave `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
@@ -35,7 +40,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 
 4. **Apply.** *Apply changes*, *Create flight sheet*, then apply it to the rig.
 
-The miner log is at `/var/log/miner/freeforgempear/freeforgempear.log` and in the HiveOS miner console.
+The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
 The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares.
 
 ### Overclocking (RTX 3070)
@@ -58,7 +63,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 - It needs root, which HiveOS miners have. Without NVML or permission it logs the reason and mines normally.
 - **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps) and the rig does not mine until it is done (GPUs are tuned in
-  parallel). Later starts take about 30 s extra. The result is kept in `/hive-config/freeforgempear/uv.json` (survives miner
+  parallel). Later starts take about 30 s extra. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner
   updates and reboots); it is tuned again when the driver, the kernel build or the starting offset changes.
 - Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset the card has when the
   miner starts and only goes up; it never touches locked clocks, power limit or memory. If HiveOS re-applies its OC and changes the offset
@@ -66,7 +71,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
-- **Reset:** run `freeforgempear --uv-reset` once in the miner folder (or delete `/hive-config/freeforgempear/uv.json`).
+- **Reset:** run `freeforgem --uv-reset` once in the miner folder (or delete `/hive-config/freeforgem/uv.json`).
   Other options (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) and a manual-tuning
   procedure are in [MANUAL.md](MANUAL.md#12-undervolt---auto-uv-optional-new-in-140). Undervolting is at your own risk, like any overclocking.
 - **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card (since 1.6.2): RTX 20xx / GTX 16xx up to +225,
@@ -83,6 +88,14 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 ### Developer fee
 
 1%: 60 s in every 100 minutes, on the same pool you set. See [LICENSE](LICENSE).
+
+### NOID (Parano1d), since 1.7.0
+
+Needs NVIDIA RTX 30/40/50 and **driver 580+** (`nvidia-driver-update 580`). Flight sheet: coin `NOID`, wallet `o1...`, Miner
+*Custom* `freeforgem` (same Installation URL), Hash algorithm `parano1d`, template `%WAL%.%WORKER_NAME%`, Pool URL
+`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv` (eff mode, best MH/W on RTX 30;
+`--noid-mode speed --lock-cclock 1560` for the most MH/s). Without `--auto-uv` a positive HiveOS core offset is set to 0 for NOID
+(a Pearl undervolt gives silently wrong NOID results) and put back when the miner stops. Results: MANUAL.md, sections 15 and 16.
 
 ### Common Foundry (CMFD), since 1.6.0
 
@@ -101,12 +114,17 @@ CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in 
 
 ## Русский
 
-FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
+FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.6.2):**
+**Переход с FreeForGemPear:** с 1.7.0 мульти-монетный майнер называется **FreeForGem** (кастомный майнер `freeforgem`). Для
+HiveOS это другой майнер: **создайте новый полётный лист** с Miner name `freeforgem` и ссылкой ниже (старый лист
+`freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
+запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
+
+**Ссылка для установки (1.7.0-beta):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
 ```
 
 ### Полётный лист
@@ -122,7 +140,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 
    | Поле | Значение |
    |---|---|
-   | Miner name | `freeforgempear` (подставится сам после вставки ссылки) |
+   | Miner name | `freeforgem` (подставится сам после вставки ссылки) |
    | Installation URL | ссылка выше |
    | Hash algorithm | `pearlhash` (или оставить `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
@@ -132,7 +150,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 
 4. **Применить.** *Apply changes*, *Create flight sheet*, затем применить лист к ригу.
 
-Лог майнера лежит в `/var/log/miner/freeforgempear/freeforgempear.log`, его видно и в консоли майнера в HiveOS.
+Лог майнера лежит в `/var/log/miner/freeforgem/freeforgem.log`, его видно и в консоли майнера в HiveOS.
 На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары.
 
 ### Разгон (RTX 3070)
@@ -155,7 +173,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 
 - Нужен root, а у майнеров в HiveOS он есть. Без NVML или прав майнер пишет причину в лог и майнит как обычно.
 - **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов), и пока он идёт, риг не майнит (карты подбираются параллельно).
-  Последующие запуски добавляют около 30 с. Результат хранится в `/hive-config/freeforgempear/uv.json` (переживает
+  Последующие запуски добавляют около 30 с. Результат хранится в `/hive-config/freeforgem/uv.json` (переживает
   обновления майнера и перезагрузки); при смене драйвера, сборки ядра или начального offset подбор повторяется.
 - Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с того offset, который
   стоит на карте в момент запуска майнера, и идёт только вверх; зафиксированные частоты, лимит мощности и память он не трогает.
@@ -163,7 +181,7 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.
-- **Сброс:** один раз выполните `freeforgempear --uv-reset` в папке майнера (или удалите `/hive-config/freeforgempear/uv.json`).
+- **Сброс:** один раз выполните `freeforgem --uv-reset` в папке майнера (или удалите `/hive-config/freeforgem/uv.json`).
   Остальные параметры (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) и порядок ручной настройки —
   в [MANUAL.md](MANUAL.md#12-андервольт---auto-uv-необязательно-новое-в-140). Андервольт — на ваш риск, как и любой разгон.
 - **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте (с 1.6.2): RTX 20xx / GTX 16xx до +225,
@@ -176,6 +194,15 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 - HiveOS с драйвером NVIDIA 525 или новее.
 - Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: всего ~2,6 TH/s, для Pearl не рекомендуется).
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
+
+### NOID (Parano1d), с 1.7.0
+
+Нужны NVIDIA RTX 30/40/50 и **драйвер 580+** (`nvidia-driver-update 580`). Полётный лист: монета `NOID`, кошелёк `o1...`, Miner
+*Custom* `freeforgem` (та же ссылка), Hash algorithm `parano1d`, шаблон `%WAL%.%WORKER_NAME%`, Pool URL
+`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv` (режим eff, лучшие MH/Вт на RTX 30;
+`--noid-mode speed --lock-cclock 1560` — максимум MH/s). Без `--auto-uv` положительный offset ядра из OC HiveOS на время NOID
+ставится в 0 (андервольт Pearl даёт тихо неверные результаты NOID) и возвращается при остановке. Подробности: MANUAL.md,
+разделы 15 и 16.
 
 ### Common Foundry (CMFD), с 1.6.0
 

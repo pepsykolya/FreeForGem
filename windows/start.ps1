@@ -1,6 +1,6 @@
 #requires -Version 5.1
-# FreeForGemPear -- see LICENSE
-# Runs freeforgempear.exe (one process drives all selected GPUs), shows its output in this window, writes it to
+# FreeForGem -- see LICENSE
+# Runs freeforgem.exe (one process drives all selected GPUs), shows its output in this window, writes it to
 # logs\miner-<date>.log and restarts the miner 15 s after any exit.
 [CmdletBinding()]
 param(
@@ -20,7 +20,9 @@ param(
     [string]$LockCclock = '',
     [string]$LockMclock = '',
     [string]$Moffset = '',
-    [string]$CmfdMode = ''
+    [string]$CmfdMode = '',
+    [string]$Algo = '',
+    [string]$NoidMode = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -30,17 +32,31 @@ function Fail([string]$message) { Write-Host "ERROR: $message" -ForegroundColor 
 
 if ($root -match '\s|[^\x00-\x7F]') {
     Write-Host "WARNING: the folder path contains spaces or non-English letters: $root" -ForegroundColor Yellow
-    Write-Host "         If the miner fails to start, move the folder to e.g. C:\FreeForGemPear" -ForegroundColor Yellow
+    Write-Host "         If the miner fails to start, move the folder to e.g. C:\FreeForGem" -ForegroundColor Yellow
 }
 # Common Foundry (CMFD): the coin follows the pool URL (cmfd+tls://IP:PORT?pin=HEX), see start-cmfd.bat
 $Cmfd = $Pool -match '^cmfd\+tls://'
-if ([string]::IsNullOrWhiteSpace($Wallet)) {
+# NOID (Parano1d): start-noid.bat passes -Algo noid; the pool is stratum+ssl://HOST:PORT (TLS) or stratum+tcp://HOST:PORT
+$Noid = $Algo -eq 'noid'
+if ($Noid) {
+    if ([string]::IsNullOrWhiteSpace($Wallet)) {
+        Write-Host 'WALLET is empty. Right-click start-noid.bat -> Edit, and set WALLET to your NOID address (o1...).'
+        $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
+    }
+    $Wallet = ($Wallet -replace '\s', '')
+    if ($Wallet -cnotmatch '^o1[0-9a-z]{20,100}$') { Fail 'WALLET must be your NOID address (o1..., lower case).' }
+    if ($Pool -cnotmatch '^(stratum\+(ssl|tls|tcp)://)?[A-Za-z0-9._-]+:[0-9]{1,5}(\?insecure)?$') { Fail 'POOL must look like stratum+ssl://HOST:PORT (TLS) or stratum+tcp://HOST:PORT.' }
+    if ($NoidMode -and $NoidMode -notin 'eff', 'speed') { Fail 'MODE must be eff or speed.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $root 'noidgpu.dll'))) { Fail 'noidgpu.dll is missing - unpack the whole archive again.' }
+}
+if (-not $Noid -and [string]::IsNullOrWhiteSpace($Wallet)) {
     if ($Cmfd) { Write-Host 'WALLET is empty. Right-click start-cmfd.bat -> Edit, and set WALLET to your CMFD address (cmfd1... or 64 hex).' }
     else { Write-Host 'WALLET is empty. Right-click start.bat -> Edit, and set WALLET to your PRL address (prl1...).' }
     $Wallet = (Read-Host 'Or paste the wallet address now').Trim()
 }
 $Wallet = ($Wallet -replace '\s', '')
-if ($Cmfd) {
+if ($Noid) {
+} elseif ($Cmfd) {
     # both forms of the wallet: cmfd1... (checksummed, wallet 1.0.16+) or 64 hex; the miner checks the checksum
     if ($Wallet -cnotmatch '^[0-9a-fA-F]{64}$' -and $Wallet -cnotmatch '^(cmfd1[02-9ac-hj-np-z]{58}|CMFD1[02-9AC-HJ-NP-Z]{58})$') {
         Fail 'WALLET must be your CMFD address: cmfd1... (63 characters) or 64 hexadecimal characters.'
@@ -53,7 +69,7 @@ if ($Cmfd) {
     # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk)
     if ($AutoUv -eq '1') { Write-Host 'NOTE: AUTO_UV is Pearl-only and is ignored for CMFD.' -ForegroundColor Yellow; $AutoUv = '' }
 } elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
-if (-not $Cmfd -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
+if (-not $Cmfd -and -not $Noid -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Write-Host ' WALLET is still the developer address from the example: you are mining' -ForegroundColor Yellow
     Write-Host ' to the developer, not to yourself. Right-click the .bat -> Edit and put' -ForegroundColor Yellow
@@ -61,8 +77,8 @@ if (-not $Cmfd -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy52
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Start-Sleep -Seconds 15
 }
-if (-not $Cmfd -and $Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
-if (-not $Cmfd -and $Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
+if (-not $Cmfd -and -not $Noid -and $Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
+if (-not $Cmfd -and -not $Noid -and $Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
     Write-Host 'NOTE: PRL+NOCK merge mining works on LuckyPool only: on this pool the miner mines PRL to the prl1... part and ignores +NOCK.' -ForegroundColor Yellow
 }
 if ([string]::IsNullOrWhiteSpace($Worker)) { $Worker = 'rig' }
@@ -71,7 +87,7 @@ if ($Worker.Length -gt 32) { $Worker = $Worker.Substring(0, 32) }
 if ($Devices -and $Devices -notmatch '^\s*\d+(\s*,\s*\d+)*\s*$') { Fail 'DEVICES must be empty or a list like 0,1,3.' }
 $Devices = ($Devices -replace '\s', '')
 
-foreach ($file in 'freeforgempear.exe', 'pearlgpu.dll') {
+foreach ($file in 'freeforgem.exe', 'pearlgpu.dll') {
     if (-not (Test-Path -LiteralPath (Join-Path $root $file))) { Fail "$file is missing - unpack the whole archive again." }
 }
 $smi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
@@ -80,7 +96,7 @@ $amd = @()
 try { $amd = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { $_.Name -match 'Radeon|AMD' -and $_.Name -notmatch '^AMD Radeon\(TM\) Graphics$' }) } catch {}
 if (-not $smi -and $amd.Count -eq 0) { Fail 'nvidia-smi.exe not found - install the NVIDIA driver (version 525 or newer); for an AMD Radeon card install the AMD Adrenalin driver.' }
 if ($amd.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $root 'pearlgpu_amd.dll'))) { Fail 'pearlgpu_amd.dll is missing - unpack the whole archive again.' }
-Write-Host "FreeForGemPear for Windows - pool $Pool, wallet $($Wallet.Substring(0,[Math]::Min(8,$Wallet.Length)))..., worker $Worker"
+Write-Host "FreeForGem for Windows - pool $Pool, wallet $($Wallet.Substring(0,[Math]::Min(8,$Wallet.Length)))..., worker $Worker"
 if ($smi) {
     try { & $smi.Source --query-gpu=index,name,memory.free --format=csv,noheader 2>$null | ForEach-Object { Write-Host "  GPU $_" } } catch {}
 }
@@ -91,10 +107,11 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 Get-ChildItem -LiteralPath $logs -Filter 'miner-*.log' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 9 |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
-$exe = Join-Path $root 'freeforgempear.exe'
+$exe = Join-Path $root 'freeforgem.exe'
 # a CMFD URL (with '?' and '=') needs no quoting: cmd passes it to the miner as is; more quotes would make cmd /c strip the outer pair
 $cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
 if ($Cmfd -and $CmfdMode) { $cmdLine += " --cmfd-mode $CmfdMode" }
+if ($Noid) { $cmdLine += ' --algo noid'; if ($NoidMode) { $cmdLine += " --noid-mode $NoidMode" } }
 if ($Devices) { $cmdLine += " --devices $Devices" }
 if ($Password -and $Password -cmatch '^[A-Za-z0-9=._-]{1,64}$') { $cmdLine += " --password $Password" }
 if ($LockCclock -match '^[0-9]+(,[0-9]*)*$') { $cmdLine += " --lock-cclock $LockCclock" }
