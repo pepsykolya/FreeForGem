@@ -98,6 +98,9 @@ Stock clocks or a power limit: a positive core offset of the OC profile is set t
 an RTX 3070 gave 3.7 FW/s with *Mem lock* 810 and 21.8 FW/s (~237 W, power limit 240 W) with the memory free. The miner
 warns about a low memory clock in the log (once per GPU, since 1.6.1) but does not change your OC.
 CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in the package needs glibc 2.30+).
+`--auto-uv` in *Extra config* tunes a separate CMFD core offset per card on the CMFD load itself (every step checked
+bit-for-bit on the real model; first start ~15–20 min, then applied at once; owner's offset back on `miner stop`). Tune with the
+OC profile you mine with: a changed power limit re-tunes, a changed core clock lock needs `--uv-reset` once. MANUAL.md, section 13.
 
 ## Русский
 
@@ -191,6 +194,10 @@ Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu
 RTX 3070 с *Mem lock* 810 дала 3,7 FW/s, со свободной памятью — 21,8 FW/s (~237 Вт при лимите 240 Вт). О низкой частоте памяти
 майнер предупреждает в логе (один раз на GPU, с 1.6.1), но разгон сам не меняет.
 CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04 (движку в пакете нужна glibc 2.30+).
+`--auto-uv` в *Extra config* подбирает отдельное смещение ядра под CMFD на каждой карте прямо на нагрузке CMFD (каждый шаг
+проверяется побитно на реальной модели; первый запуск ~15–20 мин, дальше применяется сразу; ваше смещение возвращается при
+`miner stop`). Подбирайте с тем профилем разгона, с которым майните: смена лимита мощности — подбор заново, смена лока частоты
+ядра — один раз `--uv-reset`. MANUAL.md, раздел 13.
 
 ### Комиссия разработчика
 

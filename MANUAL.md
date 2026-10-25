@@ -540,8 +540,32 @@ same in both), `--cmfd-batch N` (1–64, default by GPU memory: 64 on 11 GB+, el
 return wrong results. Therefore in CMFD mode the miner **sets a positive core offset to 0** before the engine starts and puts
 the old value back on exit (log: `cmfd offset: GPU0: core offset +345 -> 0 MHz ...`; after a crash the next start puts it
 back first). This needs root/Administrator; without it the log says so and you must remove the offset yourself (HiveOS:
-the OC profile of the CMFD flight sheet). `--uv-offset N` sets N instead — **at your own risk**. `--auto-uv` is Pearl-only.
+the OC profile of the CMFD flight sheet). `--uv-offset N` sets N instead — **at your own risk**.
 Safe settings: stock clocks, a power limit, or a core lock (`--lock-cclock`).
+
+**`--auto-uv` for CMFD (NVIDIA).** With `--auto-uv` (HiveOS: *Extra config arguments*; Windows: `AUTO_UV=1` in
+`start-cmfd.bat`, run as Administrator) the miner finds an undervolt **for CMFD itself**, separate from the Pearl result.
+After the model is prepared and before the engine starts, per card: the engine's own GPU worker (`cmfd-v4-replay`, unchanged)
+loads the model once and runs two fixed batches again and again; at the base offset (0, stock) it takes their final digests as
+the reference and runs the official Common Foundry 1.0.16 test vector; then the core offset goes up in `--uv-step` steps
+(15 MHz) from `--uv-min` (default: one step above 0) up to `--uv-max` (default: the per-card limit of section 12: 495,
+RTX 20xx / CMP 50HX 225, CMP 30HX/40HX 150); every step runs 30 s + 10 s of measurement and **every digest must be
+bit-identical** to the reference (a single wrong bit anywhere in the 384 layers changes it). The first failing step is the
+edge; the result is one step lower (`--uv-keep-last` keeps the last good one), confirmed for 2 minutes + the test vector
+(one more step down on failure). It is saved in `uv.json` (section `cmfd`, per card UUID, with the driver and the engine/worker
+identity) and later starts apply it at once (or after a 30 s check when it was verified more than `--uv-reval-hours` ago).
+While mining, an engine `INTEGRITY | ERROR` or a CUDA fault on a tuned card steps its offset back one step (saved) and
+restarts the engine. Your own offset comes back on exit (and after a crash at the next start), as without `--auto-uv`.
+If the check cannot run (no model, worker missing, failure at the base offset) the card mines at 0 with a WARNING.
+Tuning takes about 2 + 0.75 × steps minutes per card (all cards at once). Log: `grep "auto-uv (cmfd)"`, e.g.
+`auto-uv (cmfd): GPU0 (bus 0d, RTX 3070) CMFD offset +0 -> +135: 19.53 -> 20.94 FW/s, 210.7 -> 215.8 W, ... saved`.
+Measured (Aria, averages of the stats line): RTX 3070 with a 135 W power limit is power-bound at ~1050 MHz, where the voltage
+is already at the bottom of the curve: edge +225, result +195, no gain (13.84 → 13.97 FW/s at 135 W). The same card at 220 W:
+stock 19.5 FW/s at 214 W (328 k FW/kWh) → +135 (edge +165) 20.4–20.5 FW/s at 213–216 W (342–345 k, **+4–5 %**).
+CMP 50HX (power limit 225 W, core locked at 1410 MHz): no edge up to its +225 limit; 13.10 FW/s at 216 W → 13.21 at 196 W
+(**+11 %**), 13.01 at 217 W → 13.17 at 203 W (**+8 %**). **The edge depends on the operating point**: the result is tuned again
+when the power limit changes by more than 3 % or `--lock-cclock` changes; after changing the core clock lock of the OC profile
+(HiveOS, nvidia-smi) run once with `--uv-reset`.
 
 **Memory clock: no memory lock for CMFD.** Pearl hardly needs the memory, CMFD does. The usual Pearl OC with the memory
 clock locked low (HiveOS OC *Mem lock* 810, `nvidia-smi -lmc 810`, `--lock-mclock 810`) cuts CMFD about **6×**: on a HiveOS
@@ -1153,7 +1177,30 @@ HiveOS показывает FW/s по каждой карте; первый за
 возвращает прежнее значение при выходе (в логе `cmfd offset: GPU0: core offset +345 -> 0 MHz ...`; после аварийного
 завершения следующий запуск сначала возвращает его). Нужны права root/администратора; без них в логе будет предупреждение, и
 смещение надо убрать самому (HiveOS — профиль разгона полётного листа CMFD). `--uv-offset N` ставит N — **на ваш риск**.
-`--auto-uv` только для Pearl. Безопасно: стоковые частоты, лимит мощности или лок ядра (`--lock-cclock`).
+Безопасно: стоковые частоты, лимит мощности или лок ядра (`--lock-cclock`).
+
+**`--auto-uv` для CMFD (NVIDIA).** С `--auto-uv` (HiveOS — *Extra config arguments*; Windows — `AUTO_UV=1` в
+`start-cmfd.bat`, запуск от администратора) майнер подбирает андервольт **именно под CMFD**, отдельно от результата Pearl.
+После подготовки модели и до старта движка, на каждой карте: родной GPU-воркер движка (`cmfd-v4-replay`, без изменений)
+один раз грузит модель и гоняет две фиксированные пачки; на базовом смещении (0, сток) их финальные дайджесты берутся
+эталоном и прогоняется официальный тест-вектор Common Foundry 1.0.16; затем смещение ядра растёт шагами `--uv-step` (15 МГц)
+от `--uv-min` (по умолчанию — шаг над 0) до `--uv-max` (по умолчанию — лимит карты из раздела 12: 495, RTX 20xx / CMP 50HX
+225, CMP 30HX/40HX 150); каждый шаг — 30 с + 10 с замера, и **каждый дайджест должен совпасть побитно** с эталоном (один
+неверный бит где угодно в 384 слоях его меняет). Первый упавший шаг — край; результат — на шаг ниже (`--uv-keep-last`
+оставляет последний удачный), подтверждение 2 минуты + тест-вектор (при ошибке ещё шаг вниз). Результат сохраняется в
+`uv.json` (раздел `cmfd`, по UUID карты, с драйвером и идентичностью движка/воркера), следующие запуски применяют его сразу
+(или после 30-секундной проверки, если он проверялся больше `--uv-reval-hours` назад). Во время майнинга `INTEGRITY | ERROR`
+движка или CUDA-сбой на тюненой карте — шаг назад (с сохранением) и перезапуск движка. Ваше смещение возвращается при
+выходе (после аварии — при следующем запуске), как и без `--auto-uv`. Если проверка не может работать (нет модели, нет
+воркера, ошибка на базовом смещении) — карта майнит на 0 с предупреждением WARNING. Подбор занимает около 2 + 0,75 × число
+шагов минут на карту (все карты одновременно). Лог: `grep "auto-uv (cmfd)"`.
+Замеры (Aria, среднее строки статистики): RTX 3070 с лимитом 135 Вт упирается в мощность на ~1050 МГц, где напряжение уже
+на дне кривой: край +225, результат +195, выигрыша нет (13,84 → 13,97 FW/s при 135 Вт). Та же карта при 220 Вт: сток 19,5 FW/s
+при 214 Вт (328 тыс. FW/kWh) → +135 (край +165) 20,4–20,5 FW/s при 213–216 Вт (342–345 тыс., **+4–5 %**). CMP 50HX (лимит
+225 Вт, лок ядра 1410 МГц): края до своего предела +225 нет; 13,10 FW/s при 216 Вт → 13,21 при 196 Вт (**+11 %**), 13,01 при
+217 Вт → 13,17 при 203 Вт (**+8 %**). **Край зависит от рабочей точки**: результат подбирается заново, если лимит мощности
+изменился больше чем на 3 % или изменился `--lock-cclock`; после смены лока частоты ядра в профиле разгона (HiveOS,
+nvidia-smi) запустите один раз с `--uv-reset`.
 
 **Частота памяти: для CMFD без лока памяти.** Pearl память почти не нужна, CMFD — нужна. Обычный разгон под Pearl с низким
 локом памяти (в HiveOS *Mem lock* 810, `nvidia-smi -lmc 810`, `--lock-mclock 810`) режет CMFD примерно **в 6 раз**: на риге
@@ -1698,7 +1745,23 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 会让 CMFD 立即出错（"illegal memory access"、"misaligned address"）或给出错误结果。因此在 CMFD 模式下，矿工会在引擎启动前
 **把正的核心偏移设为 0**，退出时恢复原值（日志：`cmfd offset: GPU0: core offset +345 -> 0 MHz ...`；异常退出后，下次启动会先恢复）。
 这需要 root/管理员权限；没有权限时日志会提示，需要您自己去掉偏移（HiveOS：CMFD 飞行表的超频配置）。
-`--uv-offset N` 则设置为 N —— **风险自负**。`--auto-uv` 仅用于 Pearl。安全的做法：默认频率、功耗限制或锁定核心频率（`--lock-cclock`）。
+`--uv-offset N` 则设置为 N —— **风险自负**。安全的做法：默认频率、功耗限制或锁定核心频率（`--lock-cclock`）。
+
+**CMFD 的 `--auto-uv`（NVIDIA）。** 使用 `--auto-uv`（HiveOS：*Extra config arguments*；Windows：`start-cmfd.bat` 中
+`AUTO_UV=1`，以管理员身份运行）时，矿工会**专门为 CMFD** 寻找降压偏移，与 Pearl 的结果分开保存。模型准备好之后、引擎启动之前，
+对每张卡：引擎自带的 GPU 工作进程（`cmfd-v4-replay`，未修改）只加载一次模型，反复运行两批固定输入；在基准偏移（0，默认）下
+记录其最终摘要作为参考，并运行 Common Foundry 1.0.16 官方测试向量；然后核心偏移以 `--uv-step`（15 MHz）为步长，从 `--uv-min`
+（默认：0 之上一步）升到 `--uv-max`（默认：第 12 节的每卡上限：495，RTX 20xx / CMP 50HX 225，CMP 30HX/40HX 150）；每一步
+运行 30 秒 + 10 秒测量，**每个摘要都必须与参考逐位一致**。第一个失败的步长即为边界；结果取低一步（`--uv-keep-last` 保留最后
+成功的一步），再做 2 分钟确认 + 测试向量（失败则再降一步）。结果保存在 `uv.json`（`cmfd` 部分，按显卡 UUID，含驱动与引擎/工作进程
+标识），之后的启动直接应用（若上次验证早于 `--uv-reval-hours`，先做 30 秒检查）。挖矿期间，已调优显卡上出现引擎
+`INTEGRITY | ERROR` 或 CUDA 故障时，偏移退一步（并保存）并重启引擎。退出时恢复您原来的偏移（崩溃后在下次启动时恢复）。
+若无法检查（没有模型、缺少工作进程、基准偏移下失败），该卡以 0 偏移挖矿并给出 WARNING。日志：`grep "auto-uv (cmfd)"`。
+实测（Aria，统计行平均）：功耗限制 135 W 的 RTX 3070 在约 1050 MHz 处受功耗限制，电压已在曲线底部：边界 +225，结果 +195，
+没有收益（135 W 下 13.84 → 13.97 FW/s）。同一张卡在 220 W：默认 19.5 FW/s、214 W（328 k FW/kWh）→ +135（边界 +165）
+20.4–20.5 FW/s、213–216 W（342–345 k，**+4–5 %**）。CMP 50HX（功耗限制 225 W，核心锁定 1410 MHz）：到 +225 上限都未出错；
+13.10 FW/s、216 W → 13.21、196 W（**+11 %**），13.01、217 W → 13.17、203 W（**+8 %**）。**边界取决于工作点**：功耗限制变化
+超过 3 % 或 `--lock-cclock` 改变时会重新调优；在超频配置（HiveOS、nvidia-smi）中更改核心频率锁定后，请用 `--uv-reset` 运行一次。
 
 **显存频率：CMFD 不要锁定显存。** Pearl 几乎不需要显存带宽，CMFD 则需要。常见的 Pearl 超频把显存频率锁得很低（HiveOS 超频
 *Mem lock* 810、`nvidia-smi -lmc 810`、`--lock-mclock 810`），会让 CMFD 慢约 **6 倍**：在一台 4× RTX 3070 的 HiveOS 矿机上，

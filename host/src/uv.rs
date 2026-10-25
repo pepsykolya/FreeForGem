@@ -33,7 +33,7 @@ pub const DEFAULT_MAX: i32 = 495; // default --uv-max (RTX 30 / 40 / 50 and ever
 const TURING_MAX: i32 = 225; // default --uv-max on Turing (RTX 20 / GTX 16, sm_75): +200..260 measured, 225 keeps a margin
 const CMP_MAX: i32 = 150; // default --uv-max on CMP 30HX / 40HX (TU116 / TU106): a CMP 40HX hit Xid at +255, rigs run +150
 const CMP_50HX_PCI_ID: u16 = 0x1e09; // TU102 of the CMP 50HX: holds +220 and more (owner's rigs), so it gets the Turing limit
-const DISABLE_SECS: u64 = 24 * 3600;
+pub(crate) const DISABLE_SECS: u64 = 24 * 3600;
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
 const CHECK_MB: u64 = 2400;
@@ -219,20 +219,20 @@ fn lg(msg: impl AsRef<str>) {
     println!("auto-uv: {}", msg.as_ref());
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-fn signed(v: i32) -> String {
+pub(crate) fn signed(v: i32) -> String {
     format!("{v:+}")
 }
 
 /// "0000:0D:00.0" -> "0d"
-fn short_bus(bus: &str) -> String {
+pub(crate) fn short_bus(bus: &str) -> String {
     bus.split(':').nth(1).unwrap_or(bus).to_ascii_lowercase()
 }
 
-fn short_name(n: &str) -> String {
+pub(crate) fn short_name(n: &str) -> String {
     n.replace("NVIDIA ", "").replace("GeForce ", "")
 }
 
@@ -249,7 +249,7 @@ fn parse_bus(s: &str) -> Option<(u32, u32, u32)> {
 // state files
 // ---------------------------------------------------------------------------------------------------------------------
 
-fn writable_dir(p: &Path) -> bool {
+pub(crate) fn writable_dir(p: &Path) -> bool {
     if std::fs::create_dir_all(p).is_err() {
         return false;
     }
@@ -277,7 +277,7 @@ pub fn state_dir(o: &Opts) -> PathBuf {
     home.join("FreeForGemPear")
 }
 
-fn write_atomic(path: &Path, data: &str) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, data: &str) -> Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
@@ -344,7 +344,7 @@ impl Entry {
     }
 }
 
-fn results_path(dir: &Path) -> PathBuf {
+pub(crate) fn results_path(dir: &Path) -> PathBuf {
     dir.join("uv.json")
 }
 
@@ -535,7 +535,7 @@ pub struct Manager {
 }
 
 /// RAM the OS can still hand out, MB (Linux: MemAvailable; Windows: available physical memory)
-fn mem_available_mb() -> Option<u64> {
+pub(crate) fn mem_available_mb() -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let t = std::fs::read_to_string("/proc/meminfo").ok()?;
@@ -1560,14 +1560,14 @@ impl Manager {
 
 /// What a saved result means under this run's limit (`max`: --uv-max for the card, or its default).
 #[derive(Debug, PartialEq)]
-enum Saved {
+pub(crate) enum Saved {
     Apply,  // within the limit: apply it as saved
     Clamp,  // above the limit (the limit was lowered): run at the limit, keep the saved result for later
     Retune, // the saved result is the old limit itself (no failing step below it) and the limit is higher now
 }
 
 /// `cap`: the limit the saved result was tuned with (0 = unknown, results of 1.6.1 and older: never re-tuned for it).
-fn saved_vs_limit(offset: i32, cap: i32, max: i32) -> Saved {
+pub(crate) fn saved_vs_limit(offset: i32, cap: i32, max: i32) -> Saved {
     if offset > max {
         Saved::Clamp
     } else if cap > 0 && max > cap && offset >= cap {
@@ -1582,11 +1582,11 @@ fn reval_interval(hours: f64) -> Duration {
     if hours <= 0.0 { Duration::from_secs(10 * 365 * 24 * 3600) } else { Duration::from_secs_f64((hours * 3600.0).max(30.0)) }
 }
 
-fn fmt_w(w: Option<f64>) -> String {
+pub(crate) fn fmt_w(w: Option<f64>) -> String {
     w.map_or("? W".to_string(), |w| format!("{w:.1} W"))
 }
 
-fn fmt_age(s: u64) -> String {
+pub(crate) fn fmt_age(s: u64) -> String {
     if s >= 86400 {
         format!("{:.1} d", s as f64 / 86400.0)
     } else if s >= 3600 {
@@ -1639,14 +1639,14 @@ fn hex_digest(d: &[u64; 4]) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn die_with_parent() {
+pub(crate) fn die_with_parent() {
     unsafe extern "C" {
         fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
     }
     unsafe { prctl(1, 9, 0, 0, 0) }; // PR_SET_PDEATHSIG, SIGKILL: no orphaned check after a kill -9 of the miner
 }
 #[cfg(not(target_os = "linux"))]
-fn die_with_parent() {}
+pub(crate) fn die_with_parent() {}
 
 pub fn check_child(a: &ChildArgs) -> i32 {
     die_with_parent();

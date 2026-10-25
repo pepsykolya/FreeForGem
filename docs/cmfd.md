@@ -198,3 +198,42 @@ own state dir, offsets set to 0 for the test, owner's +200/+300 and the units ba
 * Linux build in ffgp-build (glibc 2.30 max); Windows build; libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/*
   byte-identical to 1.6.1. Windows chain start.bat -> start.ps1 -> exe passes `UV_MAX=225,-,150` intact.
 * Not tested on hardware: Turing / CMP defaults (no such card; unit tests only), RTX 50 start +300.
+
+## Branch `cmfd-nv-uv` (from 1.6.2): `--auto-uv` for CMFD on NVIDIA
+
+Engine unchanged (FreeForgeMiner 1.2.4 release / the 1.6.2 Ubuntu 20.04 rebuild, same SHA-256): its CUDA worker's `--server`
+protocol already has what the check needs (`RUNBATCHDIGEST n coef prefix chal` -> `<prefix>-final-digest.bin`, `RUNBATCH 32` for
+the official test vector), so the host drives it directly; no engine patch, nothing added to `ENGINE.lock` / `patches/`.
+
+* `cmfd_uv.rs`: per card one `cmfd-v4-replay --server MODEL` (model loaded once per tuning; loads one card at a time), two fixed
+  batches (splitmix64 bytes, mining batch size: 64 from 11 GB, else 32, or `--cmfd-batch`), digests folded with BLAKE3; every run
+  must equal the first run of its batch and the reference taken at the base offset (0, or the owner's offset when it is 0 or
+  below). Base 60 s + official test vector; steps `--uv-step` from `--uv-min` (default base + one step) to `--uv-max` / the 1.6.2
+  per-card default (`card_defaults`), 30 s + 10 s measurement each; first failure = edge, one step back (`--uv-keep-last`),
+  confirmation 120 s + test vector (one more step down on failure). NVML watts / clock / temperature sampled in the measurement.
+  Xid / no answer in 240 s = driver fault (crash marker `cmfd_trying` kept, the next start tunes below it).
+* `uv.json`: section `cmfd` (Pearl's `gpus` untouched), key = UUID; identity = driver + "engine | worker sha256[..12] | mode |
+  batch | inputs version [| lock-cclock N]"; enforced power limit stored, a change > 3 % re-tunes (the edge moves with the
+  operating point: RTX 3070 PL 135 W edge +225, PL 220 W edge +165). Later starts: verified within `--uv-reval-hours` -> applied,
+  else 20 s + 8 s quick check + test vector; failure -> base, paused 24 h.
+* Offsets only through `cmfd_offset` (`apply_managed` records every card before the first change; `set` / `current` / `orig`),
+  so the existing restore (exit, second Ctrl-C, console close, crash marker at the next start) puts the owner's offset back.
+* While mining: `INTEGRITY | ERROR` / CUDA fault of a tuned card -> one step back (saved; at the base: paused 24 h), the engine
+  is restarted. Without a usable check (no model/worker, failure at the base) the card mines at the base with a WARNING.
+* Fix found in the tests (also in 1.6.2): an engine stopped while its worker still loads the model left the worker running
+  (4 orphaned `cmfd-v4-replay` on Rig05, 7 GB of GPU memory each). `stop_children` now collects the workers of every engine
+  (Linux /proc) and ends those left after the stop.
+* Windows: `start-cmfd.bat` `AUTO_UV`, `UV_MAX`, `UV_MIN`; `start.ps1` passes AUTO_UV for CMFD. AMD: unchanged (warning).
+
+Measurements (Aria, averages of the stats line after the model load):
+
+| card / setting | stock (0) | result | tuned | FW/kWh |
+|---|---|---|---|---|
+| RTX 3070, PL 135 W (Shahtyor GPU1) | 13.84 FW/s, 134.8 W, 369.6 k | edge +225 (digest), **+195** | 13.97 FW/s, 134.9 W, 372.8 k | +0.8 % (noise: power-bound at ~1050 MHz, voltage at the floor) |
+| RTX 3070, PL 220 W (temporary) | 19.51 FW/s, 214.2 W, 327.9 k | edge +165 (rerun_diff), **+135** | 20.41 FW/s, 212.9 W, 345.1 k | **+5.2 %** |
+| CMP 50HX GPU2, PL 225, lock 1410 (Rig05) | 13.10 FW/s, 215.6 W, 218.7 k | no edge up to the +225 limit, **+225** | 13.21 FW/s, 195.6 W, 243.2 k | **+11.2 %** |
+| CMP 50HX GPU3 | 13.01 FW/s, 217.0 W, 215.8 k | **+225** | 13.17 FW/s, 203.2 W, 233.3 k | **+8.1 %** |
+| CMP 50HX GPU0 / GPU1 (worker numbers, tuning only) | 13.11 / 222.4 W; 13.07 / 219.9 W | +225 | 13.39 / 221.2 W; 11.70 / 194.9 W (GPU1 80 °C, throttling) | +2.6 % / +1.0 % |
+
+Tuning time: RTX 3070 ~16 min (14 steps), 4x CMP 50HX in parallel ~17 min (15 steps). The references are the same on every card
+and power limit (they are pure math): `0870ca17...`, `c6d160e6...` for batch 32.

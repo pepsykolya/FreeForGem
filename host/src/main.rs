@@ -42,6 +42,7 @@ mod amd_uv;
 mod clocks;
 mod cmfd;
 mod cmfd_offset;
+mod cmfd_uv;
 mod devfee;
 mod gpu;
 mod mining;
@@ -701,7 +702,9 @@ COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ 
     --per-gpu-workers    one pool worker per GPU (WORKER.gpuN) instead of one per rig
     CMFD needs about 7 GB of free GPU memory per card and an RTX 20xx or newer GPU. --lock-cclock/--lock-mclock/--moffset
     work as for Pearl. A positive core (undervolt) offset is set to 0 for the run and put back on exit (CMFD computes wrong
-    results with it); --uv-offset N sets N instead (at your own risk); --auto-uv is Pearl-only.
+    results with it); --uv-offset N sets N instead (at your own risk). --auto-uv (NVIDIA): a CMFD offset of its own, tuned
+    from 0 in --uv-step steps up to --uv-max (per-card default), every step checked bit-for-bit on the real model by the
+    engine's worker + the official test vector; saved in uv.json (section cmfd, separate from Pearl), applied on later starts.
     Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
 
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
@@ -722,12 +725,12 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
 }
 
 /// `--algo cmfd`: Common Foundry through the FreeForgeMiner engine (cmfd.rs). Shares the command line, the clock options and
-/// the log format with Pearl; the undervolt tuner is Pearl-only (it validates with the Pearl kernel) and is ignored here.
+/// the log format with Pearl. `--auto-uv` on NVIDIA runs the CMFD tuner (cmfd_uv.rs, checks on the CMFD load), not the Pearl one.
 fn mine_cmfd(a: Args) -> Result<()> {
     ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
     ensure!(!a.wallet.is_empty(), "--wallet is required: your CMFD address, cmfd1... or 64 hex (see --help)");
-    if a.uv.auto {
-        eprintln!("WARNING: --auto-uv is Pearl-only and is ignored for CMFD (CMFD needs stock clocks: a positive core offset is set to 0 for the run; --uv-offset N forces a value at your own risk)");
+    if a.uv.auto && gpu::backend() == gpu::Backend::Amd {
+        eprintln!("WARNING: --auto-uv for CMFD is NVIDIA-only in this version and is ignored with the AMD backend");
     }
     if a.password != "x" {
         eprintln!("WARNING: --password is not used by CMFD pools; ignored");
@@ -753,7 +756,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
         clocks::restore_all();
     });
     let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
-    a.uv.fixed.check_count(n, "--uv-offset")?;
+    a.uv.check_counts(n)?; // --uv-max/--uv-min/--uv-offset lists: one value per mining GPU
     let state_dir = a
         .uv
         .dir
@@ -781,6 +784,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
             uv_offset: a.uv.fixed.clone(),
             state_dir,
             clocks,
+            uv: a.uv.clone(),
         },
         stop,
     )
