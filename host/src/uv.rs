@@ -571,12 +571,24 @@ fn check_slots() -> &'static (Mutex<u64>, Condvar) {
 
 struct CheckSlot;
 
+thread_local! {
+    // this thread already holds a check slot (taken before mining on the GPU was paused): the check itself takes no second one
+    static SLOT_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 impl Drop for CheckSlot {
     fn drop(&mut self) {
+        SLOT_HELD.with(|h| h.set(false));
         let (m, cv) = check_slots();
         *m.lock().unwrap() -= 1;
         cv.notify_all();
     }
+}
+
+/// May one more check process start? `running` checks are already running (each counted in full: they may not have
+/// reached their peak yet), each needs `need` MB; `avail` = free RAM in MB (None = unknown: no limit).
+fn check_fits(running: u64, need: u64, avail: Option<u64>) -> bool {
+    running == 0 || avail.is_none_or(|a| a.saturating_sub(running * need) >= need + CHECK_RESERVE_MB)
 }
 
 static ACTIVE: OnceLock<Mutex<Option<Arc<Manager>>>> = OnceLock::new();
@@ -1275,19 +1287,22 @@ impl Manager {
         r
     }
 
-    fn check_slot(&self, c: &Card) -> CheckSlot {
+    /// A slot for one check process; waits while the free RAM does not cover one more (the GPU keeps mining meanwhile when
+    /// the slot is taken before the pause, see `recheck`).  `None` = this thread holds one already.
+    fn check_slot(&self, c: &Card) -> Option<CheckSlot> {
+        if SLOT_HELD.with(|h| h.get()) {
+            return None;
+        }
         let (m, cv) = check_slots();
         let need = check_mb();
         let mut running = m.lock().unwrap();
         let mut said = false;
         loop {
             // already-running checks may not have reached their peak yet: count each of them in full
-            let fits = *running == 0
-                || self.stopped()
-                || mem_available_mb().is_none_or(|a| a.saturating_sub(*running * need) >= need + CHECK_RESERVE_MB);
-            if fits {
+            if self.stopped() || check_fits(*running, need, mem_available_mb()) {
                 *running += 1;
-                return CheckSlot;
+                SLOT_HELD.with(|h| h.set(true));
+                return Some(CheckSlot);
             }
             if !said {
                 said = true;
@@ -1619,6 +1634,8 @@ impl Manager {
 
     /// Quick check of the current offset with mining on this GPU paused; on failure one step back and again.
     fn recheck(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, what: &str) {
+        // RAM for the check first: while other GPUs' checks fill the RAM this GPU keeps mining instead of idling paused
+        let _slot = self.check_slot(c);
         gs.pause.store(true, Ordering::SeqCst);
         let t = Instant::now();
         while !gs.paused.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(60) && !self.stopped() {
@@ -2092,6 +2109,17 @@ mod tests {
         let c = card(AMP.0, AMP.1, 0, 1, &o);
         assert_eq!(c.fixed, None);
         assert!(c.range_lines(false)[0].contains("no --uv-offset for this GPU, left alone"));
+    }
+
+    #[test]
+    fn ram_gate_for_checks() {
+        // the first check always runs; more only while the free RAM covers them (each running one counted in full)
+        assert!(check_fits(0, 2400, Some(100)));
+        assert!(check_fits(1, 2400, None));
+        assert!(check_fits(1, 2400, Some(2400 + 2400 + CHECK_RESERVE_MB)));
+        assert!(!check_fits(1, 2400, Some(2400 + 2400 + CHECK_RESERVE_MB - 1)));
+        assert!(!check_fits(3, 2400, Some(8000)));
+        assert!(check_fits(3, 2400, Some(3 * 2400 + 2400 + CHECK_RESERVE_MB)));
     }
 
     #[test]
