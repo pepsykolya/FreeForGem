@@ -50,7 +50,11 @@ back automatically. MANUAL.md, section 16.
 
 | File | SHA-256 |
 |---|---|
-@@FILES@@
+| `freeforgem-1.7.0beta.tar.gz` — HiveOS custom miner (Installation URL) | `7e0773fb2e7fb92fe87ed331d72155a82454b2dcb15f6fd2d0e965d171d5f7f3` |
+| `freeforgem-1.7.0-beta-linux-x86_64.tar.gz` — Linux x86_64 (glibc 2.31+) | `57fd46ab5a1057befef4d79dfdb89120be6a2dcc6188caa351a41720691a02f5` |
+| `freeforgem-1.7.0-beta-windows-x64.zip` — Windows 10/11 x64 | `c3d7ba12af3966f8afd37527a7d85eb313ef1e92e125409154c0b2b07f529811` |
+
+Inside: `libnoidgpu.so` sha256 `6da4416214fa00f8695501634dc99fa4af5db35019060abbf7e3170adea9e37c`, `noidgpu.dll` `4d90c1c1d3b70fb1b7ae7118fd1a03aec9be5f9de5dabf18811a8b6714ab2b2f`; the Pearl libraries are byte-identical to 1.6.2.
 
 ---
 
