@@ -1,7 +1,8 @@
 // FreeForGemPear — see LICENSE
 //! Optional GPU clock control via NVML: lock the core clock, lock the memory clock and set a memory-clock
 //! offset (`--lock-cclock` / `--lock-mclock` / `--moffset`).  Applied to the mining devices at start and
-//! undone on exit (Ctrl-C/SIGTERM and after a crash, via a small marker file).  Needs root/Administrator.
+//! undone on exit (Ctrl-C/SIGTERM and after a crash, via a small marker file): a lock that was there before (HiveOS OC profile,
+//! or $FFGP_RESTORE_CCLOCK / $FFGP_RESTORE_MCLOCK) is put back, otherwise the clock is reset.  Needs root/Administrator.
 //! Independent of `--auto-uv`; the kernel and mining are untouched.
 use crate::gpu;
 use crate::nvml::{Dev, Nvml};
@@ -26,12 +27,127 @@ impl ClockOpts {
     }
 }
 
+/// The lock a clock had before this run changed it.  NVML can set and reset a clock lock but cannot read one back, so it comes
+/// from the HiveOS OC profile (`hiveoc`), or from $FFGP_RESTORE_CCLOCK / $FFGP_RESTORE_MCLOCK; without either it is unknown
+/// and the lock is reset on exit (the behaviour before 1.6.3).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Prev {
+    Unknown,
+    Unlocked,
+    Locked(u32),
+}
+
+impl Prev {
+    fn to_json(self) -> serde_json::Value {
+        match self {
+            Prev::Unknown => json!(null),
+            Prev::Unlocked => json!(0),
+            Prev::Locked(m) => json!(m),
+        }
+    }
+    fn from_json(v: Option<&serde_json::Value>) -> Prev {
+        match v.and_then(|x| x.as_u64()) {
+            None => Prev::Unknown,
+            Some(0) => Prev::Unlocked,
+            Some(m) => Prev::Locked(m as u32),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Core,
+    Mem,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        if self == Kind::Core { "core" } else { "memory" }
+    }
+    fn env(self) -> &'static str {
+        if self == Kind::Core { "FFGP_RESTORE_CCLOCK" } else { "FFGP_RESTORE_MCLOCK" }
+    }
+}
+
+/// $FFGP_RESTORE_CCLOCK / $FFGP_RESTORE_MCLOCK: the lock to put back on exit, one value for all GPUs or one per GPU in
+/// --devices order (0 = no lock, i.e. reset; '-' or empty = not given for that GPU).
+fn prev_from_env(k: Kind, pos: usize, n: usize) -> Option<Prev> {
+    let raw = std::env::var(k.env()).ok()?;
+    let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
+    let s = if parts.len() == 1 {
+        parts[0]
+    } else if parts.len() == n {
+        parts[pos]
+    } else {
+        return None;
+    };
+    match s.parse::<u32>() {
+        Ok(0) => Some(Prev::Unlocked),
+        Ok(m) => Some(Prev::Locked(m)),
+        Err(_) => None,
+    }
+}
+
+/// What the HiveOS OC profile says for this GPU (by its NVML index), right now; `None` = not HiveOS.
+fn prev_from_hive(nv: &Nvml, d: Dev, k: Kind) -> Option<Prev> {
+    let h = crate::hiveoc::load()?;
+    let i = nv.index(d)? as usize;
+    let v = if k == Kind::Core { h.core_lock(i) } else { h.mem_lock(i) };
+    Some(v.map_or(Prev::Unlocked, Prev::Locked))
+}
+
+/// The lock to put back for the device at `pos` of `n` (NVML handle `d`), and where that comes from (for the log).
+fn prev_lock(nv: &Nvml, d: Dev, k: Kind, pos: usize, n: usize) -> (Prev, &'static str) {
+    if let Some(p) = prev_from_env(k, pos, n) {
+        return (p, k.env());
+    }
+    if let Some(p) = prev_from_hive(nv, d, k) {
+        return (p, "HiveOS OC profile");
+    }
+    (Prev::Unknown, "unknown")
+}
+
+fn fmt_prev(p: Prev, src: &str) -> String {
+    match p {
+        Prev::Unknown => "lock before: not readable (no HiveOS OC profile, no $FFGP_RESTORE_*), reset to default on exit".into(),
+        Prev::Unlocked => format!("lock before: none ({src}), reset on exit"),
+        Prev::Locked(m) => format!("lock before: {m} MHz ({src}), put back on exit"),
+    }
+}
+
+/// Puts one clock back: the lock it had before, else reset.  With an env value that one is used; on HiveOS the profile is
+/// read again (HiveOS may have applied a new OC meanwhile).  Returns the log text.
+fn put_back(nv: &Nvml, d: Dev, k: Kind, stored: Prev, pos: usize, n: usize) -> String {
+    let target = prev_from_env(k, pos, n).or_else(|| prev_from_hive(nv, d, k)).unwrap_or(stored);
+    match target {
+        Prev::Locked(m) => {
+            let r = if k == Kind::Core { nv.set_core_locked(d, m) } else { nv.set_mem_locked(d, m) };
+            match r {
+                Ok(()) => format!("{} clock lock {m} MHz put back", k.name()),
+                Err(e) => {
+                    // never leave this run's lock behind: reset instead
+                    let _ = if k == Kind::Core { nv.reset_core_locked(d) } else { nv.reset_mem_locked(d) };
+                    format!("{} clock: could not put the lock {m} MHz back ({e:#}); reset to default", k.name())
+                }
+            }
+        }
+        Prev::Unlocked | Prev::Unknown => {
+            let _ = if k == Kind::Core { nv.reset_core_locked(d) } else { nv.reset_mem_locked(d) };
+            format!("{} clock lock reset to default{}", k.name(), if target == Prev::Unlocked { " (there was none before)" } else { "" })
+        }
+    }
+}
+
 struct Item {
     dev: Dev,
     bus: String,
+    pos: usize,
+    n: usize,
     core_locked: bool,
     mem_locked: bool,
     mem_off: bool,
+    core_prev: Prev,
+    mem_prev: Prev,
 }
 
 struct State {
@@ -53,8 +169,9 @@ fn marker_path(dir: &Path) -> PathBuf {
     dir.join("clocks-restore.json")
 }
 
-/// Undo clock locks left by a previous run that did not exit cleanly (crash / power loss): the locks persist
-/// in the driver until reset or reboot, so clear exactly those we recorded, then delete the marker.
+/// Undo clock locks left by a previous run that did not exit cleanly (crash / power loss / SIGKILL): the locks persist in the
+/// driver until reset or reboot, so put back exactly those we recorded (the lock that was there before, else reset), then
+/// delete the marker.
 pub fn recover(dir: &Path) {
     let p = marker_path(dir);
     let Ok(txt) = std::fs::read_to_string(&p) else { return };
@@ -66,19 +183,25 @@ pub fn recover(dir: &Path) {
         Ok(n) => n,
         Err(_) => return,
     };
+    let gpus = v.get("gpus").and_then(|x| x.as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
     let mut n = 0;
-    for g in v.get("gpus").and_then(|x| x.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+    for g in gpus {
         let Some(bus) = g.get("bus").and_then(|x| x.as_str()) else { continue };
         let Ok(d) = nv.by_bus(bus) else { continue };
+        let pos = g.get("pos").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+        let cnt = g.get("n").and_then(|x| x.as_u64()).unwrap_or(1) as usize;
+        let mut what = Vec::new();
         if g.get("core_locked").and_then(|x| x.as_bool()).unwrap_or(false) {
-            let _ = nv.reset_core_locked(d);
+            what.push(put_back(&nv, d, Kind::Core, Prev::from_json(g.get("core_prev")), pos, cnt));
         }
         if g.get("mem_locked").and_then(|x| x.as_bool()).unwrap_or(false) {
-            let _ = nv.reset_mem_locked(d);
+            what.push(put_back(&nv, d, Kind::Mem, Prev::from_json(g.get("mem_prev")), pos, cnt));
         }
         if g.get("mem_off").and_then(|x| x.as_bool()).unwrap_or(false) {
             let _ = nv.set_mem_offset(d, 0);
+            what.push("memory offset 0".into());
         }
+        lg(format!("GPU bus {bus}: left changed by an earlier run that did not exit cleanly: {}", what.join(", ")));
         n += 1;
     }
     if n > 0 {
@@ -89,6 +212,7 @@ pub fn recover(dir: &Path) {
 
 /// Applies the requested clock locks / memory offset to `devices`.  Returns a guard that restores them on drop;
 /// `None` if nothing was requested, NVML is missing, or no device could be changed (then mining goes on as is).
+/// The lock each clock had before is noted first (HiveOS OC profile / $FFGP_RESTORE_*) and put back on exit.
 pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     if !o.any() {
         return None;
@@ -101,6 +225,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
         }
     };
     let mut items = Vec::new();
+    let n = devices.len();
     for (i, &dev) in devices.iter().enumerate() {
         let core = o.core_mhz.get(i).copied().flatten();
         let mem = o.mem_mhz.get(i).copied().flatten();
@@ -122,21 +247,25 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 continue;
             }
         };
-        let mut it = Item { dev: d, bus: bus.clone(), core_locked: false, mem_locked: false, mem_off: false };
+        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, mem_locked: false, mem_off: false, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
         if let Some(mhz) = core {
+            let (prev, src) = prev_lock(&nv, d, Kind::Core, i, n);
             match nv.set_core_locked(d, mhz) {
                 Ok(()) => {
                     it.core_locked = true;
-                    lg(format!("GPU{dev} (bus {bus}): core clock locked to {mhz} MHz"));
+                    it.core_prev = prev;
+                    lg(format!("GPU{dev} (bus {bus}): core clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
                 }
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot lock core clock ({e:#}); needs root/Administrator and a driver that supports it", )),
             }
         }
         if let Some(mhz) = mem {
+            let (prev, src) = prev_lock(&nv, d, Kind::Mem, i, n);
             match nv.set_mem_locked(d, mhz) {
                 Ok(()) => {
                     it.mem_locked = true;
-                    lg(format!("GPU{dev} (bus {bus}): memory clock locked to {mhz} MHz"));
+                    it.mem_prev = prev;
+                    lg(format!("GPU{dev} (bus {bus}): memory clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
                 }
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot lock memory clock ({e:#})")),
             }
@@ -157,35 +286,41 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     if items.is_empty() {
         return None;
     }
-    // marker for crash recovery (locks persist in the driver until reset/reboot)
+    // marker for crash recovery (locks persist in the driver until reset/reboot), with the locks to put back
     let marker = marker_path(dir);
     let doc = json!({
         "pid": std::process::id(),
-        "gpus": items.iter().map(|it| json!({"bus": it.bus, "core_locked": it.core_locked, "mem_locked": it.mem_locked, "mem_off": it.mem_off})).collect::<Vec<_>>(),
+        "gpus": items.iter().map(|it| json!({"bus": it.bus, "pos": it.pos, "n": it.n, "core_locked": it.core_locked, "mem_locked": it.mem_locked,
+            "mem_off": it.mem_off, "core_prev": it.core_prev.to_json(), "mem_prev": it.mem_prev.to_json()})).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
     *state().lock().unwrap() = Some(State { nv, marker, items });
     Some(Guard)
 }
 
-/// Resets every clock setting this run applied, and removes the marker.  Safe to call more than once.
+/// Puts back every clock setting this run applied (the lock from before, else default), and removes the marker.  Safe to
+/// call more than once.
 pub fn restore_all() {
     let Some(st) = state().lock().unwrap().take() else { return };
+    let mut lines = Vec::new();
     for it in &st.items {
+        let mut what = Vec::new();
         if it.core_locked {
-            let _ = st.nv.reset_core_locked(it.dev);
+            what.push(put_back(&st.nv, it.dev, Kind::Core, it.core_prev, it.pos, it.n));
         }
         if it.mem_locked {
-            let _ = st.nv.reset_mem_locked(it.dev);
+            what.push(put_back(&st.nv, it.dev, Kind::Mem, it.mem_prev, it.pos, it.n));
         }
         if it.mem_off {
             let _ = st.nv.set_mem_offset(it.dev, 0);
+            what.push("memory offset 0".into());
         }
+        lines.push(format!("GPU bus {}: {}", it.bus, what.join(", ")));
     }
     let _ = std::fs::remove_file(&st.marker);
-    // logged only after every card is reset (the log pipe may be gone at shutdown)
-    for it in &st.items {
-        lg(format!("GPU bus {}: clock settings restored to default", it.bus));
+    // logged only after every card is put back (the log pipe may be gone at shutdown)
+    for l in lines {
+        lg(l);
     }
 }
 

@@ -34,6 +34,7 @@ const TURING_MAX: i32 = 225; // default --uv-max on Turing (RTX 20 / GTX 16, sm_
 const CMP_MAX: i32 = 150; // default --uv-max on CMP 30HX / 40HX (TU116 / TU106): a CMP 40HX hit Xid at +255, rigs run +150
 const CMP_50HX_PCI_ID: u16 = 0x1e09; // TU102 of the CMP 50HX: holds +220 and more (owner's rigs), so it gets the Turing limit
 pub(crate) const DISABLE_SECS: u64 = 24 * 3600;
+const OC_RESETS_MAX: usize = 4; // OC applies per hour that get the verified offset back; more: auto-uv stands down on that GPU
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
 const CHECK_MB: u64 = 2400;
@@ -462,6 +463,7 @@ pub struct Card {
     next_reval: Mutex<Instant>,
     next_readback: Mutex<Instant>,
     last_good: AtomicI32, // highest step that passed in the tuning now running (i32::MIN = none); goes into the crash marker
+    oc_resets: Mutex<Vec<Instant>>, // OC applies (HiveOS nvidia-oc ...) that reset the offset while mining, for the rate limit
 }
 
 impl Card {
@@ -819,6 +821,7 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
         next_reval: Mutex::new(Instant::now()),
         next_readback: Mutex::new(Instant::now() + Duration::from_secs(30)),
         last_good: AtomicI32::new(i32::MIN),
+        oc_resets: Mutex::new(Vec::new()),
     }
 }
 
@@ -1233,10 +1236,36 @@ impl Manager {
         if cur != c.orig {
             self.mark_trying(c, cur);
         }
-        let r = match self.run_check_inner(c, sp) {
-            Ok(r) => r,
-            Err(e) => Res { reason: format!("{e:#}"), ..Default::default() },
-        };
+        let mut r = Res::default();
+        for attempt in 0..3 {
+            r = match self.run_check_inner(c, sp) {
+                Ok(r) => r,
+                Err(e) => Res { reason: format!("{e:#}"), ..Default::default() },
+            };
+            // an OC apply (HiveOS nvidia-oc at miner start or from the web UI) may have reset the offset during the check:
+            // then the check ran at that offset, not at `cur`, and says nothing about `cur`: set it again and repeat
+            if r.driver_fault || self.stopped() {
+                break;
+            }
+            match self.nv.get_offset(c.nv, c.mode) {
+                Ok(v) if v != cur => match self.oc_apply_kind(c, v) {
+                    Some(why) if attempt < 2 => {
+                        lg(format!("{} the offset was reset to {} during the check ({why}): setting {} again and repeating the check", c.label(), signed(v), signed(cur)));
+                        if let Err(e) = self.set_checked(c, cur) {
+                            r = Res { reason: format!("could not set {} again after the OC apply: {e:#}", signed(cur)), ..Default::default() };
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_secs(3));
+                    }
+                    _ => {
+                        r.ok = false;
+                        r.reason = format!("the offset was changed to {} by someone else during the check ({} expected)", signed(v), signed(cur));
+                        break;
+                    }
+                },
+                _ => break,
+            }
+        }
         // a driver fault (Xid, hang) often leaves the GPU unusable until a reboot ("GPU requires reset"), and then
         // nothing after this point runs: keep the marker, so the next start tunes below this offset instead of
         // climbing into the same fault again. tune() / apply_*() remove it once a result is saved.
@@ -1422,24 +1451,47 @@ impl Manager {
             if !c.owned.load(Ordering::SeqCst) {
                 continue;
             }
-            // somebody else changed the offset: do not fight
-            {
+            let Some(gs) = gstats.iter().find(|g| g.dev == c.dev) else { continue };
+            // the offset changed under us: an OC apply (HiveOS nvidia-oc at miner start or after an OC change in the web UI
+            // writes 0 when the Core Clock field is empty, or the profile's value) gets the verified offset back after a
+            // quick check; any other value is the owner's own choice: do not fight
+            let due = {
                 let mut nr = c.next_readback.lock().unwrap();
-                if Instant::now() >= *nr {
+                let due = Instant::now() >= *nr;
+                if due {
                     *nr = Instant::now() + Duration::from_secs(30);
-                    if !c.reval_busy.load(Ordering::Relaxed) {
-                        match self.nv.get_offset(c.nv, c.mode) {
-                            Ok(v) if v != c.cur.load(Ordering::Relaxed) => {
-                                lg(format!("{} the offset was changed by someone else ({} now, {} expected): auto-uv stands down on this GPU and leaves it as is", c.label(), signed(v), signed(c.cur.load(Ordering::Relaxed))));
-                                c.owned.store(false, Ordering::SeqCst);
-                                continue;
+                }
+                due
+            };
+            if due && !c.reval_busy.load(Ordering::Relaxed) {
+                let want = c.cur.load(Ordering::Relaxed);
+                if let Ok(v) = self.nv.get_offset(c.nv, c.mode) {
+                    if v != want {
+                        match self.oc_apply_kind(c, v) {
+                            Some(why) if want > c.orig && self.oc_reset_allowed(c) => {
+                                lg(format!("{} the offset was reset to {} by an OC apply ({why}); re-applying the verified {} after a quick check", c.label(), signed(v), signed(want)));
+                                c.cur.store(v, Ordering::Relaxed);
+                                c.reval_busy.store(true, Ordering::SeqCst);
+                                let (m, c2, gs2) = (self.clone(), c.clone(), gs.clone());
+                                std::thread::spawn(move || {
+                                    m.reapply(&c2, &gs2, want);
+                                    *c2.next_reval.lock().unwrap() = Instant::now() + reval_interval(m.opts.reval_hours);
+                                    c2.reval_busy.store(false, Ordering::SeqCst);
+                                });
                             }
-                            _ => {}
+                            Some(why) if want > c.orig => {
+                                lg(format!("{} the offset was reset to {} by an OC apply ({why}) again: {OC_RESETS_MAX} times within an hour already, so auto-uv stands down on this GPU and leaves it as is (restart the miner once the OC is settled)", c.label(), signed(v)));
+                                c.owned.store(false, Ordering::SeqCst);
+                            }
+                            _ => {
+                                lg(format!("{} the offset was changed by someone else ({} now, {} expected): auto-uv stands down on this GPU and leaves it as is", c.label(), signed(v), signed(want)));
+                                c.owned.store(false, Ordering::SeqCst);
+                            }
                         }
+                        continue;
                     }
                 }
             }
-            let Some(gs) = gstats.iter().find(|g| g.dev == c.dev) else { continue };
             // a hit that failed CPU verification: the GPU computed something wrong (handled once a running re-validation is over)
             if !c.reval_busy.load(Ordering::Relaxed) {
                 let bad = gs.uv_bad.load(Ordering::Relaxed);
@@ -1519,8 +1571,54 @@ impl Manager {
         *c.next_reval.lock().unwrap() = Instant::now() + Duration::from_secs(60);
     }
 
+    /// Is `v` (read back instead of the offset this run set) the work of an OC apply rather than the owner's own choice?
+    /// The HiveOS nvidia-oc writes the profile's Core Clock value at every miner start and OC change, 0 when the field is
+    /// empty; other OC tools put the owner's offset back.  Returns how it was recognised, for the log.
+    fn oc_apply_kind(&self, c: &Card, v: i32) -> Option<&'static str> {
+        let hive = crate::hiveoc::load().and_then(|h| self.nv.index(c.nv).map(|i| h.core_offset(i as usize)));
+        if hive == Some(v) {
+            Some("the value of the HiveOS OC profile")
+        } else if v == 0 {
+            Some("offset 0: HiveOS nvidia-oc with an empty Core Clock field, or an OC reset")
+        } else if v == c.orig {
+            Some("your offset from before the miner started")
+        } else {
+            None
+        }
+    }
+
+    /// Rate limit of the re-applies: an OC tool that keeps resetting the offset is not fought for ever.
+    fn oc_reset_allowed(&self, c: &Card) -> bool {
+        let mut r = c.oc_resets.lock().unwrap();
+        r.retain(|t| t.elapsed() < Duration::from_secs(3600));
+        if r.len() >= OC_RESETS_MAX {
+            return false;
+        }
+        r.push(Instant::now());
+        true
+    }
+
+    /// After an OC apply reset the offset while mining: set the verified offset again and quick-check it (mining on this GPU
+    /// pauses for ~30 s); a failure steps back as in the re-validation.
+    fn reapply(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, want: i32) {
+        if self.stopped() || !c.owned.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Err(e) = self.set_checked(c, want) {
+            lg(format!("{} could not set {} again after the OC apply ({e:#}); auto-uv stands down on this GPU", c.label(), signed(want)));
+            c.owned.store(false, Ordering::SeqCst);
+            return;
+        }
+        self.recheck(c, gs, "quick check after the OC apply");
+    }
+
     fn revalidate(&self, c: &Arc<Card>, gs: &Arc<GpuStat>) {
         lg(format!("{} periodic re-validation at {} (mining on this GPU pauses for a short while)", c.label(), signed(c.cur.load(Ordering::Relaxed))));
+        self.recheck(c, gs, "re-validation");
+    }
+
+    /// Quick check of the current offset with mining on this GPU paused; on failure one step back and again.
+    fn recheck(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, what: &str) {
         gs.pause.store(true, Ordering::SeqCst);
         let t = Instant::now();
         while !gs.paused.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(60) && !self.stopped() {
@@ -1536,7 +1634,7 @@ impl Manager {
                 }
                 let r = self.run_check(c, &self.quick_spec(refs.clone()));
                 if r.ok {
-                    lg(format!("{} re-validation at {}: ok ({} reruns, cpu ok {}), {}", c.label(), signed(cur), r.reruns, r.cpu_ok, fmt_w(r.watts)));
+                    lg(format!("{} {what} at {}: ok ({} reruns, cpu ok {}), {}", c.label(), signed(cur), r.reruns, r.cpu_ok, fmt_w(r.watts)));
                     if c.cur.load(Ordering::Relaxed) == cur {
                         let mut e = self.entry(c).unwrap_or_else(|| self.new_entry(c));
                         // running below the saved result because of the limit (apply_clamped): the saved one stays as it is
@@ -1548,11 +1646,11 @@ impl Manager {
                     }
                     break;
                 }
-                lg(format!("{} re-validation at {} FAILED ({})", c.label(), signed(cur), r.reason));
-                self.step_back(c, "re-validation failed");
+                lg(format!("{} {what} at {} FAILED ({})", c.label(), signed(cur), r.reason));
+                self.step_back(c, &format!("{what} failed"));
             }
         } else {
-            lg(format!("{} re-validation skipped (the mining thread did not pause)", c.label()));
+            lg(format!("{} {what} skipped (the mining thread did not pause)", c.label()));
         }
         gs.pause.store(false, Ordering::SeqCst);
     }

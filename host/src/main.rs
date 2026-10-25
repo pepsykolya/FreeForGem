@@ -45,6 +45,7 @@ mod cmfd_offset;
 mod cmfd_uv;
 mod devfee;
 mod gpu;
+mod hiveoc;
 mod mining;
 mod nvml;
 mod stratum;
