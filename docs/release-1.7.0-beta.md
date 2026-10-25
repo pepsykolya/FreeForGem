@@ -12,17 +12,17 @@ the Pearl miner under its own name and repository; the multi-coin line lives in 
 * **NOID (Parano1d) mining** on NVIDIA RTX 30/40/50 and A100/H100 (sm_80+), **driver 580+** — `--algo noid` (or a NOID pool
   URL). Own closed-source kernels in a separate library (`libnoidgpu.so` / `noidgpu.dll`; the Pearl library is unchanged),
   two modes:
-  * `--noid-mode eff` (default, best MH/W): RTX 3070 @1400 MHz + undervolt **@@EFF@@**;
-  * `--noid-mode speed` (best MH/s): RTX 3070 **42.79 MH/s @1560 MHz, 45.25 MH/s @1650 MHz**.
+  * `--noid-mode eff` (default, best MH/W): RTX 3070 @1400 MHz + undervolt **34.7 MH/s @ 73 W = 0.47–0.48 MH/W (offset +195 found by `--auto-uv`; 0.393 at offset 0)**;
+  * `--noid-mode speed` (best MH/s): RTX 3070 **43.65 MH/s @1560 MHz, 46.16 MH/s @1650 MHz**; RTX 4070 Ti 82.6 MH/s at stock clocks (power limit 190 W).
 * Pool protocol `parano1d-stratum-v1` over **TLS** (`stratum+ssl://`), tested on InnovLab EU
-  (`stratum+ssl://eu2.innovlab.cc:19601`): @@POOL@@.
+  (`stratum+ssl://eu2.innovlab.cc:19601`): all shares accepted in our runs (user 63/63, 41/41, 31/31, 24/24; dev fee 29/29), RTX 4070 Ti 32/32 and 51/51.
 * Every GPU candidate is **re-computed on the CPU with the official `noid_poseidon2b` crate** before it is submitted;
   `--algo noid --self-test` checks the 16 official test vectors and 32768 GPU digests per kernel against the crate, and a full
   search launch's candidate set.
 * **`--auto-uv` for NOID**: its own per-card and per-mode undervolt, every step checked by a 40 s bit-exact stress check
   (thousands of launches compared with the CPU), one step below the first failure, 2-minute confirmation, saved in `uv.json`
   under `noid`; while mining, a CPU check of every candidate plus a watchdog check every 120 s step the offset back on a
-  failure. Without `--auto-uv` a positive (Pearl) offset is set to 0 for NOID and put back on exit. RTX 3070 result: @@UV@@.
+  failure. Without `--auto-uv` a positive (Pearl) offset is set to 0 for NOID and put back on exit. RTX 3070 result: eff @1400 MHz 87.5 → 72.8 W (+20 % MH/W, voltage floor at +195), speed @1560 MHz 127.8 → 106.2 W (+20 % MH/W, silent edge at +225: 5 of 4597 launches wrong, no Xid).
 * Dev fee 1% for NOID, the same schedule as Pearl (60 s every 100 min, same pool).
 * HiveOS: custom miner **`freeforgem`** — **create a new flight sheet** (Miner name `freeforgem`, the new Installation URL);
   NOID: hash algorithm `parano1d`, hashrate in kH/s. Windows: `start-noid.bat`.
@@ -64,17 +64,17 @@ Pearl под своим именем и в своём репозитории; м
 * **Майнинг NOID (Parano1d)** на NVIDIA RTX 30/40/50 и A100/H100 (sm_80+), **драйвер 580+** — `--algo noid` (или URL
   NOID-пула). Свои закрытые ядра в отдельной библиотеке (`libnoidgpu.so` / `noidgpu.dll`; библиотека Pearl не менялась),
   два режима:
-  * `--noid-mode eff` (по умолчанию, лучшие MH/Вт): RTX 3070 @1400 МГц + андервольт **@@EFF_RU@@**;
-  * `--noid-mode speed` (максимум MH/s): RTX 3070 **42.79 MH/s @1560 МГц, 45.25 MH/s @1650 МГц**.
+  * `--noid-mode eff` (по умолчанию, лучшие MH/Вт): RTX 3070 @1400 МГц + андервольт **34.7 MH/s @ 73 Вт = 0.47–0.48 MH/Вт (offset +195, найден `--auto-uv`; 0.393 на offset 0)**;
+  * `--noid-mode speed` (максимум MH/s): RTX 3070 **43.65 MH/s @1560 МГц, 46.16 MH/s @1650 МГц**; RTX 4070 Ti 82.6 MH/s на стоковых частотах (лимит 190 Вт).
 * Протокол пула `parano1d-stratum-v1` через **TLS** (`stratum+ssl://`), проверен на InnovLab EU
-  (`stratum+ssl://eu2.innovlab.cc:19601`): @@POOL_RU@@.
+  (`stratum+ssl://eu2.innovlab.cc:19601`): в наших прогонах все шары приняты (user 63/63, 41/41, 31/31, 24/24; комиссия 29/29), RTX 4070 Ti 32/32 и 51/51.
 * Каждый кандидат GPU **пересчитывается на CPU официальным крейтом `noid_poseidon2b`** перед отправкой;
   `--algo noid --self-test` проверяет 16 официальных тест-векторов и 32768 дайджестов GPU на каждое ядро против крейта, а также
   набор кандидатов полного запуска поиска.
 * **`--auto-uv` для NOID**: свой андервольт на каждую карту и режим, каждый шаг — 40-секундная побайтная stress-проверка (тысячи
   запусков против CPU), результат на шаг ниже первой ошибки, подтверждение 2 минуты, сохраняется в `uv.json` в разделе `noid`;
   в майнинге — CPU-проверка каждого кандидата и сторожевая проверка каждые 120 с, при ошибке offset откатывается. Без
-  `--auto-uv` положительный (Pearl-овский) offset на время NOID ставится в 0 и возвращается при выходе. RTX 3070: @@UV_RU@@.
+  `--auto-uv` положительный (Pearl-овский) offset на время NOID ставится в 0 и возвращается при выходе. RTX 3070: eff @1400 МГц 87.5 → 72.8 Вт (+20 % MH/Вт, пол напряжения на +195), speed @1560 МГц 127.8 → 106.2 Вт (+20 % MH/Вт, тихий край на +225: 5 из 4597 запусков с ошибкой, Xid нет).
 * Комиссия 1 % для NOID — по тому же расписанию, что у Pearl (60 с каждые 100 мин, тот же пул).
 * HiveOS: кастомный майнер **`freeforgem`** — **создайте новый полётный лист** (Miner name `freeforgem`, новая ссылка
   установки); NOID: hash algorithm `parano1d`, хэшрейт в kH/s. Windows: `start-noid.bat`.

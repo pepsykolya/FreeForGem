@@ -688,8 +688,11 @@ wrong NOID results; RTX 4070 Ti: the owner's Pearl +300 crashes NOID). So:
 * `--uv-offset N` sets N without checks (at your own risk); `--uv-reset` forgets the NOID results;
 * while mining, every candidate is re-checked on the CPU, and every 120 s a short watchdog check (6 launches of the fixed check
   job, bit-exact) runs on each GPU; a failure steps that card's offset back by one step (saved) and mining goes on.
-* RTX 3070 measured edges (agent stress check, 1400–1650 MHz): last good +220…+235, first failure +235…+250 → results
-  +205…+220. Below ~1400 MHz the card sits at its minimum voltage and the offset no longer saves power.
+* RTX 3070, our runs: **eff @1400 MHz** — 87.5 W at offset 0 → **72.8 W at +195** (34.3 MH/s; the voltage floor: above +195
+  the power no longer drops, so the tuner stops there), MH/W **+20 %**; on the pool 34.8 MH/s @ 73 W (0.476 MH/W), 41/41 shares
+  accepted. **speed @1560 MHz** — 127.8 W → **106.2 W at +195** (43.3 MH/s), edge +225, MH/W **+20 %**; on the pool
+  43.8 MH/s @ 107 W (0.410), 24/24 accepted. RTX 4070 Ti at stock clocks and power limit 190 W, offset 0: speed 82.6 MH/s,
+  eff ~81 MH/s (both at the power limit; not tuned yet).
 
 **Log (NOID)**
 
@@ -732,18 +735,20 @@ How FreeForGem handles it (Pearl, CMFD and NOID follow the same rule):
 4. The owner's offset is written to a restore file before the first change and **put back on exit** (and by the next start
    after a crash).
 
-What you see in the log (NOID, RTX 3070, `--lock-cclock 1560`, illustrative):
+What you see in the log (NOID speed kernel, RTX 3070, `--lock-cclock 1560 --auto-uv`, our run; the last two lines are from a run with a deliberately too deep `--uv-offset 280`):
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) base 0: ok (3020 launches checked, 37.10 MH/s, 112.4 W, 0.330 MH/W, 1560 MHz, 61 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +205: ok (4012 launches checked, 37.57 MH/s, 109.4 W, 0.343 MH/W, 1560 MHz, 63 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +220: ok (4010 launches checked, ...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +235: FAILED (WRONG RESULTS: 3 of 1046 launches gave a wrong candidate set, first after 9.8s (no Xid, no crash: the silent edge)): edge found
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +205: ok (...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT eff: offset +205 (edge +235, one step below the last good one); MH/W 0.330 -> 0.343 (+3.9%)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed kernel speed:aff/sm86): base +0, start +120, limit +495 (default), step 15, 40 s of stress per step
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (3448 launches checked, 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +120: ok (4597 launches checked, 43.30 MH/s, 114.4 W, 0.378 MH/W, 1560 MHz, 56 C)
+...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (4598 launches checked, 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +225: FAILED (WRONG RESULTS: 5 of 4597 launches gave a wrong candidate set, first after 14.1s (no Xid, no crash: the silent edge)): edge found
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +195: ok (13790 launches checked, 43.30 MH/s, 106.2 W, 0.408 MH/W, 1560 MHz, 57 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, one step below the last good one); MH/W 0.339 -> 0.408 (+20.3%); saved to .../uv.json
 ...
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
-auto-uv (noid): GPU0: wrong GPU results at offset +205 (CPU check of a hit / watchdog): stepped back to +190 and mining on
+auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
 
 ---
@@ -1433,8 +1438,11 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
 * `--uv-offset N` ставит N без проверок (на ваш риск); `--uv-reset` забывает результаты NOID;
 * в майнинге каждый кандидат перепроверяется на CPU, и каждые 120 с на каждой GPU идёт короткая сторожевая проверка (6 запусков
   фиксированного задания, побайтно); ошибка откатывает offset этой карты на шаг (с сохранением), майнинг продолжается;
-* края на RTX 3070 (stress-проверка, 1400–1650 МГц): последний хороший +220…+235, первая ошибка +235…+250 → результаты
-  +205…+220. Ниже ~1400 МГц карта уже на минимальном напряжении, и offset больше не экономит ватты.
+* RTX 3070, наши прогоны: **eff @1400 МГц** — 87.5 Вт на offset 0 → **72.8 Вт на +195** (34.3 MH/s; пол напряжения: выше
+  +195 мощность уже не падает, тюнер там останавливается), MH/Вт **+20 %**; на пуле 34.8 MH/s @ 73 Вт (0.476 MH/Вт), 41/41 шар
+  принято. **speed @1560 МГц** — 127.8 Вт → **106.2 Вт на +195** (43.3 MH/s), край +225, MH/Вт **+20 %**; на пуле 43.8 MH/s
+  @ 107 Вт (0.410), 24/24 принято. RTX 4070 Ti на стоковых частотах и лимите 190 Вт, offset 0: speed 82.6 MH/s, eff ~81 MH/s
+  (обе упираются в лимит мощности; тюнинг ещё не делали).
 
 **Лог (NOID)**
 
@@ -1477,18 +1485,20 @@ new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expir
 4. Offset владельца записывается в файл восстановления до первого изменения и **возвращается при выходе** (а после падения — при
    следующем запуске).
 
-Как это выглядит в логе (NOID, RTX 3070, `--lock-cclock 1560`, пример):
+Как это выглядит в логе (ядро speed, RTX 3070, `--lock-cclock 1560 --auto-uv`, наш прогон; две последние строки — из прогона с заведомо слишком глубоким `--uv-offset 280`):
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) base 0: ok (3020 launches checked, 37.10 MH/s, 112.4 W, 0.330 MH/W, 1560 MHz, 61 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +205: ok (4012 launches checked, 37.57 MH/s, 109.4 W, 0.343 MH/W, 1560 MHz, 63 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +220: ok (4010 launches checked, ...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +235: FAILED (WRONG RESULTS: 3 of 1046 launches gave a wrong candidate set, first after 9.8s (no Xid, no crash: the silent edge)): edge found
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +205: ok (...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT eff: offset +205 (edge +235, one step below the last good one); MH/W 0.330 -> 0.343 (+3.9%)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed kernel speed:aff/sm86): base +0, start +120, limit +495 (default), step 15, 40 s of stress per step
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (3448 launches checked, 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +120: ok (4597 launches checked, 43.30 MH/s, 114.4 W, 0.378 MH/W, 1560 MHz, 56 C)
+...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (4598 launches checked, 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +225: FAILED (WRONG RESULTS: 5 of 4597 launches gave a wrong candidate set, first after 14.1s (no Xid, no crash: the silent edge)): edge found
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +195: ok (13790 launches checked, 43.30 MH/s, 106.2 W, 0.408 MH/W, 1560 MHz, 57 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, one step below the last good one); MH/W 0.339 -> 0.408 (+20.3%); saved to .../uv.json
 ...
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
-auto-uv (noid): GPU0: wrong GPU results at offset +205 (CPU check of a hit / watchdog): stepped back to +190 and mining on
+auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
 
 ---
@@ -2100,8 +2110,10 @@ RTX 4070 Ti：机主为 Pearl 设置的 +300 会让 NOID 崩溃）。因此：
 * `--uv-offset N` 直接设置 N，不做检查（风险自负）；`--uv-reset` 清除 NOID 结果；
 * 挖矿时每个候选结果都在 CPU 上复核，每 120 秒每张 GPU 还会运行一次简短的看门狗检查（固定任务 6 次启动，逐位比对）；
   检查失败会让该卡的偏移回退一步（并保存），挖矿继续；
-* RTX 3070 实测边缘（压力检查，1400–1650 MHz）：最后成功 +220…+235，首次失败 +235…+250 → 结果 +205…+220。低于约 1400 MHz
-  时显卡已处于最低电压，偏移不再省电。
+* RTX 3070 实测：**eff @1400 MHz** — 偏移 0 时 87.5 W → **+195 时 72.8 W**（34.3 MH/s；电压下限：高于 +195 功耗不再
+  下降，调整器在此停止），MH/W **+20%**；矿池上 34.8 MH/s @ 73 W（0.476 MH/W），41/41 份额被接受。**speed @1560 MHz** —
+  127.8 W → **+195 时 106.2 W**（43.3 MH/s），边缘 +225，MH/W **+20%**；矿池上 43.8 MH/s @ 107 W（0.410），24/24 被接受。
+  RTX 4070 Ti 默认频率、功耗上限 190 W、偏移 0：speed 82.6 MH/s，eff 约 81 MH/s（均受功耗上限限制；尚未调整）。
 
 **日志（NOID）**
 
@@ -2138,16 +2150,18 @@ FreeForGem 的做法（Pearl、CMFD 和 NOID 遵循同一原则）：
    检查；Pearl 每 6 小时重新验证。检查失败时**自动将偏移回退一步**（并保存），挖矿继续。
 4. 机主的偏移在第一次修改前写入恢复文件，并在**退出时恢复**（崩溃后则在下次启动时恢复）。
 
-日志中的样子（NOID，RTX 3070，`--lock-cclock 1560`，示例）：
+日志中的样子（speed 内核，RTX 3070，`--lock-cclock 1560 --auto-uv`，我们的实际运行；最后两行来自故意设置过深的 `--uv-offset 280` 的运行）：
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) base 0: ok (3020 launches checked, 37.10 MH/s, 112.4 W, 0.330 MH/W, 1560 MHz, 61 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +205: ok (4012 launches checked, 37.57 MH/s, 109.4 W, 0.343 MH/W, 1560 MHz, 63 C)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +220: ok (4010 launches checked, ...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) +235: FAILED (WRONG RESULTS: 3 of 1046 launches gave a wrong candidate set, first after 9.8s (no Xid, no crash: the silent edge)): edge found
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +205: ok (...)
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT eff: offset +205 (edge +235, one step below the last good one); MH/W 0.330 -> 0.343 (+3.9%)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed kernel speed:aff/sm86): base +0, start +120, limit +495 (default), step 15, 40 s of stress per step
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (3448 launches checked, 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +120: ok (4597 launches checked, 43.30 MH/s, 114.4 W, 0.378 MH/W, 1560 MHz, 56 C)
+...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (4598 launches checked, 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) +225: FAILED (WRONG RESULTS: 5 of 4597 launches gave a wrong candidate set, first after 14.1s (no Xid, no crash: the silent edge)): edge found
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) confirmation +195: ok (13790 launches checked, 43.30 MH/s, 106.2 W, 0.408 MH/W, 1560 MHz, 57 C)
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, one step below the last good one); MH/W 0.339 -> 0.408 (+20.3%); saved to .../uv.json
 ...
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
-auto-uv (noid): GPU0: wrong GPU results at offset +205 (CPU check of a hit / watchdog): stepped back to +190 and mining on
+auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
