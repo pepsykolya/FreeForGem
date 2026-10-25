@@ -387,7 +387,7 @@ fn mine(a: Args) -> Result<()> {
             println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devices[0]);
         }
         let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "eff".into());
-        amd_uv::start(devices[0], true, &goal)
+        amd_uv::start(devices[0], true, &goal, amd_uv::Load::Pearl)
     } else {
         None
     };
@@ -672,7 +672,7 @@ OPTIONS:
     --self-test          verify the GPU kernel against the CPU reference and exit
     --backend B          GPU library: auto (default: CUDA if it sees a device, else AMD), cuda, amd ($FFGP_BACKEND)
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
-                         via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL eff|max); see MANUAL.md
+                         via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
     --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
@@ -705,6 +705,7 @@ COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ 
     results with it); --uv-offset N sets N instead (at your own risk). --auto-uv (NVIDIA): a CMFD offset of its own, tuned
     from 0 in --uv-step steps up to --uv-max (per-card default), every step checked bit-for-bit on the real model by the
     engine's worker + the official test vector; saved in uv.json (section cmfd, separate from Pearl), applied on later starts.
+    AMD: --auto-uv runs amduv tuned on the CMFD load itself (see --auto-uv above).
     Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
 
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
@@ -725,13 +726,11 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
 }
 
 /// `--algo cmfd`: Common Foundry through the FreeForgeMiner engine (cmfd.rs). Shares the command line, the clock options and
-/// the log format with Pearl. `--auto-uv` on NVIDIA runs the CMFD tuner (cmfd_uv.rs, checks on the CMFD load), not the Pearl one.
+/// the log format with Pearl. `--auto-uv` on NVIDIA runs the CMFD tuner (cmfd_uv.rs, checks on the CMFD load), not the Pearl one;
+/// on AMD the amduv tuner with the CMFD check (cmfd.rs).
 fn mine_cmfd(a: Args) -> Result<()> {
     ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
     ensure!(!a.wallet.is_empty(), "--wallet is required: your CMFD address, cmfd1... or 64 hex (see --help)");
-    if a.uv.auto && gpu::backend() == gpu::Backend::Amd {
-        eprintln!("WARNING: --auto-uv for CMFD is NVIDIA-only in this version and is ignored with the AMD backend");
-    }
     if a.password != "x" {
         eprintln!("WARNING: --password is not used by CMFD pools; ignored");
     }

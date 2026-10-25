@@ -512,7 +512,7 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
     let with_model = bank.is_file();
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
     // the same stock-offset rule as for mining: a Pearl undervolt would fail the test vector
-    // NVML only; on AMD nothing to reset (the amduv undervolt is only active while Pearl mines and is restored on exit)
+    // NVML only; on AMD nothing to reset (an amduv point is only active while the miner runs and is restored on exit)
     if !amd() {
         crate::cmfd_offset::recover(state_dir);
     }
@@ -785,6 +785,18 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         let ctx = crate::cmfd_uv::Ctx { engine: engine.clone(), bank: bank.clone(), mode: o.mode.clone(), batch: o.batch, work: work_root.clone(), core_lock: o.clocks.core_mhz.clone() };
         crate::cmfd_uv::start(&o.uv, &devs, &bases, &ctx, &stop);
     }
+    // AMD --auto-uv: amduv applies its CMFD point (tuned on the CMFD load first if there is none) before the engine starts; its
+    // guard process puts the owner's clocks / voltage / power limit back when this process exits (also on a crash or kill)
+    let _amd_uv_guard = if amd() && o.uv.auto && !o.uv.dry_run {
+        if devs.len() > 1 {
+            println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devs[0]);
+        }
+        let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "bal".into());
+        let worker = engine.join(bin(replay_worker()));
+        crate::amd_uv::start(devs[0], true, &goal, crate::amd_uv::Load::Cmfd { worker: &worker, model: &bank })
+    } else {
+        None
+    };
 
     let nv = if amd() { None } else { nvml::Nvml::load().ok() };
     let mut slots: Vec<Slot> = gpus

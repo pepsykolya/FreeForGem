@@ -539,7 +539,8 @@ same in both), `--cmfd-batch N` (1–64, default by GPU memory: 64 on 11 GB+, el
 return wrong results. Therefore in CMFD mode the miner **sets a positive core offset to 0** before the engine starts and puts
 the old value back on exit (log: `cmfd offset: GPU0: core offset +345 -> 0 MHz ...`; after a crash the next start puts it
 back first). This needs root/Administrator; without it the log says so and you must remove the offset yourself (HiveOS:
-the OC profile of the CMFD flight sheet). `--uv-offset N` sets N instead — **at your own risk**.
+the OC profile of the CMFD flight sheet). `--uv-offset N` sets N instead — **at your own risk**. On **AMD Radeon** `--auto-uv` tunes an undervolt
+for CMFD with amduv (section 14, since 1.6.3); on NVIDIA see below.
 Safe settings: stock clocks, a power limit, or a core lock (`--lock-cclock`).
 
 **`--auto-uv` for CMFD (NVIDIA).** With `--auto-uv` (HiveOS: *Extra config arguments*; Windows: `AUTO_UV=1` in
@@ -634,6 +635,31 @@ NVIDIA-only (the miner refuses them with AMD).
 `cmfd\cmfd-v4-replay-ocl.exe` and the pool client `cmfd\cmfd-miner-ffgp.exe` (FreeForgeMiner rebuilt with the small patch in
 `cmfd/patches/`, so it runs without nvidia-smi). Needs ~7 GB of free GPU memory. RX 6800 XT: ~10 FW/s at ~275 W (an RTX 3070
 does ~20 FW/s): CMFD is much better on NVIDIA tensor cores.
+
+**Undervolt for CMFD on AMD (since 1.6.3):** remove `rem` before `set "AUTO_UV=1"` in `start-cmfd.bat` (run it as
+Administrator), or add `--auto-uv` to a CMFD command line. `amduv.exe` keeps a **separate CMFD result**: CMFD computes wrongly
+at clocks where Pearl is still fine (RX 6800 XT at the lowest voltage: Pearl passes up to 2250 MHz, CMFD fails from 2200–2250),
+so the Pearl point is never used for CMFD. Every point is checked on the real model: the OpenCL worker runs fixed batches of 32
+nonces again and again, and their final digests (BLAKE3 over all 384 layers) must equal bit for bit the ones taken at stock —
+one wrong bit anywhere changes them. The first start tunes (~15–20 min, once per card / driver / worker / model), later starts
+apply the saved point (a 15-second check when the last one is older than 6 h). The guard puts **your own clock / voltage /
+power-limit settings back** when the miner exits, also after a crash or a kill. `UV_GOAL` in `start-cmfd.bat`
+(`$FFGP_AMD_UV_GOAL`) picks one of the tuned profiles:
+
+| Profile | How it is found | RX 6800 XT (ASIC watts, ADLX) |
+|---|---|---|
+| — (stock) | | 10.0 FW/s at 280 W (36 FW/kJ) |
+| `eff` | lowest voltage, max clock raised until the check fails, one step back | 2100 MHz / 881 mV: 9.1 FW/s at 193 W (47 FW/kJ, **+32 %**; −9 % FW/s) |
+| `bal` (default) | the most FW per watt that keeps ≥ 90 % of the stock FW/s | = `eff` on this card |
+| `max` | your max clock, voltage lowered until the check fails, one step back up | 2324 MHz / 1075 mV: 10.1 FW/s at 248 W (41 FW/kJ, +14 %; same speed) |
+
+On the Aria pool through the miner (10–15 min each, average of the stats line): stock 9.9 FW/s at 277 W, `bal` 9.1 FW/s at
+191 W (+33 % FW/W), `max` 10.0 FW/s at 247 W (+14 %); no rejected shares, engine `INTEGRITY | ok`. The edge moves a little from
+run to run (2200 MHz at 881 mV passed twice and failed once), so the tuner always keeps one step of margin.
+
+Not useful on Windows: the power limit goes down only to −6 % (264 W, +4 % FW/W); the memory clock can only be raised
+(2000–2150 MHz: no gain, and wrong results at 2150), the fast memory timing changes nothing. `--uv-reset` forgets the Pearl
+and CMFD results (the next `--auto-uv` start tunes again).
 
 ---
 
@@ -1175,6 +1201,7 @@ HiveOS показывает FW/s по каждой карте; первый за
 возвращает прежнее значение при выходе (в логе `cmfd offset: GPU0: core offset +345 -> 0 MHz ...`; после аварийного
 завершения следующий запуск сначала возвращает его). Нужны права root/администратора; без них в логе будет предупреждение, и
 смещение надо убрать самому (HiveOS — профиль разгона полётного листа CMFD). `--uv-offset N` ставит N — **на ваш риск**.
+На **AMD Radeon** `--auto-uv` подбирает андервольт для CMFD через amduv (раздел 14, с 1.6.3); на NVIDIA — ниже.
 Безопасно: стоковые частоты, лимит мощности или лок ядра (`--lock-cclock`).
 
 **`--auto-uv` для CMFD (NVIDIA).** С `--auto-uv` (HiveOS — *Extra config arguments*; Windows — `AUTO_UV=1` в
@@ -1267,6 +1294,31 @@ CPU при этом занят; `PEARL_AMD_SPIN=0` / `FFGP_PROC_PRIO=0` откл
 `cmfd\cmfd-v4-replay-ocl.exe` и клиент пула `cmfd\cmfd-miner-ffgp.exe` (FreeForgeMiner, пересобранный с небольшим патчем из
 `cmfd/patches/`, чтобы работать без nvidia-smi). Нужно ~7 ГБ свободной видеопамяти. RX 6800 XT: ~10 FW/s при ~275 Вт (RTX 3070 —
 ~20 FW/s): CMFD гораздо выгоднее на тензорных ядрах NVIDIA.
+
+**Андервольт для CMFD на AMD (с 1.6.3):** уберите `rem` перед `set "AUTO_UV=1"` в `start-cmfd.bat` (запуск от администратора)
+или добавьте `--auto-uv` в командную строку CMFD. `amduv.exe` хранит **отдельный результат для CMFD**: CMFD считает неверно на
+частотах, где Pearl ещё работает (RX 6800 XT на минимальном напряжении: Pearl проходит до 2250 МГц, CMFD ошибается уже с
+2200–2250), поэтому точка Pearl для CMFD не используется. Каждая точка проверяется на настоящей модели: OpenCL-воркер снова и
+снова считает фиксированные пачки по 32 nonce, и их финальные дайджесты (BLAKE3 по всем 384 слоям) должны побитно совпасть со
+снятыми на стоке — один неверный бит где угодно их меняет. Первый запуск подбирает (~15–20 мин, один раз на карту / драйвер /
+воркер / модель), следующие применяют сохранённую точку (проверка 15 с, если прошлая была больше 6 ч назад). Сторож **возвращает
+ваши настройки частоты / напряжения / лимита мощности**, когда майнер завершается, в том числе после падения или kill.
+`UV_GOAL` в `start-cmfd.bat` (`$FFGP_AMD_UV_GOAL`) выбирает один из подобранных профилей:
+
+| Профиль | Как находится | RX 6800 XT (Вт чипа, ADLX) |
+|---|---|---|
+| — (сток) | | 10,0 FW/s при 280 Вт (36 FW/кДж) |
+| `eff` | минимальное напряжение, предел частоты вверх до ошибки проверки, шаг назад | 2100 МГц / 881 мВ: 9,1 FW/s при 193 Вт (47 FW/кДж, **+32 %**; −9 % FW/s) |
+| `bal` (по умолчанию) | больше всего FW на ватт при ≥ 90 % стоковых FW/s | на этой карте = `eff` |
+| `max` | ваша макс. частота, напряжение вниз до ошибки проверки, шаг обратно вверх | 2324 МГц / 1075 мВ: 10,1 FW/s при 248 Вт (41 FW/кДж, +14 %; скорость та же) |
+
+На пуле Aria через майнер (по 10–15 мин, среднее по строке статистики): сток 9,9 FW/s при 277 Вт, `bal` 9,1 FW/s при 191 Вт
+(+33 % FW/Вт), `max` 10,0 FW/s при 247 Вт (+14 %); отклонённых шар нет, у движка `INTEGRITY | ok`. Край немного плавает от
+прогона к прогону (2200 МГц при 881 мВ прошли дважды и один раз нет), поэтому тюнер всегда оставляет шаг запаса.
+
+Бесполезно в Windows: лимит мощности опускается только до −6 % (264 Вт, +4 % FW/Вт); частоту памяти можно только поднять
+(2000–2150 МГц: прироста нет, а на 2150 — неверные результаты), быстрые тайминги памяти ничего не меняют. `--uv-reset` забывает
+результаты Pearl и CMFD (следующий запуск с `--auto-uv` подберёт заново).
 
 ---
 
@@ -1742,7 +1794,7 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 会让 CMFD 立即出错（"illegal memory access"、"misaligned address"）或给出错误结果。因此在 CMFD 模式下，矿工会在引擎启动前
 **把正的核心偏移设为 0**，退出时恢复原值（日志：`cmfd offset: GPU0: core offset +345 -> 0 MHz ...`；异常退出后，下次启动会先恢复）。
 这需要 root/管理员权限；没有权限时日志会提示，需要您自己去掉偏移（HiveOS：CMFD 飞行表的超频配置）。
-`--uv-offset N` 则设置为 N —— **风险自负**。安全的做法：默认频率、功耗限制或锁定核心频率（`--lock-cclock`）。
+`--uv-offset N` 则设置为 N —— **风险自负**。在 **AMD Radeon** 上 `--auto-uv` 通过 amduv 为 CMFD 调校降压（第 14 节，自 1.6.3 起）；NVIDIA 见下文。安全的做法：默认频率、功耗限制或锁定核心频率（`--lock-cclock`）。
 
 **CMFD 的 `--auto-uv`（NVIDIA）。** 使用 `--auto-uv`（HiveOS：*Extra config arguments*；Windows：`start-cmfd.bat` 中
 `AUTO_UV=1`，以管理员身份运行）时，矿工会**专门为 CMFD** 寻找降压偏移，与 Pearl 的结果分开保存。模型准备好之后、引擎启动之前，
@@ -1819,3 +1871,25 @@ Windows 软件包也可以在 **AMD Radeon** 显卡上挖矿，使用自有的 O
 `cmfd\cmfd-v4-replay-ocl.exe` 和矿池客户端 `cmfd\cmfd-miner-ffgp.exe`（用 `cmfd/patches/` 中的小补丁重新编译的
 FreeForgeMiner，无需 nvidia-smi）。需要约 7 GB 空闲显存。RX 6800 XT：约 10 FW/s @ ~275 W（RTX 3070 约 20 FW/s）：CMFD 在
 NVIDIA 张量核心上效率高得多。
+
+**AMD 上 CMFD 的降压（自 1.6.3 起）：**删除 `start-cmfd.bat` 中 `set "AUTO_UV=1"` 前面的 `rem`（以管理员身份运行），或在 CMFD
+命令行中加入 `--auto-uv`。`amduv.exe` 为 CMFD 保存**单独的结果**：在 Pearl 仍正常的频率下 CMFD 就会算错（RX 6800 XT 最低电压下：
+Pearl 到 2250 MHz 都通过，CMFD 从 2200–2250 起出错），因此 CMFD 从不使用 Pearl 的点。每个点都在真实模型上检查：OpenCL 工作进程
+反复计算固定的 32 个 nonce 批次，其最终摘要（覆盖全部 384 层的 BLAKE3）必须与默认设置下取得的摘要逐位一致——任何位置错一位都会改变摘要。
+首次启动进行调校（约 15–20 分钟，每块卡 / 驱动 / 工作进程 / 模型只做一次），之后启动直接应用保存的点（上次检查超过 6 小时则做 15 秒检查）。
+守护进程在矿工退出时（包括崩溃或被强制结束）**恢复您自己的频率 / 电压 / 功耗限制设置**。`start-cmfd.bat` 中的 `UV_GOAL`
+（`$FFGP_AMD_UV_GOAL`）选择调校出的配置之一：
+
+| 配置 | 如何得到 | RX 6800 XT（芯片功耗，ADLX） |
+|---|---|---|
+| —（默认设置） | | 10.0 FW/s @ 280 W（36 FW/kJ） |
+| `eff` | 最低电压，提高频率上限直到检查失败，退回一步 | 2100 MHz / 881 mV：9.1 FW/s @ 193 W（47 FW/kJ，**+32 %**；FW/s −9 %） |
+| `bal`（默认） | 在保留 ≥ 90 % 默认 FW/s 的前提下每瓦 FW 最高 | 在这块卡上 = `eff` |
+| `max` | 您的最高频率，降低电压直到检查失败，再升回一步 | 2324 MHz / 1075 mV：10.1 FW/s @ 248 W（41 FW/kJ，+14 %；速度不变） |
+
+通过矿工在 Aria 矿池上（各 10–15 分钟，统计行平均值）：默认 9.9 FW/s @ 277 W，`bal` 9.1 FW/s @ 191 W（FW/W +33 %），
+`max` 10.0 FW/s @ 247 W（+14 %）；没有被拒份额，引擎 `INTEGRITY | ok`。边界每次运行略有浮动（881 mV 下 2200 MHz 两次通过、一次失败），
+因此调校器总是留出一步余量。
+
+在 Windows 上无用：功耗限制最多只能降到 −6 %（264 W，FW/W +4 %）；显存频率只能提高（2000–2150 MHz：没有提升，且 2150 时结果错误），
+快速显存时序没有变化。`--uv-reset` 清除 Pearl 和 CMFD 的结果（下次 `--auto-uv` 启动重新调校）。
