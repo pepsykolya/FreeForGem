@@ -690,6 +690,8 @@ OPTIONS:
     --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
     --lock-mclock N      lock the memory clock to N MHz (same syntax)
     --moffset N          memory clock offset in MHz, may be negative (same syntax; needs driver 555+)
+                         on exit a lock that was there before is put back: the HiveOS OC profile lock, or
+                         $FFGP_RESTORE_CCLOCK / $FFGP_RESTORE_MCLOCK (one value or one per device, 0 = none); else reset
     --help               show this text
     --version            show the version
 
