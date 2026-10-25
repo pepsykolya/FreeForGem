@@ -237,3 +237,10 @@ Measurements (Aria, averages of the stats line after the model load):
 
 Tuning time: RTX 3070 ~16 min (14 steps), 4x CMP 50HX in parallel ~17 min (15 steps). The references are the same on every card
 and power limit (they are pure math): `0870ca17...`, `c6d160e6...` for batch 32.
+
+Final package (this commit) on Shahtyor GPU1: the integrity watchdog with a known-bad +225 at PL 220 W stepped +225 -> +210 ->
++195 -> +180 (each `INTEGRITY | ERROR`, engine restarted after 5 s, never DISABLED); back at the owner's PL 135 W the result was
+re-tuned (power limit changed): +240 failed, the confirmation at +210 failed too, +195 confirmed + test vector; 20 min on Aria
+at +195: 14.12 FW/s, 134.3 W, 378.5 k FW/kWh, 1 accepted / 0 rejected. Owner's +175 back after every run; Rig05 owner's +150
+back on all cards, `miner start` (with the HiveOS PATH) verified. Pearl self-test PASSED (lines differ from 1.6.2 only by the
+random nonce_base of each run; Pearl code unchanged).
