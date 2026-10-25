@@ -42,7 +42,7 @@ FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual instal
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -72,8 +72,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
-cd freeforgempear-1.6.2
+tar xzf freeforgempear-1.6.3-linux-x86_64.tar.gz
+cd freeforgempear-1.6.3
 ./freeforgempear --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -94,8 +94,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgempear-1.6.2-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
+1. Download **`freeforgempear-1.6.3-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGemPear`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -146,7 +146,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -240,6 +240,14 @@ auto-uv starts their search at +200 on RTX 40 and +300 on RTX 50 (RTX 30: +120).
 (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). For manual control give one value
 per GPU in `--devices` order: `--uv-max 225,495,150` (`-` = that GPU's default). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
+**CMP cards (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX mine Pearl with the Turing kernel (memory locked at 5001, auto-uv
+limit +150). **CMP 50HX: not recommended for Pearl** — only ~2.6 TH/s per card (its int8 tensor cores are cut ~17x against the
+CMP 40HX, on every driver). **For Common Foundry (CMFD) the CMP 50HX works well:** ~13 FW/s per card at ~220 W (power limit
+225 W, core lock 1410 MHz, memory not locked; 4x CMP 50HX rig on the Aria pool), with `--auto-uv` (CMFD tuner, +225) about
+13.2 FW/s at 196–203 W (+8–11 % FW/kWh); see section 13. CMFD needs ~7 GB of free GPU memory, so 6 GB cards (CMP 30HX) cannot
+run it. **Unlocking CMP cards is not part of FreeForGemPear:** we do not provide or support drivers or tools that lift the
+limits of CMP cards; all numbers here are for the cards as they are.
+
 * HiveOS: Overclock tab → core clock (absolute), memory clock (absolute), power limit; the V/F offset via `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root), or `--lock-cclock` / `--lock-mclock`.
 * Windows: `LOCK_CCLOCK` / `LOCK_MCLOCK` / `MOFFSET` in `start.bat` (as Administrator), `start-nvidia-smi.bat` for a power
@@ -263,9 +271,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.3-linux-x86_64.tar.gz freeforgempear-1.6.3.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.3-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgempear-1.6.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -318,10 +326,20 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
    result is kept for when the limit goes up again; a saved result that *is* the old limit is tuned again when the limit rises.
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version and kernel build. Later starts apply it after a
    quick check (about 30 s). If the driver, the kernel build or your starting offset changed, the GPU is tuned again.
+   Each check runs in a child process that needs about 2.4 GB of RAM (`FFGP_UV_CHECK_MB`): on a rig with little RAM the
+   checks of several GPUs run together only while the free RAM covers them, the others wait (`waits for RAM` in the log) and
+   go next; mining starts when every GPU is tuned or applied. While mining, a re-check takes its RAM first and only then
+   pauses its GPU (since 1.6.3), so a GPU that waits for RAM keeps mining.
 5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
    If a found result fails the CPU verification, or a burst of rejected shares appears, the offset goes one step down (never
-   below your own value) and is saved. If somebody else changes the offset (for example HiveOS re-applies its OC), auto-uv
-   stands down on that GPU and does not fight.
+   below your own value) and is saved. **OC applies (since 1.6.3):** HiveOS `nvidia-oc` writes the *Core Clock* value of the
+   OC profile at every miner start and every OC change, **0 when that field is empty** — before 1.6.3 this switched the
+   undervolt off until the next restart (a 4x RTX 3070 rig ran at 604 W instead of ~440 W). Now an offset that is read back as
+   0, as the HiveOS profile value or as your own starting offset counts as an OC apply: auto-uv sets the verified offset again
+   after a quick check (mining on that GPU pauses for ~30 s; a failure steps back as in the re-check; at most 4 times an hour),
+   log `the offset was reset to +0 by an OC apply (...); re-applying the verified +285 after a quick check`. A check during
+   which an OC apply reset the offset is repeated. Any other value is your own choice: auto-uv stands down on that GPU and
+   does not fight.
 6. On exit (Ctrl+C, SIGTERM, HiveOS `miner stop`, closing the Windows console, normal end) your offset is restored on every
    GPU (before 1.6.1 a `miner stop` on HiveOS could restore only GPU0). If the miner was killed (`kill -9`, crash), the next start
    restores your offset first, from the restore file `uv-restore.json`. A reboot resets the offset in the driver anyway.
@@ -351,8 +369,8 @@ same clock), and the safety net worked too (a found result failed the CPU check 
    * your own command line: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Starting point.** The tuner starts from the offset the card has now and never goes below it. The *Core Clock* offset of
    MSI Afterburner (or a similar tool) is this same offset, so a value you set there is your starting point and is put back
-   on exit. Do not let Afterburner re-apply a profile while mining: auto-uv sees that somebody else changed the offset and
-   stands down on that GPU. With no offset set the tuner starts at +120, on RTX 40 at +200, on RTX 50 at +300 (or `--uv-min` / `UV_MIN`).
+   on exit. If Afterburner re-applies a profile while mining (the offset goes back to your value or to 0), auto-uv puts the
+   verified offset back after a quick check (since 1.6.3); any other value makes it stand down on that GPU. With no offset set the tuner starts at +120, on RTX 40 at +200, on RTX 50 at +300 (or `--uv-min` / `UV_MIN`).
 5. **Wait.** The first start tunes for about 15 minutes per GPU (all GPUs in parallel) and only then starts mining. Later
    starts apply the saved value after a ~30 s check.
 6. **Files** are in the miner folder: `uv.json` (results) and `uv-restore.json` (your original offset). The folder must be
@@ -441,7 +459,7 @@ extended. An explicit `--uv-max` is used as given, also above the card's default
 (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Example for 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop and a CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (the same as the defaults).
 
-**GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
+**GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). **Since 1.6.3 a lock that was there before is put back instead of removed:** on HiveOS the lock of the OC profile (*Lock Core Clock* / *Lock Memory Clock*, read from `/hive-config/nvidia-oc.conf`; before 1.6.3 a test run with `--lock-cclock` left a rig without its HiveOS lock); elsewhere NVML cannot read a lock back, so name it in `FFGP_RESTORE_CCLOCK` / `FFGP_RESTORE_MCLOCK` (one value or a list per GPU, 0 = none), otherwise the clock is reset to default as before. The log says what happens: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, at exit `core clock lock 1470 MHz put back`. After a crash or `kill -9` the next start does the same. On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
 
 Default location of the files: next to the binary (Windows: the miner folder), on HiveOS `/hive-config/freeforgempear`
 (survives miner updates and reboots). **Reset:** `freeforgempear --uv-reset` (or delete `uv.json`).
@@ -697,7 +715,7 @@ FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и 
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -727,8 +745,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
-cd freeforgempear-1.6.2
+tar xzf freeforgempear-1.6.3-linux-x86_64.tar.gz
+cd freeforgempear-1.6.3
 ./freeforgempear --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -749,8 +767,8 @@ cd freeforgempear-1.6.2
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgempear-1.6.2-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
+1. Скачайте **`freeforgempear-1.6.3-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGemPear`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -801,7 +819,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -893,6 +911,14 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). Для ручного управления — по значению
 на карту в порядке `--devices`: `--uv-max 225,495,150` (`-` = значение по умолчанию для этой карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
+**Карты CMP (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX майнят Pearl на Turing-ядре (память лочить на 5001, предел auto-uv +150).
+**CMP 50HX для Pearl не рекомендуется** — всего ~2,6 TH/s на карту (int8 тензорные ядра урезаны ~в 17 раз относительно CMP 40HX,
+на любом драйвере). **Для Common Foundry (CMFD) CMP 50HX подходит:** ~13 FW/s на карту при ~220 Вт (лимит мощности 225 Вт,
+лок ядра 1410 МГц, память без лока; риг 4× CMP 50HX, пул Aria), с `--auto-uv` (подбор под CMFD, +225) — около 13,2 FW/s при
+196–203 Вт (+8–11 % FW/kWh); см. раздел 13. CMFD нужно ~7 ГБ свободной видеопамяти, на картах с 6 ГБ (CMP 30HX) он не
+запустится. **Разблокировка CMP не входит в FreeForGemPear:** драйверов и программ, снимающих ограничения CMP-карт, мы не
+предоставляем и не поддерживаем; все цифры здесь — для карт как есть.
+
 * HiveOS: вкладка Overclock → частота ядра (абсолютная), частота памяти (абсолютная), лимит мощности; V/F offset — через `--auto-uv`.
 * Linux: `nvidia-smi -lgc 1560,1560`, `nvidia-smi -lmc 810,810`, `nvidia-smi -pl 120` (root) или `--lock-cclock` / `--lock-mclock`.
 * Windows: `LOCK_CCLOCK` / `LOCK_MCLOCK` / `MOFFSET` в `start.bat` (от администратора), `start-nvidia-smi.bat` — если нужен
@@ -916,9 +942,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
-* Windows: `certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgempear-1.6.3-linux-x86_64.tar.gz freeforgempear-1.6.3.tar.gz`
+* Windows: `certutil -hashfile freeforgempear-1.6.3-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgempear-1.6.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -973,10 +999,20 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 4. Результат сохраняется в `uv.json` с ключом: UUID карты, версия драйвера, сборка ядра. При следующих запусках он
    применяется после быстрой проверки (около 30 с). Если изменились драйвер, сборка ядра или ваш начальный offset,
    карта подбирается заново.
+   Каждая проверка идёт в отдельном процессе, которому нужно около 2,4 ГБ ОЗУ (`FFGP_UV_CHECK_MB`): на риге с малым объёмом
+   ОЗУ проверки нескольких карт идут одновременно, только пока хватает свободной памяти, остальные ждут (`waits for RAM` в
+   логе) и идут следом; майнинг начинается, когда все карты подобраны или применены. Во время майнинга перепроверка сначала
+   получает память и только потом ставит карту на паузу (с 1.6.3) — карта, ждущая ОЗУ, продолжает майнить.
 5. Во время майнинга: каждые 6 часов (`--uv-reval-hours`) настройка перепроверяется (майнинг на этой карте приостанавливается
    примерно на 30 с). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
-   снижается на шаг (но не ниже вашего значения) и сохраняется. Если offset изменил кто-то другой (например, HiveOS заново
-   применил разгон), auto-uv отступает на этой карте и не воюет.
+   снижается на шаг (но не ниже вашего значения) и сохраняется. **Применение разгона (с 1.6.3):** `nvidia-oc` в HiveOS при
+   каждом старте майнера и каждой смене OC записывает значение *Core Clock* из профиля разгона, **0, если поле пустое** — до
+   1.6.3 это выключало андервольт до следующего перезапуска (риг 4× RTX 3070 ел 604 Вт вместо ~440). Теперь offset, который
+   прочитан как 0, как значение профиля HiveOS или как ваш исходный offset, считается применением разгона: auto-uv ставит
+   проверенный offset обратно после быстрой проверки (майнинг на карте встаёт на ~30 с; при ошибке — шаг вниз, как при
+   перепроверке; не чаще 4 раз в час), в логе `the offset was reset to +0 by an OC apply (...); re-applying the verified +285
+   after a quick check`. Проверка, во время которой разгон сбросил offset, повторяется. Любое другое значение — ваш собственный
+   выбор: auto-uv отступает на этой карте и не воюет.
 6. При выходе (Ctrl+C, SIGTERM, `miner stop` в HiveOS, закрытие окна консоли в Windows, обычное завершение) ваш offset
    возвращается на всех GPU (до 1.6.1 `miner stop` в HiveOS мог вернуть только GPU0). Если майнер был убит (`kill -9`, сбой), то при
    следующем запуске ваш offset сначала восстанавливается из файла `uv-restore.json`. Перезагрузка в любом случае сбрасывает
@@ -1007,8 +1043,9 @@ offset (в логе `allowed -1000..1000`), подбор нашёл +240 вме�
    * своя командная строка: `freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Точка старта.** Подбор начинает с offset, который сейчас стоит на карте, и ниже него не опускается. Смещение *Core Clock*
    в MSI Afterburner (и похожих программах) — это тот же самый offset: выставленное там значение станет точкой старта и
-   вернётся при выходе. Не давайте Afterburner заново применять профиль во время майнинга: auto-uv увидит, что offset
-   поменял кто-то другой, и отступит на этой карте. Если offset не задан, подбор стартует с +120, на RTX 40 — с +200, на RTX 50 — с +300 (или с `--uv-min` / `UV_MIN`).
+   вернётся при выходе. Если Afterburner заново применит профиль во время майнинга (offset вернётся к вашему значению или к 0),
+   auto-uv после быстрой проверки поставит проверенный offset обратно (с 1.6.3); любое другое значение — и он отступит на этой
+   карте. Если offset не задан, подбор стартует с +120, на RTX 40 — с +200, на RTX 50 — с +300 (или с `--uv-min` / `UV_MIN`).
 5. **Подождите.** При первом запуске подбор идёт около 15 минут на карту (все карты параллельно), майнинг начинается после
    него. Следующие запуски применяют сохранённое значение после проверки ~30 с.
 6. **Файлы** лежат в папке майнера: `uv.json` (результаты) и `uv-restore.json` (ваш исходный offset). Папка должна быть
@@ -1101,7 +1138,7 @@ set "UV_MAX=495"
 предупреждение (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Пример для 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop и CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (то же, что по умолчанию).
 
-**Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
+**Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). **С 1.6.3 прежний лок возвращается, а не снимается:** в HiveOS — лок из профиля разгона (*Lock Core Clock* / *Lock Memory Clock*, читается из `/hive-config/nvidia-oc.conf`; до 1.6.3 тестовый запуск с `--lock-cclock` оставлял риг без лока HiveOS); вне HiveOS NVML не умеет читать лок, поэтому укажите его в `FFGP_RESTORE_CCLOCK` / `FFGP_RESTORE_MCLOCK` (одно значение или список по картам, 0 = лока не было), иначе частота, как и раньше, сбрасывается по умолчанию. В логе видно, что происходит: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, при выходе `core clock lock 1470 MHz put back`. После сбоя или `kill -9` то же делает следующий запуск. В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
 
 Файлы по умолчанию лежат рядом с программой (Windows — в папке майнера), в HiveOS — `/hive-config/freeforgempear`
 (переживает обновления майнера и перезагрузки). **Сброс:** `freeforgempear --uv-reset` (или удалить `uv.json`).
@@ -1355,7 +1392,7 @@ FreeForGemPear 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无�
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1385,8 +1422,8 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
-cd freeforgempear-1.6.2
+tar xzf freeforgempear-1.6.3-linux-x86_64.tar.gz
+cd freeforgempear-1.6.3
 ./freeforgempear --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgempear --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1407,8 +1444,8 @@ cd freeforgempear-1.6.2
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgempear-1.6.2-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2-windows-x64.zip`
+1. 从发布页面下载 **`freeforgempear-1.6.3-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGemPear`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1450,7 +1487,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgempear-1.6.2-windows-x64
+cd /d C:\Mining\freeforgempear-1.6.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgempear.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1527,6 +1564,12 @@ RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承�
 如需手动控制，按 `--devices` 顺序每卡一个值：`--uv-max 225,495,150`（`-` = 该卡的默认值）。
 Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
+**CMP 显卡（CMP 30HX / 40HX / 50HX）。** CMP 30HX/40HX 使用 Turing 内核挖 Pearl（显存锁定 5001，auto-uv 上限 +150）。**CMP 50HX
+不建议用于 Pearl**——每卡仅约 2.6 TH/s（int8 张量核心相比 CMP 40HX 被削减约 17 倍，与驱动无关）。**CMP 50HX 挖 Common Foundry
+（CMFD）表现良好：** 每卡约 13 FW/s、约 220 W（功耗限制 225 W，核心锁定 1410 MHz，显存不锁定；4× CMP 50HX 矿机，Aria 矿池），
+使用 `--auto-uv`（CMFD 调校，+225）约 13.2 FW/s、196–203 W（FW/kWh +8–11 %）；见第 13 节。CMFD 需要约 7 GB 空闲显存，6 GB 显卡
+（CMP 30HX）无法运行。**FreeForGemPear 不提供 CMP 解锁：** 我们不提供也不支持解除 CMP 显卡限制的驱动或工具；这里的所有数据均为显卡原状下的结果。
+
 * HiveOS：Overclock 选项卡 → 核心频率（绝对值）、显存频率（绝对值）、功耗限制；V/F 偏移用 `--auto-uv`。
 * Linux：`nvidia-smi -lgc 1560,1560`、`nvidia-smi -lmc 810,810`、`nvidia-smi -pl 120`（root），或 `--lock-cclock` / `--lock-mclock`。
 * Windows：在 `start.bat` 中设置 `LOCK_CCLOCK` / `LOCK_MCLOCK` / `MOFFSET`（以管理员身份），需要功耗限制时用 `start-nvidia-smi.bat`，
@@ -1550,9 +1593,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgempear-1.6.2-linux-x86_64.tar.gz freeforgempear-1.6.2.tar.gz`
-* Windows：`certutil -hashfile freeforgempear-1.6.2-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgempear-1.6.2-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgempear-1.6.3-linux-x86_64.tar.gz freeforgempear-1.6.3.tar.gz`
+* Windows：`certutil -hashfile freeforgempear-1.6.3-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgempear-1.6.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -1599,9 +1642,16 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
    （先快速检查），已保存的结果保留，待上限再次提高时使用；若已保存的结果*正好*等于旧上限，上限提高后会重新调校。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本和内核版本为键。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动、内核版本或你的起始偏移发生变化，则重新调校。
+   每次检查在单独的子进程中运行，约需 2.4 GB 内存（`FFGP_UV_CHECK_MB`）：内存较小的矿机上，只有在空闲内存足够时多块显卡的检查才会
+   同时进行，其余的等待（日志中的 `waits for RAM`）并随后进行；所有显卡调校或应用完成后才开始挖矿。挖矿期间的复查会先获得内存，
+   再暂停该显卡（自 1.6.3 起），因此等待内存的显卡会继续挖矿。
 5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
-   或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。如果别人修改了偏移（例如 HiveOS 重新应用超频），
-   auto-uv 会在该显卡上退让，不会与之对抗。
+   或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。**超频重新应用（自 1.6.3 起）：** HiveOS 的 `nvidia-oc`
+   在每次矿工启动和每次修改超频时写入超频配置中的 *Core Clock* 值，**该字段为空时写入 0**——1.6.3 之前这会让降压失效直到下次重启
+   （一台 4× RTX 3070 矿机功耗 604 W 而不是约 440 W）。现在，读回的偏移若为 0、HiveOS 配置值或你自己的起始偏移，就视为超频重新应用：
+   auto-uv 在快速检查后重新设置已验证的偏移（该显卡挖矿暂停约 30 秒；失败则与复查一样降一步；每小时最多 4 次），日志
+   `the offset was reset to +0 by an OC apply (...); re-applying the verified +285 after a quick check`。检查期间偏移被超频重置时，
+   该检查会重做。其他任何值都视为你自己的选择：auto-uv 会在该显卡上退让，不会与之对抗。
 6. 退出时（Ctrl+C、SIGTERM、HiveOS `miner stop`、关闭 Windows 控制台窗口、正常结束）在所有 GPU 上恢复你的偏移
    （1.6.1 之前 HiveOS 的 `miner stop` 可能只恢复 GPU0）。如果矿工被强制终止（`kill -9`、崩溃），下次启动会先根据恢复文件
    `uv-restore.json` 恢复你的偏移。重启本身也会重置驱动中的偏移。
@@ -1627,8 +1677,8 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
    * `start-nvidia-smi.bat`：`AUTO_UV=1`，范围在 `UV_MIN` / `UV_MAX`，并通过 `nvidia-smi` 设置功耗限制和锁频。
    * 自己的命令行：`freeforgempear.exe --pool ... --wallet ... --auto-uv --uv-max 480`。
 4. **起点。** 调校从显卡当前的偏移开始，且不会低于它。MSI Afterburner（或类似工具）中的 *Core Clock* 偏移就是同一个偏移：
-   你在那里设置的值就是起点，退出时会恢复。挖矿期间不要让 Afterburner 重新应用配置文件：auto-uv 发现偏移被别人修改后会在
-   该卡上退让。未设置偏移时，调校从 +120 开始，RTX 40 从 +200、RTX 50 从 +300 开始（或 `--uv-min` / `UV_MIN`）。
+   你在那里设置的值就是起点，退出时会恢复。如果挖矿期间 Afterburner 重新应用配置文件（偏移回到你的值或 0），auto-uv 会在快速检查后
+   恢复已验证的偏移（自 1.6.3 起）；其他值则会让它在该卡上退让。未设置偏移时，调校从 +120 开始，RTX 40 从 +200、RTX 50 从 +300 开始（或 `--uv-min` / `UV_MIN`）。
 5. **等待。** 首次启动时每块显卡调校约 15 分钟（所有显卡并行），完成后才开始挖矿。之后的启动在约 30 秒检查后应用已保存的值。
 6. **文件**在矿工目录中：`uv.json`（结果）和 `uv-restore.json`（你原来的偏移）。该目录必须可写，所以不要把矿工放在
    `C:\Program Files`。重新调校：关闭矿工，删除 `uv.json`（或在该目录运行 `freeforgempear.exe --uv-reset`），再启动。
@@ -1705,7 +1755,7 @@ set "UV_MAX=495"
 此时日志会给出警告（`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`）。2× RTX 2060 SUPER、
 3× RTX 3070 Laptop 加一块 CMP 40HX 的示例：`--auto-uv --uv-max 225,225,495,495,495,150`（与默认值相同）。
 
-**GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。
+**GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。**自 1.6.3 起，原有的锁频会被恢复而不是移除：** 在 HiveOS 上恢复超频配置中的锁频（*Lock Core Clock* / *Lock Memory Clock*，从 `/hive-config/nvidia-oc.conf` 读取）；其他系统上 NVML 无法读回锁频，可在 `FFGP_RESTORE_CCLOCK` / `FFGP_RESTORE_MCLOCK` 中指定（一个值或按显卡的列表，0 = 无锁频），否则与以前一样恢复为默认。日志：`core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`，退出时 `core clock lock 1470 MHz put back`。崩溃或 `kill -9` 后，下次启动会做同样的恢复。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。
 
 文件默认位置：程序旁边（Windows：矿工文件夹）；HiveOS 上为 `/hive-config/freeforgempear`（矿工更新和重启后仍保留）。
 **重置：** `freeforgempear --uv-reset`（或删除 `uv.json`）。

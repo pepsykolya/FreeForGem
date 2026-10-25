@@ -6,10 +6,10 @@
 
 FreeForGemPear runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.6.2):**
+**Installation URL (1.6.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 ### Flight sheet
@@ -61,8 +61,12 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   parallel). Later starts take about 30 s extra. The result is kept in `/hive-config/freeforgempear/uv.json` (survives miner
   updates and reboots); it is tuned again when the driver, the kernel build or the starting offset changes.
 - Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset the card has when the
-  miner starts and only goes up; it never touches locked clocks, power limit or memory. If HiveOS re-applies its OC and changes the offset
-  while mining, auto-uv notices, stands down on that GPU and does not fight.
+  miner starts and only goes up; it never touches locked clocks, power limit or memory. When HiveOS re-applies its OC while mining (at miner
+  start or after an OC change it writes the *Core Clock* value, **0 when the field is empty**), auto-uv puts the verified offset
+  back after a quick check (since 1.6.3; before, the undervolt was off until the next restart). A different offset set by hand
+  makes it stand down on that GPU.
+- `--lock-cclock` / `--lock-mclock` in *Extra config*: on exit the miner puts back the lock of your HiveOS OC profile (since
+  1.6.3; before, it removed the lock and the rig ran unlocked).
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
@@ -106,10 +110,10 @@ OC profile you mine with: a changed power limit re-tunes, a changed core clock l
 
 FreeForGemPear запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.6.2):**
+**Ссылка для установки (1.6.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 ### Полётный лист
@@ -162,7 +166,11 @@ https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgem
   обновления майнера и перезагрузки); при смене драйвера, сборки ядра или начального offset подбор повторяется.
 - Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с того offset, который
   стоит на карте в момент запуска майнера, и идёт только вверх; зафиксированные частоты, лимит мощности и память он не трогает.
-  Если HiveOS заново применит разгон и изменит offset во время майнинга, auto-uv это заметит, отступит на этой карте и не будет воевать.
+  Если HiveOS заново применит разгон во время майнинга (при старте майнера и после смены OC он записывает значение *Core Clock*,
+  **0, если поле пустое**), auto-uv после быстрой проверки поставит проверенный offset обратно (с 1.6.3; раньше андервольт
+  выключался до перезапуска). Другой offset, выставленный вручную, — и auto-uv отступит на этой карте.
+- `--lock-cclock` / `--lock-mclock` в *Extra config*: при выходе майнер возвращает лок из профиля разгона HiveOS (с 1.6.3;
+  раньше лок снимался, и риг работал без него).
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.

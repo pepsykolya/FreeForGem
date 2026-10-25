@@ -1,3 +1,6 @@
+> **New: [FreeForGem](https://github.com/pepsykolya/FreeForGem)** — the multi-coin successor of FreeForGemPear: Pearl, CMFD and NOID in one miner.
+> FreeForGemPear continues with bug fixes.
+
 # FreeForGemPear
 
 GPU miner for **Pearl (PRL)** — pearlhash proof-of-useful-work — with a **1% developer fee**. Since 1.6.0 it also mines
@@ -30,7 +33,7 @@ is emitted directly as SASS by our own generator.
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl.
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl, but it mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGemPear (MANUAL.md section 7, *CMP cards*).
 * **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
@@ -44,8 +47,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 ## Usage
 
 ```
-tar xzf freeforgempear-1.6.2-linux-x86_64.tar.gz
-cd freeforgempear-1.6.2
+tar xzf freeforgempear-1.6.3-linux-x86_64.tar.gz
+cd freeforgempear-1.6.3
 ./freeforgempear --self-test                      # optional: checks the GPU kernel against the CPU reference
 ./freeforgempear --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1
 ```
@@ -81,7 +84,7 @@ multi-GPU rigs with older CPUs run at full speed.
 
 ## Windows
 
-Download `freeforgempear-1.6.2-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
+Download `freeforgempear-1.6.3-windows-x64.zip`, unpack it to a folder without spaces, pick the ready start file for your pool
 (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat`; `start.bat` = LuckyPool Europe), replace the example
 `WALLET` (the developer's address) with your own and run it. Output goes to the window and to `logs\`; a miner that
 exits is restarted after 15 s. Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -94,7 +97,7 @@ FreeForGemPear runs on HiveOS as a Custom miner. Set the flight sheet *Miner* to
 this *Installation URL*:
 
 ```
-https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.2/freeforgempear-1.6.2.tar.gz
+https://github.com/pepsykolya/FreeForGemPear/releases/download/v1.6.3/freeforgempear-1.6.3.tar.gz
 ```
 
 Wallet template `%WAL%.%WORKER_NAME%`, pool URL `pearl-eu2.luckypool.io:3360`.
