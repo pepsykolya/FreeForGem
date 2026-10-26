@@ -62,9 +62,11 @@ GPU, the lowest core voltage (V/F offset) at which the card still computes corre
 own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MHz: roughly 5-10 W less per card).
 
 - It needs root, which HiveOS miners have. Without NVML or permission it logs the reason and mines normally.
-- **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps) and the rig does not mine until it is done (GPUs are tuned in
-  parallel). Later starts take about 30 s extra. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner
-  updates and reboots); it is tuned again when the driver, the kernel build or the starting offset changes.
+- **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps). Since 1.7.2 the rig mines meanwhile:
+  only the GPU being tuned pauses. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner updates and reboots), **one
+  profile per core clock lock** (since 1.7.2): switching the lock in the OC profile reuses that lock's verified result, a new lock is
+  tuned once; it is tuned again when the driver or the kernel build changes. A GPU that crashes while mining is named in the log and
+  stepped back by the miner itself (`gpu-faults.json`), see [MANUAL.md](MANUAL.md#17-profiles-per-clock-lock-mining-during-tuning-crashes-while-mining-new-in-172).
 - Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset the card has when the
   miner starts and only goes up; it never touches locked clocks, power limit or memory. When HiveOS re-applies its OC while mining (at miner
   start or after an OC change it writes the *Core Clock* value, **0 when the field is empty**), auto-uv puts the verified offset
@@ -75,7 +77,8 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
-- **Reset:** run `freeforgem --uv-reset` once in the miner folder (or delete `/hive-config/freeforgem/uv.json`).
+- **Reset:** add `--uv-reset` for one start: it forgets the profile of the current lock only (`--uv-reset-all`: every profile;
+  or delete `/hive-config/freeforgem/uv.json`). On exit the offset of the OC profile (*Core Clock*) is put back.
   Other options (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) and a manual-tuning
   procedure are in [MANUAL.md](MANUAL.md#12-undervolt---auto-uv-optional-new-in-140). Undervolting is at your own risk, like any overclocking.
 - **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card (since 1.6.2): RTX 20xx / GTX 16xx up to +225,
@@ -179,9 +182,11 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforge
 майнинге и вернёт ваши настройки при остановке. Тот же хешрейт, меньше ватт (RTX 3070 на 1560 МГц: примерно на 5-10 Вт меньше на карту).
 
 - Нужен root, а у майнеров в HiveOS он есть. Без NVML или прав майнер пишет причину в лог и майнит как обычно.
-- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов), и пока он идёт, риг не майнит (карты подбираются параллельно).
-  Последующие запуски добавляют около 30 с. Результат хранится в `/hive-config/freeforgem/uv.json` (переживает
-  обновления майнера и перезагрузки); при смене драйвера, сборки ядра или начального offset подбор повторяется.
+- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов). С 1.7.2 риг при этом майнит: на паузе
+  только подбираемая карта. Результат хранится в `/hive-config/freeforgem/uv.json` (переживает обновления майнера и перезагрузки),
+  **отдельный профиль на каждый лок ядра** (с 1.7.2): смена лока в профиле разгона берёт проверенный результат этого лока, новый лок
+  подбирается один раз; при смене драйвера или сборки ядра подбор повторяется. Карту, падающую в майнинге, майнер называет в логе и
+  сам понижает (`gpu-faults.json`), см. [MANUAL.md](MANUAL.md).
 - Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с того offset, который
   стоит на карте в момент запуска майнера, и идёт только вверх; зафиксированные частоты, лимит мощности и память он не трогает.
   Если HiveOS заново применит разгон во время майнинга (при старте майнера и после смены OC он записывает значение *Core Clock*,
@@ -192,7 +197,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforge
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.
-- **Сброс:** один раз выполните `freeforgem --uv-reset` в папке майнера (или удалите `/hive-config/freeforgem/uv.json`).
+- **Сброс:** добавьте `--uv-reset` на один запуск: он забывает только профиль текущего лока (`--uv-reset-all` — все профили; или
+  удалите `/hive-config/freeforgem/uv.json`). При выходе возвращается offset профиля разгона (*Core Clock*).
   Остальные параметры (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) и порядок ручной настройки —
   в [MANUAL.md](MANUAL.md#12-андервольт---auto-uv-необязательно-новое-в-140). Андервольт — на ваш риск, как и любой разгон.
 - **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте (с 1.6.2): RTX 20xx / GTX 16xx до +225,
