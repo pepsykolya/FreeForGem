@@ -864,7 +864,7 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         for c in &m.cards {
             let (m, c) = (m.clone(), c.clone());
             s.spawn(move || match m.run_card(&c) {
-                Ok(Plan::Apply { e, want }) => m.launch(&c, Plan::Apply { e, want }),
+                Ok(Plan::Apply { e, want }) if verified(&e) => m.launch(&c, Plan::Apply { e, want }),
                 Ok(Plan::None) => {}
                 Ok(p) => *c.plan.lock().unwrap() = Some(p),
                 Err(e) => {
@@ -1315,7 +1315,7 @@ impl Manager {
                     signed(c.orig),
                     signed(e.offset)
                 ));
-                return if e.migrated { Plan::Check { want: e.offset, e } } else { Plan::Apply { want: e.offset, e } };
+                return if verified(&e) { Plan::Apply { want: e.offset, e } } else { Plan::Check { want: e.offset, e } };
             }
             Choice::Paused => {
                 lg(format!("{} auto-uv is paused for this GPU at these clocks after a failure ({} h left); keeping {}", c.label(), (e.disabled_until - now()) / 3600 + 1, signed(c.orig)));
@@ -1354,6 +1354,7 @@ impl Manager {
     fn launch(self: &Arc<Self>, c: &Arc<Card>, p: Plan) {
         match p {
             Plan::None => {}
+            Plan::Apply { e, want } if !verified(&e) => self.launch(c, Plan::Check { e, want }),
             Plan::Apply { e, want } => {
                 if let Err(err) = self.apply_now(c, &e, want) {
                     lg(format!("{} error: {err:#}; restoring {}", c.label(), signed(c.orig)));
@@ -1507,8 +1508,7 @@ impl Manager {
             e2.edge = want;
             if want - step < floor || attempt == 4 {
                 lg(format!("{} offset {} (profile {}) FAILED the quick check ({}); nothing passes down to {}: back to {}, auto-uv paused at these clocks for 24 h", c.label(), signed(want), profile_key(e), r.reason, signed(floor), signed(c.orig)));
-                e2.offset = c.orig.min(e2.offset);
-                e2.disabled_until = now() + DISABLE_SECS;
+                failed_profile(&mut e2, want, c.orig, now());
                 self.save_entry(c, &e2);
                 return Ok(());
             }
@@ -2277,6 +2277,7 @@ impl Manager {
             Ok(()) => {
                 lg(format!("{} {why}: offset {} -> {}, saved", c.label(), signed(cur), signed(new)));
                 e.offset = new;
+                e.verified_at = 0; // not checked yet: the next start checks it before use (a re-check here saves it as verified)
                 if new <= c.orig {
                     e.disabled_until = now() + DISABLE_SECS;
                     lg(format!("{} back at the starting offset {}: auto-uv paused for this GPU for 24 h", c.label(), signed(c.orig)));
@@ -2522,15 +2523,31 @@ enum Choice {
 }
 
 fn start_choice(e: &Entry, orig: i32, t: u64) -> Choice {
-    if e.offset < orig {
-        Choice::Lower
-    } else if e.disabled_until > t {
+    // a failure paused this profile: nothing of it is applied, the owner's offset stays (Rig01 1.7.2 soak: a migrated +270 that
+    // FAILED its quick check was kept as the profile's offset and applied as "verified 20752 d ago" after the next restart)
+    if e.disabled_until > t {
         Choice::Paused
+    } else if e.offset < orig {
+        Choice::Lower
     } else if e.offset == orig {
         Choice::Keep
     } else {
         Choice::Higher
     }
+}
+
+/// A profile whose offset (or every step below it down to the floor) FAILED its check: the failed value never stays as its offset.
+/// The card goes back to the owner's offset, the failed one is the edge, auto-uv pauses at these clocks, nothing counts as verified.
+fn failed_profile(e: &mut Entry, failed: i32, orig: i32, t: u64) {
+    e.edge = failed;
+    e.offset = orig;
+    e.verified_at = 0;
+    e.disabled_until = t + DISABLE_SECS;
+}
+
+/// May this profile's offset be set without a check now?  Only one that passed a check (verified_at set), not from before 1.7.2.
+fn verified(e: &Entry) -> bool {
+    e.verified_at > 0 && !e.migrated
 }
 
 /// 0 = never (only after a step back)
@@ -3041,11 +3058,40 @@ mod tests {
         // with the HiveOS profile value as the owner's offset (+275): +270 lower, +315 an undervolt above it
         assert_eq!(start_choice(&e(270, 0), 275, 1000), Choice::Lower);
         assert_eq!(start_choice(&e(315, 0), 275, 1000), Choice::Higher);
-        // a pause never keeps an offset above a verified lower one
-        assert_eq!(start_choice(&e(270, 5000), 325, 1000), Choice::Lower);
+        // a paused profile: nothing of it is applied (its offset may be the one that failed)
+        assert_eq!(start_choice(&e(270, 5000), 325, 1000), Choice::Paused);
         assert_eq!(start_choice(&e(315, 5000), 275, 1000), Choice::Paused);
         // the result is the start itself (it passed the baseline check)
         assert_eq!(start_choice(&e(275, 0), 275, 1000), Choice::Keep);
+    }
+
+    #[test]
+    fn failed_migrated_profile_stays_paused() {
+        // Rig01 1.7.2 soak: migrated ~1815:+270 (owner's offset +275) FAILED its quick check, the self-restart applied +270 as
+        // "verified 20752.7 d ago".  After the failure the profile holds the owner's offset, paused, not verified.
+        let mut e = Entry { driver: "d".into(), kernel: "k".into(), clk: 1815, offset: 270, migrated: true, ..Default::default() };
+        let mut db = json!({"version": 1, "gpus": {"GPU-6": e.to_json()}});
+        migrate(&mut db);
+        e = Entry::from_json(&db["profiles"]["GPU-6"]["~1815"]).unwrap();
+        assert!(!verified(&e), "a migrated result is never applied without a check");
+        // the check fails (as in check_saved): re-keyed to the lock of the run, failure recorded
+        e.migrated = false;
+        e.lock = 1805;
+        e.mlock = 810;
+        failed_profile(&mut e, 270, 275, 1000);
+        assert_eq!((e.offset, e.edge, e.verified_at), (275, 270, 0));
+        assert!(e.disabled_until > 1000);
+        let back = Entry::from_json(&e.to_json()).unwrap();
+        assert_eq!(profile_key(&back), "1805/mem810");
+        // after the restart: paused at the owner's offset, never the failed +270, never "verified" (no epoch-0 age)
+        assert_eq!(start_choice(&back, 275, 2000), Choice::Paused);
+        assert!(!verified(&back));
+        // even if the pause has run out, the profile is the owner's offset itself, not the failed value
+        assert_eq!(start_choice(&back, 275, back.disabled_until + 1), Choice::Keep);
+        // a lower offset that was never checked is checked, not applied
+        let lower = Entry { offset: 255, verified_at: 0, ..back.clone() };
+        assert_eq!(start_choice(&Entry { disabled_until: 0, ..lower.clone() }, 275, 2000), Choice::Lower);
+        assert!(!verified(&lower));
     }
 
     #[test]

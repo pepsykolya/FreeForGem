@@ -21,6 +21,8 @@
 #   s2c              a changed starting offset with a verified profile: quick check + apply, no tuning
 #   s4b              a verified offset that fails its quick check: steps down from it, no tuning from scratch
 #   s6a s6b          (6) uv.json migration from 1.6.x / 1.7.1 files (entries of another lock)
+#   s6c              a migrated result below the owner's offset FAILS its quick check -> after a restart: paused at the owner's
+#                    offset, never applied as "verified" (Rig01 1.7.2 soak)
 #   p5 p6 p7         clock probe without --lock-cclock (profile found / tuning while mining), HiveOS owner offset
 #   n1 n2 n3 n4      NOID: fault, profiles 1400 / 1900 / 1400            c1 c2   CMFD: migration + clock probe, --lock-cclock 1500
 set -u
@@ -100,7 +102,7 @@ print('   old sections left:', [k for k in ('gpus','cmfd') if d.get(k)], '; tryi
 " 2>/dev/null; }
 faults() { echo "   gpu-faults.json: $(sudo cat $1/gpu-faults.json 2>/dev/null | tr -d '\n ' | cut -c1-300)"; }
 P7=$T/p   # the profiles of s7 (1400 and 1900)
-steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s2c s3a s3b s3c s4 s4b s5a s5b s5c s5d s5e s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
+steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s2c s3a s3b s3c s4 s4b s5a s5b s5c s5d s5e s6a s6b s6c p5 p6 p7 n1 n2 n3 n4 c1 c2"
 [ "$BIN" = freeforgem ] || steps=$(echo " $steps " | sed "s/ n[1-4]//g")
 for step in $steps; do
   echo "=== $step $(date +%T)"
@@ -233,6 +235,20 @@ json.dump(d,open('$T/s6/uv.json','w'))"
       sudo rm -rf $T/s6b; sudo mkdir -p $T/s6b; sudo cp ${FFG_OLD171:-$HOME/ffg171-test/uv/uv.json} $T/s6b/uv.json
       run s6b 300 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1500 --lock-mclock 810 --uv-dir $T/s6b --auto-uv $SHORT --minutes 1.2
       show s6b "auto-uv"; ent $T/s6b/uv.json ;;
+    s6c) # the 1.7.1 result (lock 1500, +150 below the owner's +175) with broken reference digests: its quick check fails.
+         # expect run 1: "FAILED the quick check ... back to +175, auto-uv paused"; run 2: "paused ... keeping +175", no "applied
+         # without a start check", the card mines at +175
+      [ -f "${FFG_OLD171:-$HOME/ffg171-test/uv/uv.json}" ] || { echo "   (no 1.7.1 uv.json: FFG_OLD171)"; continue; }
+      sudo rm -rf $T/s6c; sudo mkdir -p $T/s6c
+      sudo python3 -c "
+import json;d=json.load(open('${FFG_OLD171:-$HOME/ffg171-test/uv/uv.json}'))
+for e in d['gpus'].values(): e['refs']=['00'*32]*4; e['disabled_until']=0
+d.pop('trying',None); json.dump(d,open('$T/s6c/uv.json','w'),indent=1)"
+      run s6c1 300 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1500 --lock-mclock 810 --uv-dir $T/s6c --auto-uv $SHORT --minutes 1.5
+      show s6c1 "auto-uv: GPU"; ent $T/s6c/uv.json
+      bg s6c2 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1500 --lock-mclock 810 --uv-dir $T/s6c --auto-uv $SHORT --minutes 1
+      waitlog s6c2 "^\[ *[0-9]+s\]" 120; sleep 15; echo "   offset while mining after the restart: $(off) (owner $ORIG)"; stopbg
+      show s6c2 "auto-uv: GPU"; echo "   'applied without a start check' lines: $(grep -ac 'applied without a start check' $L/s6c2.log)" ;;
     p5) # lock 1400 set outside the miner: the clock under mining load picks the 1400 profile
       lock 1400; run p5 300 NVIDIA_OC_CONF=$HC -- $PEARL --uv-dir $P7 --auto-uv $SHORT --minutes 1
       show p5 "auto-uv: GPU"; stats p5 3 ;;
