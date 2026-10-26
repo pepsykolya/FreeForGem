@@ -200,6 +200,7 @@ impl Db {
                 m.remove(SECTION);
             }
             if n > 0 {
+                let _ = uv::write_atomic(&uv::results_path(dir), &serde_json::to_string_pretty(&v).unwrap());
                 lg(format!("{n} CMFD result(s) from before 1.7.2 kept as profiles of their lock / clock (one without a lock is used only after the quick check)"));
             }
         }

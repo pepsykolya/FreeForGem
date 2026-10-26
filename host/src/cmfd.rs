@@ -985,7 +985,10 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     // shutdown: the engines stop first (they must not compute with a Pearl undervolt back), then the owner's offsets and
     // clocks go back on every card, and only then the log (the log pipe may be gone already under HiveOS `miner stop`;
     // console writes never fail the miner, see the macros in main.rs)
+    stop.store(true, Ordering::SeqCst); // a background start check / tuning stops too (1.7.2: it runs while the engines mine)
     stop_children(&mut slots);
+    // the check workers of a background tuning (registered in CHILDREN): no orphan keeps 7 GB of a GPU after the miner exits
+    kill_all();
     crate::cmfd_offset::restore_all();
     clocks::restore_all();
     println!("cmfd: engine processes stopped");

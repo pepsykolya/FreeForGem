@@ -256,7 +256,7 @@ json.dump(d,open('$T/s6/uv.json','w'))"
       bg n3 NVIDIA_OC_CONF=$HC -- $NOID --lock-cclock 1900 --lock-mclock 810 --uv-dir $T/nu --auto-uv $NSHORT --minutes 3
       waitlog n3 "tuning the NOID" 120; sleep 3; stopbg; show n3 "auto-uv \(noid\)"; ent $T/nu/uv.json ;;
     n4) # NOID back at 1400: its profile at once
-      run n4 300 NVIDIA_OC_CONF=$HC -- $NOID --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/nu --auto-uv --minutes 0.6
+      run n4 300 NVIDIA_OC_CONF=$HC -- $NOID --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/nu --auto-uv $NSHORT --minutes 0.6
       show n4 "auto-uv \(noid\)|noid offset" ;;
     c1) # CMFD: a 1.7.1 uv.json (no lock) migrates; the clock at the base picks it; quick check; mining
       [ -f "$CSTATE" ] && [ -d "$CMODEL" ] || { echo "   (no CMFD model / old state: FFG_CMFD_MODEL, FFG_CMFD_OLD_STATE)"; continue; }

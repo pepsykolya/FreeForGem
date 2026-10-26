@@ -186,6 +186,7 @@ impl Db {
         }
         if moved > 0 {
             lg(format!("{moved} NOID result(s) from before 1.7.2 kept as the profiles of their --lock-cclock"));
+            let _ = uv::write_atomic(&uv::results_path(dir), &serde_json::to_string_pretty(&v).unwrap());
         }
         Db { dir: dir.to_path_buf(), v: Mutex::new(v), keys: Mutex::new(Default::default()) }
     }
@@ -715,8 +716,11 @@ impl Tuner<'_> {
                 c.max
             }
             Saved::Retune => {
-                lg(format!("{} the limit was raised to {} ({}): tuning again above {}", c.label(), signed(c.max), c.max_src, signed(e.offset)));
-                return self.tune(c, None);
+                // the verified offset stays the floor: the search goes on above it, not from --uv-min
+                lg(format!("{} the limit was raised to {} ({}): tuning on above the verified {}", c.label(), signed(c.max), c.max_src, signed(e.offset)));
+                let mut from = c.clone();
+                from.start = e.offset;
+                return self.tune(&from, None);
             }
         };
         let age = now().saturating_sub(e.verified_at);
