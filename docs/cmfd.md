@@ -276,3 +276,33 @@ Checks (owner PC, test package = 1.6.2 + new freeforgempear.exe / amduv.exe / cm
   `--algo cmfd --auto-uv` prints the NVIDIA warning as before. cargo test --release 14/14.
 * Prebuilt: amduv.exe and cmfd/cmfd-v4-replay-ocl.exe replaced (the binaries tested above); pearlgpu.dll/.lib,
   pearlgpu_amd.dll, cmfd-miner-ffgp.exe, libpearlgpu.so byte-identical to rel-1.6.2.
+
+## 1.6.3 (bug-fix release): branches cmfd-nv-uv + amd-cmfd-uv, lock restore, auto-uv after an OC apply
+
+* Merge of `amd-cmfd-uv` (fcc9f86) into `cmfd-nv-uv`: six text conflicts (both branches edited the same `--auto-uv` spots);
+  resolved keeping both: NVIDIA -> `cmfd_uv`, AMD -> `amd_uv::start(.., Load::Cmfd)`; start-cmfd.bat has `UV_MAX/UV_MIN`
+  (NVIDIA) and `UV_GOAL` (AMD). The AMD part was not re-run on AMD hardware for 1.6.3; its binaries are the ones tested above.
+* `--lock-cclock/--lock-mclock`: the lock from before is put back (new `hiveoc.rs`: HiveOS OC profile, nvidia-oc rules of hive
+  0.6-231; or `$FFGP_RESTORE_CCLOCK/MCLOCK`); recorded in `clocks-restore.json` for the crash path. NVML has no getter for a
+  lock (checked on driver 580.178: nvidia-smi -q, GetPerformanceModes, GetCurrentClockFreqs, MinMaxClockOfPState).
+* `--auto-uv` (Pearl): a read-back of 0 / the HiveOS profile value / the owner's starting offset = OC apply -> set the verified
+  offset again + quick check (max 4/h); a check whose offset was reset by an OC apply is repeated; other values: stand down.
+* Fixes found in the tests (also in 1.6.2): a stop during a check (HiveOS `miner stop` = Ctrl-C then SIGHUP) left the crash
+  marker (`trying` / `cmfd_trying`) -> the next start treated the offset as a crash point; a stop during the start quick check
+  paused auto-uv for 24 h. A re-check while mining takes its RAM slot before pausing the GPU.
+* Not ported to CMFD: re-apply after an OC apply while mining (the CMFD tuner sets its offset before the engine starts; an OC
+  apply mid-run leaves the card at the HiveOS value, which is safe).
+
+Checks (Shahtyor GPU1 RTX 3070 through gpu1-test.sh; fake HiveOS profile via `NVIDIA_OC_CONF`):
+
+| test | result |
+|---|---|
+| prior lock 1200/810, run `--lock-cclock 1500 --lock-mclock 5001`, Ctrl-C / SIGTERM | 1500/5001 while running; after exit under load 1200/810 (both) |
+| same, SIGKILL, then a plain start | marker `core_prev 1200, mem_prev 810`; the next start put 1200/810 back |
+| no profile, `FFGP_RESTORE_CCLOCK=1250`, SIGTERM | 1260/810 after exit |
+| no profile, no env | reset (1620/6801 under load, as before 1.6.3) |
+| auto-uv, mining at +210: offset -> 0, -> 30 (profile), -> 45 (by hand) | re-applied (+210 failed the quick check -> +195 saved, ok), re-applied +195, stood down |
+| OC apply during the start quick check | check repeated at +195, passed |
+| 2x SIGINT during a check (Pearl, CMFD) | no crash marker left, no 24 h pause (after 703f4d6), no CMFD worker left |
+| Pearl 5 min, LuckyPool, lock 1500/810, +195 | 67.7 TH/s, 99 W, 0.685 TH/W, 13/13 accepted (stock offset: 67.67 TH/s, 123 W, 16/16) |
+| CMFD 5 min, Aria, `--auto-uv` (+195 saved) | 14.2-14.4 FW/s, 135 W, ~380 k FW/kWh, 1/0 shares; owner's +175 back |
