@@ -787,6 +787,7 @@ OPTIONS:
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
+    --no-color           no colours in the log (also NO_COLOR=1 or FFG_COLOR=0; FFG_COLOR=1 forces them, e.g. through tee)
     --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load, and
                          the coin / NOID mode); the profiles of other locks stay (since 1.7.2)
     --uv-reset-all       forget every saved undervolt result (all locks, coins and modes)
