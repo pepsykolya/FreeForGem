@@ -1754,10 +1754,10 @@ impl Manager {
             return Ok(());
         }
         if !base.ok {
-            // the start itself fails at these clocks: never keep it (or the owner's offset) unchecked; down in 60 MHz steps to the
+            // the start itself fails at these clocks: never keep it (or the owner's offset) unchecked; down in 30 MHz steps from it (not a jump to the owner's offset) to the
             // first one that passes, which becomes the profile of these clocks (below the owner's offset: used instead of it)
             lg(format!("{} the start offset {} FAILS the check at these clocks ({}): looking for a lower one that passes (30 MHz steps)", c.label(), signed(start), base.reason));
-            let mut v = if start > c.orig { c.orig } else { start - 30 };
+            let mut v = start - 30;
             loop {
                 if v < c.lo || self.stopped() {
                     break;
