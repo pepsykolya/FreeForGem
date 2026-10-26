@@ -902,7 +902,7 @@ fn map_card(nv: &Nvml, dev: i32, pos: usize, o: &Opts) -> Result<Card> {
     let (cc, pci_id) = (nv.compute_capability(h), nv.pci_device_id(h));
     let m = crate::mining::device_m(gpu::sm_count(dev));
     // on HiveOS the owner's offset is the OC profile's Core Clock value: what the card has now may be left by another program
-    // (Rig01: +325 from an interrupted ffgs restore instead of the profile's +275)
+    // (Rig01: +325 from another miner whose exit restore was cut short instead of the profile's +275)
     let orig = hive_offset(nv, h).filter(|v| (lo..=hi).contains(v)).unwrap_or(cur);
     Ok(new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, orig, lo, hi, cc, pci_id, m }, pos, o))
 }
@@ -1305,7 +1305,7 @@ impl Manager {
         match start_choice(&e, c.orig, now()) {
             Choice::Lower => {
                 // the result verified at these clocks is below the owner's / starting offset: the tuning proved the edge below it
-                // (Rig01, 1.7.1: results +270..+315 at 1805 MHz, the start offset +325 an ffgs leftover; "keeping" the +325 without a
+                // (Rig01, 1.7.1: results +270..+315 at 1805 MHz, the start offset +325 a leftover of another miner; "keeping" the +325 without a
                 // check crashed GPU3 with Xid 13/43 and stopped all 8 GPUs).  The verified offset is used, never the unchecked start.
                 lg(format!(
                     "{} the offset {} verified at these clocks (profile {key}{}) is below your offset {}: mining at {} (yours is put back on exit)",
@@ -3017,7 +3017,7 @@ mod tests {
 
     #[test]
     fn migration_of_old_results() {
-        // 1.7.1 uv.json: tuned under the ffgs leftover lock (1410 MHz), and one entry without a clock
+        // 1.7.1 uv.json: tuned under the leftover lock of another miner (1410 MHz), and one entry without a clock
         let old = Entry { driver: "d".into(), kernel: "k".into(), clk: 1410, offset: 495, verified_at: 5, ..Default::default() };
         let noclk = Entry { driver: "d".into(), kernel: "k".into(), offset: 300, ..Default::default() };
         let mut db = json!({"version": 1, "gpus": {"GPU-a": old.to_json(), "GPU-b": noclk.to_json()}});
@@ -3034,7 +3034,7 @@ mod tests {
     #[test]
     fn verified_offset_below_the_start_is_used() {
         let e = |offset, disabled_until| Entry { driver: "d".into(), kernel: "k".into(), offset, disabled_until, edge: 285, ..Default::default() };
-        // Rig01 1.7.1 regression: results +270..+315 at 1805 MHz, start offset +325 (ffgs leftover) -> never "keeping it"
+        // Rig01 1.7.1 regression: results +270..+315 at 1805 MHz, start offset +325 (leftover of another miner) -> never "keeping it"
         for o in [270, 285, 315] {
             assert_eq!(start_choice(&e(o, 0), 325, 1000), Choice::Lower, "+{o} vs +325");
         }

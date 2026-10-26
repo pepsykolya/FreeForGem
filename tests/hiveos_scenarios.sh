@@ -11,7 +11,7 @@
 #
 # Steps (scenario numbers of the 1.7.2 release gate):
 #   s7a s7b s7c s7d  (7) lock switching: profile per lock, reuse, --uv-reset only the current lock   [run first: later steps use its profiles]
-#   s1               (1) a foreign miner left lock 1400 and an offset above the edge (ffgs), then FreeForGem starts
+#   s1               (1) a foreign miner left lock 1400 and an offset above the edge, then FreeForGem starts
 #   s2a s2b          (2) HiveOS OC apply at start / during mining (offset and lock writes)
 #   s3a s3b          (3) SIGINT then SIGKILL during the start check / during the exit restore
 #   s3c              Ctrl+C to the whole group with a plain `tee` (dies first): the restore must still complete (no SIGPIPE death)

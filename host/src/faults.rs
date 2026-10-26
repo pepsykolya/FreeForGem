@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn lower_steps() {
-        // the incident: owner's +325 is an ffgs leftover, HiveOS profile +275
+        // the incident: owner's +325 is a leftover of another miner, HiveOS profile +275
         assert_eq!(lower_step(325, Some(275)), Some(275));
         assert_eq!(lower_step(275, Some(275)), Some(215));
         assert_eq!(lower_step(40, None), Some(0));

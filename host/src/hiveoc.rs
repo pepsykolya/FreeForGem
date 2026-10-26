@@ -117,7 +117,7 @@ impl HiveOc {
 }
 
 /// The offset to put back on exit (1.7.2): on HiveOS the OC profile's Core Clock value for this GPU (what the card has now may be
-/// left by another program: Rig01, +325 from an interrupted ffgs restore instead of the profile's +275); elsewhere `cur`.
+/// left by another program: Rig01, +325 from another miner whose exit restore was cut short instead of the profile's +275); elsewhere `cur`.
 pub fn owner_offset(nv: &crate::nvml::Nvml, d: crate::nvml::Dev, cur: i32, lo: i32, hi: i32) -> i32 {
     load().and_then(|h| nv.index(d).map(|i| h.core_offset(i as usize))).filter(|v| (lo..=hi).contains(v)).unwrap_or(cur)
 }

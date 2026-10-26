@@ -28,7 +28,7 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   owner's offset even when the tuning had proven the edge below it (Rig01: +270..+315 verified at 1805 MHz, +325 kept → Xid 13).
   Now the offset verified at these clocks is used; a tuning whose start fails looks for a lower offset that passes.
 * **HiveOS owner offset.** The offset put back on exit is the OC profile's *Core Clock* value (`/hive-config/nvidia-oc.conf`), not
-  what the card had at start (Rig01: +325 left by an interrupted SASEUL-miner restore instead of +275); such a leftover is
+  what the card had at start (+325 left by another miner whose exit restore was cut short, instead of +275); such a leftover is
   replaced by the profile value at start. Pearl, NOID, CMFD, and the crash recovery.
 * **Which GPU failed.** A CUDA fault on one GPU ends CUDA for the whole process (all workers report "an illegal memory access").
   The miner now names the failing GPU from the driver's Xid events, remembers it in `gpu-faults.json`, restarts itself (Linux /
@@ -82,7 +82,7 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   оставлен +325 → Xid 13). Теперь используется offset, проверенный на этих частотах; если не проходит сам стартовый offset
   тюнинга, ищется меньший.
 * **Offset владельца на HiveOS.** На выходе возвращается *Core Clock* профиля разгона (`/hive-config/nvidia-oc.conf`), а не то, что
-  было на карте при старте (Rig01: +325 — остаток прерванного восстановления SASEUL-майнера вместо +275); такой остаток при старте
+  было на карте при старте (+325 — остаток другого майнера, чьё восстановление на выходе прервалось, вместо +275); такой остаток при старте
   заменяется значением профиля. Pearl, NOID, CMFD и восстановление после аварийного выхода.
 * **Какая карта упала.** Сбой CUDA на одной карте завершает CUDA всего процесса (все воркеры: «an illegal memory access»). Майнер
   определяет упавшую карту по событиям Xid драйвера, запоминает в `gpu-faults.json`, перезапускает себя (Linux / HiveOS — в том же

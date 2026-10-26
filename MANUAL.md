@@ -860,7 +860,7 @@ other GPUs mine meanwhile. The RAM
 queue of the checks ("waits for RAM") lets the waiting GPU mine meanwhile.
 
 **Your offset.** On HiveOS the offset put back on exit is the OC profile's *Core Clock* value of that GPU (`/hive-config/nvidia-oc.conf`),
-not whatever the card had at start (Rig01: +325 left by an interrupted ffgs instead of the profile's +275); at start such a leftover
+not whatever the card had at start (seen on a rig: +325 left by another miner whose exit restore was cut short, instead of the profile's +275); at start such a leftover
 is replaced by the profile value. A result verified below your offset at these clocks is **used instead of it** (your offset is
 past the edge there); it is never kept unchecked. A tuning whose start offset itself fails looks for a lower one that passes
 (60 MHz steps) and keeps it as the profile. `WARNING`: a single `--lock-cclock` value for all GPUs replaces per-GPU HiveOS locks.
@@ -1739,7 +1739,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 проверок по RAM («waits for RAM») не останавливает майнинг ждущей карты.
 
 **Ваш offset.** На HiveOS при выходе возвращается значение *Core Clock* профиля разгона этой карты (`/hive-config/nvidia-oc.conf`),
-а не то, что было на карте при старте (Rig01: +325 — остаток прерванного ffgs вместо +275 профиля); такой остаток при старте
+а не то, что было на карте при старте (было на риге: +325 — остаток другого майнера, чьё восстановление на выходе прервалось, вместо +275 профиля); такой остаток при старте
 заменяется значением профиля. Результат, проверенный на этих частотах ниже вашего offset, **используется вместо него** (ваш offset
 там за краем); вслепую он никогда не оставляется. Если не проходит сам стартовый offset тюнинга, ищется меньший (шагами 60 МГц),
 и он сохраняется как профиль. `WARNING`: одно значение `--lock-cclock` на все карты заменяет поканальные локи HiveOS.
