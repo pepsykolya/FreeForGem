@@ -32,13 +32,23 @@ set "MOFFSET="
 rem Force a core offset for CMFD instead of 0, MHz (AT YOUR OWN RISK: wrong results / no shares are likely). Example: 100
 rem (one value for all GPUs, or a comma list in DEVICES order; - = the default 0 for that GPU)
 set "UV_OFFSET="
+rem Undervolt tuned for CMFD itself (run as Administrator). The first start tunes (NVIDIA: ~10-20 min per card, every step
+rem checked bit-for-bit on the real model + the official test vector; AMD Radeon: amduv, ~20 min), later starts apply the
+rem saved result; your own settings come back when the miner exits. Separate from the Pearl result. MANUAL.md, section 13.
+rem set "AUTO_UV=1"
+rem NVIDIA: limits of the search, MHz (empty = per-card defaults: 495, Turing/CMP 50HX 225, CMP 30HX/40HX 150); one value or a list
+set "UV_MAX="
+set "UV_MIN="
+rem AMD Radeon: profile bal (default; most FW per watt keeping >= 90 %% of the stock FW/s), eff (most FW per watt), max (stock
+rem speed, fewer watts). RX 6800 XT: eff = bal 9.1 FW/s at 193 W, max 10.1 FW/s at 248 W, stock 10.0 FW/s at 280 W (chip watts)
+set "UV_GOAL="
 rem Any other miner options, e.g. --per-gpu-workers (one pool worker per GPU) or --cmfd-batch 32:
 set "EXTRA="
 rem ================================================================
 
 set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -CmfdMode "%MODE%" -Extra "%EXTRA%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -UvOffset "%UV_OFFSET%"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -CmfdMode "%MODE%" -Extra "%EXTRA%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -UvOffset "%UV_OFFSET%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -UvMin "%UV_MIN%" -UvGoal "%UV_GOAL%"
 echo.
 echo FreeForGem stopped (exit code %ERRORLEVEL%).
 pause

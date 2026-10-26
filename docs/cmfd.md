@@ -198,3 +198,111 @@ own state dir, offsets set to 0 for the test, owner's +200/+300 and the units ba
 * Linux build in ffgp-build (glibc 2.30 max); Windows build; libpearlgpu.so, pearlgpu.dll, pearlgpu_amd.dll, amduv.exe, cmfd/*
   byte-identical to 1.6.1. Windows chain start.bat -> start.ps1 -> exe passes `UV_MAX=225,-,150` intact.
 * Not tested on hardware: Turing / CMP defaults (no such card; unit tests only), RTX 50 start +300.
+
+## Branch `cmfd-nv-uv` (from 1.6.2): `--auto-uv` for CMFD on NVIDIA
+
+Engine unchanged (FreeForgeMiner 1.2.4 release / the 1.6.2 Ubuntu 20.04 rebuild, same SHA-256): its CUDA worker's `--server`
+protocol already has what the check needs (`RUNBATCHDIGEST n coef prefix chal` -> `<prefix>-final-digest.bin`, `RUNBATCH 32` for
+the official test vector), so the host drives it directly; no engine patch, nothing added to `ENGINE.lock` / `patches/`.
+
+* `cmfd_uv.rs`: per card one `cmfd-v4-replay --server MODEL` (model loaded once per tuning; loads one card at a time), two fixed
+  batches (splitmix64 bytes, mining batch size: 64 from 11 GB, else 32, or `--cmfd-batch`), digests folded with BLAKE3; every run
+  must equal the first run of its batch and the reference taken at the base offset (0, or the owner's offset when it is 0 or
+  below). Base 60 s + official test vector; steps `--uv-step` from `--uv-min` (default base + one step) to `--uv-max` / the 1.6.2
+  per-card default (`card_defaults`), 30 s + 10 s measurement each; first failure = edge, one step back (`--uv-keep-last`),
+  confirmation 120 s + test vector (one more step down on failure). NVML watts / clock / temperature sampled in the measurement.
+  Xid / no answer in 240 s = driver fault (crash marker `cmfd_trying` kept, the next start tunes below it).
+* `uv.json`: section `cmfd` (Pearl's `gpus` untouched), key = UUID; identity = driver + "engine | worker sha256[..12] | mode |
+  batch | inputs version [| lock-cclock N]"; enforced power limit stored, a change > 3 % re-tunes (the edge moves with the
+  operating point: RTX 3070 PL 135 W edge +225, PL 220 W edge +165). Later starts: verified within `--uv-reval-hours` -> applied,
+  else 20 s + 8 s quick check + test vector; failure -> base, paused 24 h.
+* Offsets only through `cmfd_offset` (`apply_managed` records every card before the first change; `set` / `current` / `orig`),
+  so the existing restore (exit, second Ctrl-C, console close, crash marker at the next start) puts the owner's offset back.
+* While mining: `INTEGRITY | ERROR` / CUDA fault of a tuned card -> one step back (saved; at the base: paused 24 h), the engine
+  is restarted. Without a usable check (no model/worker, failure at the base) the card mines at the base with a WARNING.
+* Fix found in the tests (also in 1.6.2): an engine stopped while its worker still loads the model left the worker running
+  (4 orphaned `cmfd-v4-replay` on Rig05, 7 GB of GPU memory each). `stop_children` now collects the workers of every engine
+  (Linux /proc) and ends those left after the stop.
+* Windows: `start-cmfd.bat` `AUTO_UV`, `UV_MAX`, `UV_MIN`; `start.ps1` passes AUTO_UV for CMFD. AMD: unchanged (warning).
+
+Measurements (Aria, averages of the stats line after the model load):
+
+| card / setting | stock (0) | result | tuned | FW/kWh |
+|---|---|---|---|---|
+| RTX 3070, PL 135 W (Shahtyor GPU1) | 13.84 FW/s, 134.8 W, 369.6 k | edge +225 (digest), **+195** | 13.97 FW/s, 134.9 W, 372.8 k | +0.8 % (noise: power-bound at ~1050 MHz, voltage at the floor) |
+| RTX 3070, PL 220 W (temporary) | 19.51 FW/s, 214.2 W, 327.9 k | edge +165 (rerun_diff), **+135** | 20.41 FW/s, 212.9 W, 345.1 k | **+5.2 %** |
+| CMP 50HX GPU2, PL 225, lock 1410 (Rig05) | 13.10 FW/s, 215.6 W, 218.7 k | no edge up to the +225 limit, **+225** | 13.21 FW/s, 195.6 W, 243.2 k | **+11.2 %** |
+| CMP 50HX GPU3 | 13.01 FW/s, 217.0 W, 215.8 k | **+225** | 13.17 FW/s, 203.2 W, 233.3 k | **+8.1 %** |
+| CMP 50HX GPU0 / GPU1 (worker numbers, tuning only) | 13.11 / 222.4 W; 13.07 / 219.9 W | +225 | 13.39 / 221.2 W; 11.70 / 194.9 W (GPU1 80 °C, throttling) | +2.6 % / +1.0 % |
+
+Tuning time: RTX 3070 ~16 min (14 steps), 4x CMP 50HX in parallel ~17 min (15 steps). The references are the same on every card
+and power limit (they are pure math): `0870ca17...`, `c6d160e6...` for batch 32.
+
+Final package (this commit) on Shahtyor GPU1: the integrity watchdog with a known-bad +225 at PL 220 W stepped +225 -> +210 ->
++195 -> +180 (each `INTEGRITY | ERROR`, engine restarted after 5 s, never DISABLED); back at the owner's PL 135 W the result was
+re-tuned (power limit changed): +240 failed, the confirmation at +210 failed too, +195 confirmed + test vector; 20 min on Aria
+at +195: 14.12 FW/s, 134.3 W, 378.5 k FW/kWh, 1 accepted / 0 rejected. Owner's +175 back after every run; Rig05 owner's +150
+back on all cards, `miner start` (with the HiveOS PATH) verified. Pearl self-test PASSED (lines differ from 1.6.2 only by the
+random nonce_base of each run; Pearl code unchanged).
+
+## amd-cmfd-uv (branch from `rel-1.6.2`): undervolt for CMFD on AMD (`--auto-uv`, `AUTO_UV=1` in start-cmfd.bat)
+
+Measured on the owner's RX 6800 XT (Adrenalin 25.5.1, ASIC watts from ADLX; kernel bench 2–2.5 min per point + 45–60 s
+bit-exact check on the real model + CF 1.0.16 test vector):
+
+* Stock (2324 MHz max, 1150 mV): 10.1 FW/s, 280 W, 36 FW/kJ. FW/s follows the core clock; the memory runs at full clock all the
+  time (unlike Pearl), +7.5 % memory clock and fast timings change nothing (and 2150 MHz memory gives wrong results). PL only
+  down to −6 % in ADLX: 9.9 FW/s, 264 W (+4 % FW/W).
+* Voltage floor 881 mV: 1900–2200 MHz max pass (8.4–9.6 FW/s at 182–201 W, 46–48 FW/kJ, +28..33 %); 2250 and 2300 fail at
+  every slider value up to 1000–1025 mV. 2200/881 passed twice and failed once: the edge moves, one step of margin is needed.
+* Owner's clock 2324 with the slider at 1100/1075 mV: 10.2 FW/s at 258/246 W (+9/+15 %); 1050 failed once, passed once; 1000 fails.
+* The official test vector (32 nonces × 2) alone is not enough to judge a point: it passed at 2324/1050 and at memory 2150 where
+  the long check found wrong digests.
+
+Implementation: pearl-miner `amd-cmfd-uv` — the OpenCL worker got `--uvcheck MODEL secs measure [refs]` (two fixed batches of
+32 nonces, final digests must equal the stock ones bit for bit, then FW/s), amduv got `--algo cmfd --model BANK` (own result
+section per card, search A = floor voltage / clock up → `eff`, search B = owner's clock / voltage down → `max`, `bal` = most FW/W
+with ≥ 90 % of stock FW/s, each confirmed by a long check; `apply --goal`). Host: `cmfd.rs` starts `amduv apply --algo cmfd`
+on AMD with `--auto-uv` after the model is prepared (guard restores the owner's settings on exit), goal `$FFGP_AMD_UV_GOAL`
+(default `bal`); NVIDIA unchanged (`--auto-uv` ignored for CMFD with a warning). start-cmfd.bat: `AUTO_UV`, `UV_GOAL`.
+
+Checks (owner PC, test package = 1.6.2 + new freeforgempear.exe / amduv.exe / cmfd-v4-replay-ocl.exe):
+* `amduv tune --algo cmfd`: 16 min; eff = bal = 2100/881 (9.13 FW/s, 193 W, 47.2 FW/kJ), max = 2324/1075 (10.07 FW/s, 248 W,
+  40.6 FW/kJ); owner's settings read back unchanged afterwards.
+* Aria pool through the host with `--auto-uv`: bal 15 min 9.06 FW/s / 191 W (47.4 FW/kJ), max 10 min 10.03 FW/s / 247 W
+  (40.7), stock 10 min 9.86 FW/s / 277 W (35.6); 0 rejected, INTEGRITY ok, the guard restored the owner's settings each time
+  (read back: 500/2324/1150/PL 0/VRAM 2000/timing 0). Shares on Aria are rare (none in these 35 min).
+* Pearl with the new amduv: stock 34.25 TMAC/s, 2200/881 32.2 at 173 W (as before). NVIDIA (Clawa): Pearl self-test PASSED,
+  `--algo cmfd --auto-uv` prints the NVIDIA warning as before. cargo test --release 14/14.
+* Prebuilt: amduv.exe and cmfd/cmfd-v4-replay-ocl.exe replaced (the binaries tested above); pearlgpu.dll/.lib,
+  pearlgpu_amd.dll, cmfd-miner-ffgp.exe, libpearlgpu.so byte-identical to rel-1.6.2.
+
+## 1.6.3 (bug-fix release): branches cmfd-nv-uv + amd-cmfd-uv, lock restore, auto-uv after an OC apply
+
+* Merge of `amd-cmfd-uv` (fcc9f86) into `cmfd-nv-uv`: six text conflicts (both branches edited the same `--auto-uv` spots);
+  resolved keeping both: NVIDIA -> `cmfd_uv`, AMD -> `amd_uv::start(.., Load::Cmfd)`; start-cmfd.bat has `UV_MAX/UV_MIN`
+  (NVIDIA) and `UV_GOAL` (AMD). The AMD part was not re-run on AMD hardware for 1.6.3; its binaries are the ones tested above.
+* `--lock-cclock/--lock-mclock`: the lock from before is put back (new `hiveoc.rs`: HiveOS OC profile, nvidia-oc rules of hive
+  0.6-231; or `$FFGP_RESTORE_CCLOCK/MCLOCK`); recorded in `clocks-restore.json` for the crash path. NVML has no getter for a
+  lock (checked on driver 580.178: nvidia-smi -q, GetPerformanceModes, GetCurrentClockFreqs, MinMaxClockOfPState).
+* `--auto-uv` (Pearl): a read-back of 0 / the HiveOS profile value / the owner's starting offset = OC apply -> set the verified
+  offset again + quick check (max 4/h); a check whose offset was reset by an OC apply is repeated; other values: stand down.
+* Fixes found in the tests (also in 1.6.2): a stop during a check (HiveOS `miner stop` = Ctrl-C then SIGHUP) left the crash
+  marker (`trying` / `cmfd_trying`) -> the next start treated the offset as a crash point; a stop during the start quick check
+  paused auto-uv for 24 h. A re-check while mining takes its RAM slot before pausing the GPU.
+* Not ported to CMFD: re-apply after an OC apply while mining (the CMFD tuner sets its offset before the engine starts; an OC
+  apply mid-run leaves the card at the HiveOS value, which is safe).
+
+Checks (Shahtyor GPU1 RTX 3070 through gpu1-test.sh; fake HiveOS profile via `NVIDIA_OC_CONF`):
+
+| test | result |
+|---|---|
+| prior lock 1200/810, run `--lock-cclock 1500 --lock-mclock 5001`, Ctrl-C / SIGTERM | 1500/5001 while running; after exit under load 1200/810 (both) |
+| same, SIGKILL, then a plain start | marker `core_prev 1200, mem_prev 810`; the next start put 1200/810 back |
+| no profile, `FFGP_RESTORE_CCLOCK=1250`, SIGTERM | 1260/810 after exit |
+| no profile, no env | reset (1620/6801 under load, as before 1.6.3) |
+| auto-uv, mining at +210: offset -> 0, -> 30 (profile), -> 45 (by hand) | re-applied (+210 failed the quick check -> +195 saved, ok), re-applied +195, stood down |
+| OC apply during the start quick check | check repeated at +195, passed |
+| 2x SIGINT during a check (Pearl, CMFD) | no crash marker left, no 24 h pause (after 703f4d6), no CMFD worker left |
+| Pearl 5 min, LuckyPool, lock 1500/810, +195 | 67.7 TH/s, 99 W, 0.685 TH/W, 13/13 accepted (stock offset: 67.67 TH/s, 123 W, 16/16) |
+| CMFD 5 min, Aria, `--auto-uv` (+195 saved) | 14.2-14.4 FW/s, 135 W, ~380 k FW/kWh, 1/0 shares; owner's +175 back |

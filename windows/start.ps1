@@ -21,6 +21,7 @@ param(
     [string]$LockMclock = '',
     [string]$Moffset = '',
     [string]$CmfdMode = '',
+    [string]$UvGoal = '',
     [string]$Algo = '',
     [string]$NoidMode = ''
 )
@@ -66,8 +67,9 @@ if ($Noid) {
     }
     if ($CmfdMode -and $CmfdMode -notin 'speed', 'eco') { Fail 'MODE must be speed or eco.' }
     if (-not (Test-Path -LiteralPath (Join-Path $root 'cmfd\cmfd-miner.exe'))) { Fail 'cmfd\cmfd-miner.exe is missing - unpack the whole archive again.' }
-    # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk)
-    if ($AutoUv -eq '1') { Write-Host 'NOTE: AUTO_UV is Pearl-only and is ignored for CMFD.' -ForegroundColor Yellow; $AutoUv = '' }
+    # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk).
+    # AUTO_UV with CMFD: NVIDIA - an offset tuned and checked on the CMFD load itself (separate from the Pearl result);
+    # AMD Radeon - amduv with the CMFD check, profile UV_GOAL
 } elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
 if (-not $Cmfd -and -not $Noid -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow
@@ -129,6 +131,8 @@ if ($UvOffset -match '^[+-]?[0-9]+$' -or ($UvOffset -match '^([+-]?[0-9]+|-)?(,(
     if ($UvStep -match '^[0-9]+$') { $cmdLine += " --uv-step $UvStep" }
     if ($UvKeepLast -eq '1') { $cmdLine += ' --uv-keep-last' }
 }
+# AMD undervolt profile (amduv): CMFD eff|bal|max, Pearl eff|max (used when it tunes)
+if ($AutoUv -eq '1' -and $UvGoal -match '^(eff|bal|max)$') { $env:FFGP_AMD_UV_GOAL = $UvGoal }
 if (($UvOffset -or $AutoUv -eq '1') -and $UvRevalHours -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --uv-reval-hours $UvRevalHours" }
 if ($Extra) {
     if ($Extra -match '[&|<>^"]') { Fail 'EXTRA must not contain & | < > ^ or quotes' }

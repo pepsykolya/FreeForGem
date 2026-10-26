@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.0-beta):**
+**Installation URL (1.7.1-beta):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz
 ```
 
 ### Flight sheet
@@ -66,8 +66,12 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   parallel). Later starts take about 30 s extra. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner
   updates and reboots); it is tuned again when the driver, the kernel build or the starting offset changes.
 - Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset the card has when the
-  miner starts and only goes up; it never touches locked clocks, power limit or memory. If HiveOS re-applies its OC and changes the offset
-  while mining, auto-uv notices, stands down on that GPU and does not fight.
+  miner starts and only goes up; it never touches locked clocks, power limit or memory. When HiveOS re-applies its OC while mining (at miner
+  start or after an OC change it writes the *Core Clock* value, **0 when the field is empty**), auto-uv puts the verified offset
+  back after a quick check (since 1.7.1; before, the undervolt was off until the next restart). A different offset set by hand
+  makes it stand down on that GPU.
+- `--lock-cclock` / `--lock-mclock` in *Extra config*: on exit the miner puts back the lock of your HiveOS OC profile (since
+  1.7.1; before, it removed the lock and the rig ran unlocked).
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
@@ -111,6 +115,9 @@ Stock clocks or a power limit: a positive core offset of the OC profile is set t
 an RTX 3070 gave 3.7 FW/s with *Mem lock* 810 and 21.8 FW/s (~237 W, power limit 240 W) with the memory free. The miner
 warns about a low memory clock in the log (once per GPU, since 1.6.1) but does not change your OC.
 CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in the package needs glibc 2.30+).
+`--auto-uv` in *Extra config* tunes a separate CMFD core offset per card on the CMFD load itself (every step checked
+bit-for-bit on the real model; first start ~15–20 min, then applied at once; owner's offset back on `miner stop`). Tune with the
+OC profile you mine with: a changed power limit re-tunes, a changed core clock lock needs `--uv-reset` once. MANUAL.md, section 13.
 
 ## Русский
 
@@ -121,10 +128,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.0-beta):**
+**Ссылка для установки (1.7.1-beta):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz
 ```
 
 ### Полётный лист
@@ -177,7 +184,11 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforge
   обновления майнера и перезагрузки); при смене драйвера, сборки ядра или начального offset подбор повторяется.
 - Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с того offset, который
   стоит на карте в момент запуска майнера, и идёт только вверх; зафиксированные частоты, лимит мощности и память он не трогает.
-  Если HiveOS заново применит разгон и изменит offset во время майнинга, auto-uv это заметит, отступит на этой карте и не будет воевать.
+  Если HiveOS заново применит разгон во время майнинга (при старте майнера и после смены OC он записывает значение *Core Clock*,
+  **0, если поле пустое**), auto-uv после быстрой проверки поставит проверенный offset обратно (с 1.7.1; раньше андервольт
+  выключался до перезапуска). Другой offset, выставленный вручную, — и auto-uv отступит на этой карте.
+- `--lock-cclock` / `--lock-mclock` в *Extra config*: при выходе майнер возвращает лок из профиля разгона HiveOS (с 1.7.1;
+  раньше лок снимался, и риг работал без него).
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.
@@ -218,6 +229,10 @@ Extra config по желанию: `--cmfd-mode eco`, `--devices 0,1`, `--per-gpu
 RTX 3070 с *Mem lock* 810 дала 3,7 FW/s, со свободной памятью — 21,8 FW/s (~237 Вт при лимите 240 Вт). О низкой частоте памяти
 майнер предупреждает в логе (один раз на GPU, с 1.6.1), но разгон сам не меняет.
 CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04 (движку в пакете нужна glibc 2.30+).
+`--auto-uv` в *Extra config* подбирает отдельное смещение ядра под CMFD на каждой карте прямо на нагрузке CMFD (каждый шаг
+проверяется побитно на реальной модели; первый запуск ~15–20 мин, дальше применяется сразу; ваше смещение возвращается при
+`miner stop`). Подбирайте с тем профилем разгона, с которым майните: смена лимита мощности — подбор заново, смена лока частоты
+ядра — один раз `--uv-reset`. MANUAL.md, раздел 13.
 
 ### Комиссия разработчика
 

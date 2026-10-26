@@ -43,8 +43,10 @@ mod amd_uv;
 mod clocks;
 mod cmfd;
 mod cmfd_offset;
+mod cmfd_uv;
 mod devfee;
 mod gpu;
+mod hiveoc;
 mod mining;
 mod noid;
 mod nvml;
@@ -392,7 +394,7 @@ fn mine(a: Args) -> Result<()> {
             println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devices[0]);
         }
         let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "eff".into());
-        amd_uv::start(devices[0], true, &goal)
+        amd_uv::start(devices[0], true, &goal, amd_uv::Load::Pearl)
     } else {
         None
     };
@@ -678,7 +680,7 @@ OPTIONS:
     --self-test          verify the GPU kernel against the CPU reference and exit
     --backend B          GPU library: auto (default: CUDA if it sees a device, else AMD), cuda, amd ($FFGP_BACKEND)
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
-                         via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL eff|max); see MANUAL.md
+                         via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
     --uv-reset           forget the saved undervolt results
     --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
@@ -695,6 +697,11 @@ OPTIONS:
     --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
     --lock-mclock N      lock the memory clock to N MHz (same syntax)
     --moffset N          memory clock offset in MHz, may be negative (same syntax; needs driver 555+)
+                         on exit a lock that was there before is put back: the HiveOS OC profile lock, or
+                         $FFG_RESTORE_CCLOCK / $FFG_RESTORE_MCLOCK (also $FFGP_RESTORE_*; one value or one per device,
+                         0 = none); else reset
+                         --auto-uv (Pearl, CMFD, NOID): an OC apply (HiveOS) that resets the tuned offset while mining gets
+                         it back after a quick check; a stop during a check is not a failure
     --help               show this text
     --version            show the version
 
@@ -708,7 +715,11 @@ COMMON FOUNDRY (CMFD, ForgeMatrix V4; engine: FreeForgeMiner, MIT, in the cmfd/ 
     --per-gpu-workers    one pool worker per GPU (WORKER.gpuN) instead of one per rig
     CMFD needs about 7 GB of free GPU memory per card and an RTX 20xx or newer GPU. --lock-cclock/--lock-mclock/--moffset
     work as for Pearl. A positive core (undervolt) offset is set to 0 for the run and put back on exit (CMFD computes wrong
-    results with it); --uv-offset N sets N instead (at your own risk); --auto-uv is Pearl-only.
+    results with it); --uv-offset N sets N instead (at your own risk). --auto-uv (NVIDIA): a CMFD offset of its own, tuned
+    from 0 in --uv-step steps up to --uv-max (per-card default), every step checked bit-for-bit on the real model by the
+    engine's worker + the official test vector; saved in uv.json (section cmfd, separate from Pearl), applied on later starts;
+    after an OC apply that resets it while mining, the engine of that GPU stops for a quick check and restarts at it.
+    AMD: --auto-uv runs amduv tuned on the CMFD load itself (see --auto-uv above).
     Dev fee for CMFD: 1% inside the engine (36 s per hour per GPU).
 
 NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R580+):
@@ -721,6 +732,8 @@ NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R
                          result per card and mode in uv.json (section noid); --uv-max/--uv-min/--uv-step/--uv-keep-last/--uv-reset as
                          for Pearl (default first step +120). Without --auto-uv a positive core offset is set to 0 for NOID
                          (Pearl offsets give silently wrong NOID results) and put back on exit; --uv-offset N forces N.
+                         An OC apply (HiveOS) that resets the offset while mining: the tuned one comes back after a 30 s
+                         stress check (mining on that GPU pauses), the base 0 / --uv-offset value is set again at once.
     Every candidate is re-computed on the CPU (official noid_poseidon2b crate) before it is submitted; a failed check or a
     failed in-mining watchdog check (every 120 s) steps the card's offset back. Dev fee: 1% (60 s per 100 min, same pool).
 
@@ -742,13 +755,11 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
 }
 
 /// `--algo cmfd`: Common Foundry through the FreeForgeMiner engine (cmfd.rs). Shares the command line, the clock options and
-/// the log format with Pearl; the undervolt tuner is Pearl-only (it validates with the Pearl kernel) and is ignored here.
+/// the log format with Pearl. `--auto-uv` on NVIDIA runs the CMFD tuner (cmfd_uv.rs, checks on the CMFD load), not the Pearl one;
+/// on AMD the amduv tuner with the CMFD check (cmfd.rs).
 fn mine_cmfd(a: Args) -> Result<()> {
     ensure!(a.pool_given && cmfd::is_cmfd_url(&a.pool), "--algo cmfd needs --pool {}IP:PORT?pin=<64 hex> (the pool's URL with its certificate pin)", cmfd::SCHEME);
     ensure!(!a.wallet.is_empty(), "--wallet is required: your CMFD address, cmfd1... or 64 hex (see --help)");
-    if a.uv.auto {
-        eprintln!("WARNING: --auto-uv is Pearl-only and is ignored for CMFD (CMFD needs stock clocks: a positive core offset is set to 0 for the run; --uv-offset N forces a value at your own risk)");
-    }
     if a.password != "x" {
         eprintln!("WARNING: --password is not used by CMFD pools; ignored");
     }
@@ -760,6 +771,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
                 cmfd::kill_all();
                 cmfd_offset::restore_all();
                 clocks::restore_all();
+                cmfd_uv::forget_trying_on_stop();
                 eprintln!("second interrupt: exiting at once");
                 std::process::exit(130);
             }
@@ -771,9 +783,10 @@ fn mine_cmfd(a: Args) -> Result<()> {
         cmfd::kill_all();
         cmfd_offset::restore_all();
         clocks::restore_all();
+        cmfd_uv::forget_trying_on_stop();
     });
     let n = a.devices.as_ref().map_or_else(gpu::device_count, Vec::len);
-    a.uv.fixed.check_count(n, "--uv-offset")?;
+    a.uv.check_counts(n)?; // --uv-max/--uv-min/--uv-offset lists: one value per mining GPU
     let state_dir = a
         .uv
         .dir
@@ -801,6 +814,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
             uv_offset: a.uv.fixed.clone(),
             state_dir,
             clocks,
+            uv: a.uv.clone(),
         },
         stop,
     )

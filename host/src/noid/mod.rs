@@ -1,4 +1,4 @@
-// FreeForGemPear — see LICENSE
+// FreeForGem — see LICENSE
 //! NOID (Parano1d) mining: `--algo noid` (or a NOID pool URL).  GPU search in the closed-source NOID library (gpu.rs), every hit
 //! re-checked on the CPU with the official crate (cpu.rs) before it is submitted, pool client `parano1d-stratum-v1` over TLS
 //! (pool.rs), 1% developer fee on the same pool (devfee.rs schedule), NOID-specific undervolt (tune.rs, offset.rs).
@@ -294,6 +294,8 @@ pub struct GpuStat {
     pub bad: AtomicU64,      // hits that failed the CPU check (wrong GPU results)
     pub bad_seen: AtomicU64, // handled by the main thread (offset step back)
     pub watch_runs: AtomicU64,
+    pub pause: Arc<AtomicBool>,  // a quick check after an OC apply asks the mining thread of this GPU to pause
+    pub paused: Arc<AtomicBool>, // the mining thread is paused (no launch in flight)
 }
 
 struct Shared {
@@ -371,7 +373,7 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
     let wwant = if wsecs > 0 { cpu_candidates(&wf, wn, wth) } else { Vec::new() };
     let mut wlast = Instant::now();
     loop {
-        if wsecs > 0 && wlast.elapsed() >= Duration::from_secs(wsecs) && flight.iter().all(Option::is_none) {
+        if wsecs > 0 && wlast.elapsed() >= Duration::from_secs(wsecs) && flight.iter().all(Option::is_none) && !gs.pause.load(Ordering::Relaxed) {
             wlast = Instant::now();
             gpu::set_job(&wf, &target_hi(wth))?;
             let mut wrong = 0;
@@ -409,12 +411,21 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
                 check_hit(sh, gs, &fl, idx);
             }
         }
-        if stop {
+        if stop || gs.pause.load(Ordering::Relaxed) {
             if flight.iter().all(Option::is_none) {
-                return Ok(());
+                if stop {
+                    return Ok(());
+                }
+                // paused for a check of this GPU (after an OC apply): nothing in flight until it is over
+                gs.paused.store(true, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
             }
             slot ^= 1;
             continue;
+        }
+        if gs.paused.swap(false, Ordering::SeqCst) {
+            wlast = Instant::now();
         }
         // newest assignment
         let newest = sh.cur.lock().unwrap().clone();
@@ -527,6 +538,7 @@ pub fn mine(o: Opts) -> Result<()> {
             if stop.swap(true, Ordering::SeqCst) {
                 offset::restore_all();
                 clocks::restore_all();
+                tune::forget_trying_on_stop();
                 eprintln!("second interrupt: exiting at once");
                 std::process::exit(130);
             }
@@ -536,6 +548,7 @@ pub fn mine(o: Opts) -> Result<()> {
     crate::wintune::on_console_close(|| {
         offset::restore_all();
         clocks::restore_all();
+        tune::forget_trying_on_stop();
     });
     let devices = open_devices(&o.devices, o.mode)?;
     o.uv.check_counts(devices.len())?;
@@ -626,7 +639,10 @@ pub fn mine(o: Opts) -> Result<()> {
             bad: AtomicU64::new(0),
             bad_seen: AtomicU64::new(0),
             watch_runs: AtomicU64::new(0),
+            pause: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
         });
+        live.attach(pos, gs.pause.clone(), gs.paused.clone());
         let (rtx, rrx) = mpsc::channel();
         let (sh2, gs2, mode) = (sh.clone(), gs.clone(), o.mode);
         handles.push(std::thread::Builder::new().name(format!("noid-gpu{dev}")).spawn(move || worker(dev, pos, mode, sh2, gs2, rtx))?);
@@ -713,6 +729,8 @@ pub fn mine(o: Opts) -> Result<()> {
                 tune::on_bad_hit(&live, g.pos, &g.bus, g.dev);
             }
         }
+        // an OC apply (HiveOS) that reset an offset this run set: set again (tuned: after a quick check); 30 s per card
+        tune::watch(&live);
         let el = win.elapsed();
         if el >= Duration::from_secs(10) {
             let mut parts = Vec::new();

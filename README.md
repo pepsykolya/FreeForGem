@@ -8,7 +8,7 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.0-beta**, pre-release)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.1-beta**, pre-release)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
@@ -31,18 +31,18 @@ Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 | Field | Pearl | NOID |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.0-beta/freeforgem-1.7.0beta.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz` | same |
 | Hash algorithm | `pearlhash` | `parano1d` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
 | Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1400 --auto-uv` |
 
-Use the **HiveOS** file of the release (`freeforgem-1.7.0beta.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Use the **HiveOS** file of the release (`freeforgem-1.7.1beta.tar.gz`) as the Installation URL — not the Linux or Windows archive.
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
 
 ### Windows 10/11 x64
 
-Download `freeforgem-1.7.0-beta-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+Download `freeforgem-1.7.1-beta-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
 pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
 replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
 Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -51,8 +51,8 @@ Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details
 ### Linux x86_64
 
 ```
-tar xzf freeforgem-1.7.0-beta-linux-x86_64.tar.gz
-cd freeforgem-1.7.0-beta
+tar xzf freeforgem-1.7.1-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.1-beta
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv                                # NOID
@@ -94,7 +94,7 @@ int8 tensor peak at 1560 MHz).
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl.
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl, but it mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGem (MANUAL.md section 7, *CMP cards*).
 * **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
@@ -178,7 +178,8 @@ model is downloaded once from the official Common Foundry servers and then only 
 shared with FreeForgeMiner in `/hive/miners/custom/cmfd-model`). Needs about 7 GB of free GPU memory and an RTX 20xx or newer.
 `--cmfd-mode eco` = RTX 30 about 13% fewer watts for 2% less hashrate. A Pearl undervolt (positive core offset) makes CMFD
 compute wrong results, so in CMFD mode the miner sets it to 0 for the run and puts it back on exit (needs root/Administrator;
-`--uv-offset N` forces a value at your own risk; `--auto-uv` is Pearl-only).
+`--uv-offset N` forces a value at your own risk). `--auto-uv` (NVIDIA) tunes a separate CMFD offset, every step checked
+bit-for-bit on the real model (MANUAL.md, section 13).
 **Use a separate OC profile for CMFD without the memory lock:** the Pearl OC (memory locked at 810 MHz) cuts CMFD about 6×
 (RTX 3070 on HiveOS: 3.7 FW/s with *Mem lock* 810, 21.8 FW/s at ~237 W with the memory free); the miner warns about a low
 memory clock in the log but never changes your OC.

@@ -1,4 +1,4 @@
-// FreeForGemPear — see LICENSE
+// FreeForGem — see LICENSE
 //! `--auto-uv` in NOID mode: a core V/F offset (undervolt) tuned and checked on the NOID kernel itself, per card.
 //!
 //! Why its own tuner: NOID fails at offsets Pearl runs fine with, and near the edge it fails SILENTLY — no Xid, no crash, the
@@ -14,8 +14,16 @@
 //!     with the driver, the kernel, the clock lock and the power limit it was found at (a change of any of them = tune again);
 //!     a later start applies it after a short check (none when verified within --uv-reval-hours).
 //!   * while mining, a hit that fails the CPU check steps that card's offset back by one step (saved) and mining goes on.
+//!   * while mining, the offset is read back every 30 s: an OC apply (HiveOS nvidia-oc at a miner start or after an OC change
+//!     in the web UI writes the profile's Core Clock value, 0 when the field is empty; other tools put the owner's offset back)
+//!     gets the verified NOID offset back after a quick stress check with mining on that GPU paused (a failure steps back),
+//!     a base / --uv-offset value is simply set again; at most 4 times per hour, any other value is the owner's own choice
+//!     and the miner stands down on that GPU.  An OC apply during a check makes the check repeat at the right offset.
+//!   * a stop (Ctrl-C, SIGTERM, HiveOS miner stop / restart: Ctrl-C, then SIGHUP) during a check is not a failure: no
+//!     verdict, no 24 h pause, and the crash marker of the interrupted check is removed (a driver fault keeps its marker).
 //!   * the owner's offset is put back on exit by offset.rs (marker file for crashes).
 use super::{gpu, offset};
+use crate::hiveoc::{self, ResetLimit};
 use crate::nvml::{Dev, Nvml};
 use crate::uv::{self, DISABLE_SECS, HARD_CAP, Saved, fmt_age, fmt_w, now, saved_vs_limit, short_bus, short_name, signed};
 use anyhow::Result;
@@ -24,7 +32,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const SECTION: &str = "noid";
@@ -38,6 +46,7 @@ fn lg(m: impl AsRef<str>) {
     println!("auto-uv (noid): {}", m.as_ref());
 }
 
+#[derive(Clone)]
 pub struct CardRef {
     pub dev: i32,
     pub pos: usize,
@@ -161,26 +170,62 @@ impl Db {
     }
 }
 
-/// Cards that mine at an offset above their base: stepped back when a hit fails the CPU check.
+/// The uv.json of this run (for the stop handler) and the cards whose check ended in a driver fault (their crash marker stays).
+fn stop_db() -> &'static Mutex<(Option<Arc<Db>>, Vec<String>)> {
+    static S: OnceLock<Mutex<(Option<Arc<Db>>, Vec<String>)>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new((None, Vec::new())))
+}
+
+/// At a stop (second Ctrl-C / SIGHUP of HiveOS miner stop while a check runs, console close): the crash markers of interrupted
+/// NOID checks are removed, so the next start does not take the offset under check for a crash point; driver faults keep theirs.
+pub fn forget_trying_on_stop() {
+    let (db, faulted) = {
+        let g = stop_db().lock().unwrap();
+        (g.0.clone(), g.1.clone())
+    };
+    let Some(db) = db else { return };
+    let ids: Vec<String> = db.v.lock().unwrap()[TRYING].as_object().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+    for id in ids.iter().filter(|id| !faulted.contains(id)) {
+        db.clear_trying(id);
+    }
+}
+
+/// Cards whose core offset this run changed (base 0 for a positive owner's offset, a tuned NOID offset, --uv-offset): stepped
+/// back when a hit fails the CPU check (tuned ones), and watched for OC applies that reset the offset while mining.
 struct LiveCard {
     pos: usize,
-    #[allow(dead_code)]
+    dev: i32,
     bus: String,
+    nv: Option<Dev>,
     uuid: String,
+    orig: i32,
     base: i32,
     step: i32,
     tuned: bool,
+    want: i32, // the offset this run set (the read-back must equal it)
+    owned: bool,
+    busy: Arc<AtomicBool>, // a quick check after an OC apply runs
+    next_read: Instant,
+    resets: Arc<ResetLimit>,
+    card: Option<Card>, // tuned cards: what the quick check after an OC apply needs
+    pause: Option<(Arc<AtomicBool>, Arc<AtomicBool>)>, // (pause request, paused) of the mining thread of this GPU
     last: Option<Instant>,
 }
 
 pub struct Live {
-    db: Option<Db>,
+    db: Option<Arc<Db>>,
     mode: &'static str,
+    mode_id: i32,
+    nv: Option<&'static Nvml>,
+    o: uv::Opts,
+    driver: String,
+    stop: Arc<AtomicBool>,
     cards: Mutex<Vec<LiveCard>>,
 }
 
-struct Card<'a> {
-    r: &'a CardRef,
+#[derive(Clone)]
+struct Card {
+    r: CardRef,
     nv: Dev,
     uuid: String,
     orig: i32,
@@ -193,7 +238,7 @@ struct Card<'a> {
     pl: f64,
 }
 
-impl Card<'_> {
+impl Card {
     fn label(&self) -> String {
         format!("GPU{} (bus {}, {})", self.r.dev, short_bus(&self.r.bus), short_name(&self.r.name))
     }
@@ -228,6 +273,11 @@ struct Tuner<'a> {
     stop: &'a Arc<AtomicBool>,
 }
 
+/// After the check: the offset of the card now, when it is not `at` (an OC apply or someone else changed it meanwhile).
+fn changed_during(c: &Card, at: i32) -> Option<i32> {
+    offset::current(&c.r.bus).filter(|&v| v != at)
+}
+
 impl Tuner<'_> {
     fn stopped(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
@@ -237,9 +287,41 @@ impl Tuner<'_> {
         if self.o.step_secs == uv::Opts::default().step_secs { STEP_SECS } else { self.o.step_secs }
     }
 
-    /// One stress check at offset `at` (set first) for `secs` seconds.
+    /// One stress check at offset `at` (set first) for `secs` seconds.  An OC apply that resets the offset during the check
+    /// (HiveOS nvidia-oc at a miner start / from the web UI) makes the check say nothing about `at`: `at` is set again and the
+    /// check repeated (twice at most); any other value there is a failed check.
     fn check(&self, c: &Card, at: i32, secs: u32) -> Res {
+        let mut r = Res::default();
+        for attempt in 0..3 {
+            r = self.check_once(c, at, secs);
+            if r.fault || r.infra || self.stopped() {
+                break;
+            }
+            let Some(v) = changed_during(c, at) else { break };
+            match hiveoc::reset_kind(self.nv, c.nv, v, c.orig) {
+                Some(why) if attempt < 2 => {
+                    lg(format!("{} the offset was reset to {} during the check ({why}): setting {} again and repeating the check", c.label(), signed(v), signed(at)));
+                }
+                _ => {
+                    r.ok = false;
+                    r.reason = format!("the offset was changed to {} by someone else during the check ({} expected)", signed(v), signed(at));
+                    break;
+                }
+            }
+        }
+        if r.fault {
+            stop_db().lock().unwrap().1.push(c.uuid.clone());
+        }
+        r
+    }
+
+    fn check_once(&self, c: &Card, at: i32, secs: u32) -> Res {
         let mut res = Res::default();
+        if self.stopped() {
+            res.reason = "interrupted".into();
+            res.infra = true;
+            return res;
+        }
         if let Err(e) = offset::set(&c.r.bus, at) {
             res.reason = format!("cannot set offset {}: {e:#}", signed(at));
             return res;
@@ -351,6 +433,17 @@ impl Tuner<'_> {
         if let Some(x) = self.nv.take_xids(c.nv).first() {
             res.reason = format!("Xid {x} reported by the driver");
             res.fault = true;
+            return res;
+        }
+        // a stop kills the check process too (Ctrl-C reaches the whole process group; HiveOS miner stop): not a GPU failure.
+        // The stop flag may be set a moment after the check process died, so look again shortly
+        if result.is_none() && (self.stopped() || {
+            std::thread::sleep(Duration::from_millis(700));
+            self.stopped()
+        }) {
+            res.reason = "interrupted".into();
+            res.infra = true;
+            self.db.clear_trying(&c.uuid);
             return res;
         }
         let Some(line) = result else {
@@ -471,6 +564,10 @@ impl Tuner<'_> {
 
     /// The check itself could not run (not a GPU failure): nothing is saved, the card mines at its base offset.
     fn abort(&self, c: &Card, r: &Res) -> i32 {
+        if self.stopped() {
+            // a stop: no verdict; the shutdown puts the owner's offset back
+            return c.base;
+        }
         lg(format!("{} the NOID check could not run ({}): auto-uv skipped for this run, mining at {}", c.label(), r.reason, signed(c.base)));
         let _ = offset::set(&c.r.bus, c.base);
         c.base
@@ -636,13 +733,23 @@ impl Tuner<'_> {
 ///  * --uv-offset N: N (at the user's risk);  * --auto-uv: the NOID-tuned value (tuning now if needed, all cards in parallel);
 ///  * otherwise: a positive owner's offset is set to 0 (NOID computes wrong results with Pearl undervolts), others are kept.
 pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode: i32, dir: &Path, stop: &Arc<AtomicBool>) -> Result<Arc<Live>> {
-    let live = Arc::new(Live { db: None, mode: super::mode_name(mode), cards: Mutex::new(Vec::new()) });
+    let mut live = Live {
+        db: None,
+        mode: super::mode_name(mode),
+        mode_id: mode,
+        nv,
+        o: o.clone(),
+        driver: String::new(),
+        stop: stop.clone(),
+        cards: Mutex::new(Vec::new()),
+    };
     let Some(nv) = nv else {
         if o.auto || o.fixed.is_set() {
             lg("NVML not available: --auto-uv / --uv-offset skipped, offsets left as they are");
         }
-        return Ok(live);
+        return Ok(Arc::new(live));
     };
+    live.driver = nv.driver_version();
     if o.reset {
         let db = Db::load(dir);
         let mut v = db.v.lock().unwrap();
@@ -661,7 +768,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         let max = max.min(HARD_CAP).min(hi);
         let start = o.min_offset.get(r.pos).unwrap_or(START).max(lo);
         list.push(Card {
-            r,
+            r: r.clone(),
             nv: d,
             uuid: nv.uuid(d).unwrap_or_else(|_| r.bus.clone()),
             orig,
@@ -674,43 +781,76 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
             pl: nv.power_limit_w(d).unwrap_or(0.0),
         });
     }
-    let mut live_cards = Vec::new();
+    // the offset each card mines at (None: left as the owner had it), and whether it is a tuned (verified) NOID offset
+    let mut set_to: Vec<(Option<i32>, bool)> = vec![(None, false); list.len()];
     if o.fixed.is_set() {
-        for c in &list {
+        for (i, c) in list.iter().enumerate() {
             let Some(v) = o.fixed.get(c.r.pos) else { continue };
             let v = v.min(c.hi).min(HARD_CAP);
             match offset::set(&c.r.bus, v) {
-                Ok(()) => lg(format!("{} core offset {} -> {} (--uv-offset; not checked for NOID: at your own risk)", c.label(), signed(c.orig), signed(v))),
+                Ok(()) => {
+                    lg(format!("{} core offset {} -> {} (--uv-offset; not checked for NOID: at your own risk)", c.label(), signed(c.orig), signed(v)));
+                    set_to[i] = (Some(v), false);
+                }
                 Err(e) => lg(format!("{} cannot set offset {}: {e:#}", c.label(), signed(v))),
             }
-            live_cards.push(LiveCard { pos: c.r.pos, bus: c.r.bus.clone(), uuid: c.uuid.clone(), base: c.base, step: o.step, tuned: false, last: None });
         }
-    } else if o.auto && o.dry_run {
-        for c in &list {
-            lg(format!("{} dry run: would tune the NOID offset from {} (base {}, start {}, limit {} {}); offset now {}", c.label(), signed(c.base), signed(c.base), signed(c.start), signed(c.max), c.max_src, signed(c.orig)));
-        }
-        set_base(&list);
-    } else if o.auto {
-        let db = Db::load(dir);
+    } else if o.auto && !o.dry_run {
+        let db = Arc::new(Db::load(dir));
+        stop_db().lock().unwrap().0 = Some(db.clone());
         for c in &list {
             nv.watch_xid(c.nv);
         }
-        let t = Tuner { nv, o, mode, db: &db, driver: nv.driver_version(), stop };
+        let t = Tuner { nv, o, mode, db: &db, driver: live.driver.clone(), stop };
         let res: Vec<i32> = std::thread::scope(|s| {
             let hs: Vec<_> = list.iter().map(|c| s.spawn(|| t.run_card(c))).collect();
             hs.into_iter().zip(&list).map(|(h, c)| h.join().unwrap_or(c.base)).collect()
         });
-        for (c, &v) in list.iter().zip(&res) {
-            if v > c.base {
-                live_cards.push(LiveCard { pos: c.r.pos, bus: c.r.bus.clone(), uuid: c.uuid.clone(), base: c.base, step: o.step, tuned: true, last: None });
+        for (i, (c, &v)) in list.iter().zip(&res).enumerate() {
+            set_to[i] = (Some(v), v > c.base);
+        }
+        live.db = Some(db);
+    } else {
+        if o.auto {
+            for c in &list {
+                lg(format!("{} dry run: would tune the NOID offset from {} (base {}, start {}, limit {} {}); offset now {}", c.label(), signed(c.base), signed(c.base), signed(c.start), signed(c.max), c.max_src, signed(c.orig)));
             }
         }
-        return Ok(Arc::new(Live { db: Some(db), mode: super::mode_name(mode), cards: Mutex::new(live_cards) }));
-    } else {
         set_base(&list);
+        for (i, c) in list.iter().enumerate() {
+            if c.orig > 0 {
+                set_to[i] = (Some(0), false);
+            }
+        }
+    }
+    let mut live_cards = Vec::new();
+    for (c, (v, tuned)) in list.into_iter().zip(set_to) {
+        let Some(v) = v else { continue };
+        if v == c.orig && !tuned {
+            continue; // nothing changed on this card: nothing to keep
+        }
+        live_cards.push(LiveCard {
+            pos: c.r.pos,
+            dev: c.r.dev,
+            bus: c.r.bus.clone(),
+            nv: Some(c.nv),
+            uuid: c.uuid.clone(),
+            orig: c.orig,
+            base: c.base,
+            step: o.step,
+            tuned,
+            want: v,
+            owned: true,
+            busy: Arc::new(AtomicBool::new(false)),
+            next_read: Instant::now() + Duration::from_secs(30),
+            resets: Arc::new(ResetLimit::default()),
+            card: tuned.then_some(c),
+            pause: None,
+            last: None,
+        });
     }
     *live.cards.lock().unwrap() = live_cards;
-    Ok(live)
+    Ok(Arc::new(live))
 }
 
 fn set_base(list: &[Card]) {
@@ -728,13 +868,25 @@ fn set_base(list: &[Card]) {
     }
 }
 
+impl Live {
+    /// The pause handshake of the mining thread of the card at `pos` (a quick check after an OC apply pauses it).
+    pub fn attach(&self, pos: usize, pause: Arc<AtomicBool>, paused: Arc<AtomicBool>) {
+        if let Some(c) = self.cards.lock().unwrap().iter_mut().find(|c| c.pos == pos) {
+            c.pause = Some((pause, paused));
+        }
+    }
+}
+
 /// A hit of card `pos` failed the CPU check: one step back (saved for a tuned card), at most once per 20 s.
 pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
     let mut g = live.cards.lock().unwrap();
-    let Some(c) = g.iter_mut().find(|c| c.pos == pos) else {
+    let Some(c) = g.iter_mut().find(|c| c.pos == pos && c.owned) else {
         eprintln!("GPU{dev}: wrong GPU results (CPU check of a hit / watchdog) at the card's own offset (no undervolt by this miner): check clocks/temperature");
         return;
     };
+    if c.busy.load(Ordering::SeqCst) {
+        return; // the quick check after an OC apply decides
+    }
     if c.last.is_some_and(|t| t.elapsed() < Duration::from_secs(20)) {
         return;
     }
@@ -746,7 +898,10 @@ pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
     }
     let new = (cur - c.step).max(c.base);
     match offset::set(bus, new) {
-        Ok(()) => lg(format!("GPU{dev}: wrong GPU results at offset {} (CPU check of a hit / watchdog): stepped back to {} and mining on", signed(cur), signed(new))),
+        Ok(()) => {
+            c.want = new;
+            lg(format!("GPU{dev}: wrong GPU results at offset {} (CPU check of a hit / watchdog): stepped back to {} and mining on", signed(cur), signed(new)))
+        }
         Err(e) => lg(format!("GPU{dev}: cannot step the offset back ({e:#})")),
     }
     if c.tuned {
@@ -758,4 +913,148 @@ pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
             }
         }
     }
+}
+
+/// While mining (called from the main loop; reads every card's offset every 30 s): an offset that is no longer the one this
+/// run set.  An OC apply (HiveOS nvidia-oc at a miner start / after an OC change: the profile's Core Clock value, 0 when the
+/// field is empty; or the owner's offset from before) gets the verified NOID offset back after a quick check with mining on
+/// that GPU paused; a base / --uv-offset value is set again at once.  At most 4 times per hour; any other value is the
+/// owner's own choice: the miner stands down on that GPU and leaves it as it is.
+pub fn watch(live: &Arc<Live>) {
+    let Some(nv) = live.nv else { return };
+    if live.stop.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut g = live.cards.lock().unwrap();
+    for c in g.iter_mut() {
+        if !c.owned || c.busy.load(Ordering::SeqCst) || Instant::now() < c.next_read {
+            continue;
+        }
+        c.next_read = Instant::now() + Duration::from_secs(30);
+        let Some(v) = offset::current(&c.bus) else { continue };
+        if v == c.want {
+            continue;
+        }
+        let label = format!("GPU{} (bus {})", c.dev, short_bus(&c.bus));
+        let kind = c.nv.and_then(|d| hiveoc::reset_kind(nv, d, v, c.orig));
+        match kind {
+            Some(why) if c.resets.allow() => {
+                let reapply_it = c.tuned && c.want > c.base;
+                if let (true, Some(card), Some((pause, paused))) = (reapply_it, c.card.clone(), c.pause.clone()) {
+                    lg(format!(
+                        "{label} the NOID offset was reset to {} by an OC apply ({why}); re-applying the verified {} after a quick check (mining on this GPU pauses for ~{QUICK_SECS} s)",
+                        signed(v),
+                        signed(c.want)
+                    ));
+                    c.busy.store(true, Ordering::SeqCst);
+                    let (l2, want, pos) = (live.clone(), c.want, c.pos);
+                    std::thread::spawn(move || {
+                        let fin = reapply(&l2, &card, want, &pause, &paused);
+                        let mut g = l2.cards.lock().unwrap();
+                        if let Some(c) = g.iter_mut().find(|c| c.pos == pos) {
+                            if let Some(f) = fin {
+                                c.want = f;
+                            }
+                            c.next_read = Instant::now() + Duration::from_secs(30);
+                            c.busy.store(false, Ordering::SeqCst);
+                        }
+                    });
+                } else {
+                    match offset::set(&c.bus, c.want) {
+                        Ok(()) => lg(format!(
+                            "{label} the offset was reset to {} by an OC apply ({why}); set back to {} ({})",
+                            signed(v),
+                            signed(c.want),
+                            if c.tuned {
+                                "the verified NOID offset"
+                            } else if c.want == c.base {
+                                "the NOID base: Pearl undervolt offsets give silently wrong NOID results"
+                            } else {
+                                "--uv-offset"
+                            }
+                        )),
+                        Err(e) => {
+                            lg(format!("{label} the offset was reset to {} by an OC apply ({why}); cannot set {} again ({e:#}): left as it is", signed(v), signed(c.want)));
+                            c.owned = false;
+                        }
+                    }
+                }
+            }
+            Some(why) => {
+                lg(format!(
+                    "{label} the offset was reset to {} by an OC apply ({why}) again: {} times within an hour already, so the miner stands down on this GPU and leaves it as is (restart the miner once the OC is settled)",
+                    signed(v),
+                    hiveoc::OC_RESETS_MAX
+                ));
+                c.owned = false;
+            }
+            None => {
+                lg(format!(
+                    "{label} the offset was changed by someone else ({} now, {} expected): the miner stands down on this GPU and leaves it as is{}",
+                    signed(v),
+                    signed(c.want),
+                    if v > 0 { " (NOID may compute wrong results at a positive offset: the watchdog reports them)" } else { "" }
+                ));
+                c.owned = false;
+            }
+        }
+    }
+}
+
+/// The quick check after an OC apply reset the offset of a tuned card while mining: mining on the GPU pauses, `want` is
+/// checked (stress, QUICK_SECS); a failure steps back one step (saved) and checks again.  Returns the offset the card mines at
+/// (None: a stop, nothing decided).
+fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &AtomicBool) -> Option<i32> {
+    let (Some(nv), Some(db)) = (live.nv, live.db.as_ref()) else { return None };
+    let t = Tuner { nv, o: &live.o, mode: live.mode_id, db, driver: live.driver.clone(), stop: &live.stop };
+    pause.store(true, Ordering::SeqCst);
+    let t0 = Instant::now();
+    while !paused.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_secs(60) && !t.stopped() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let fin = if t.stopped() {
+        None
+    } else if !paused.load(Ordering::SeqCst) {
+        lg(format!("{} quick check after the OC apply skipped (the mining thread did not pause): {} set again without it", c.label(), signed(want)));
+        let _ = offset::set(&c.r.bus, want);
+        Some(want)
+    } else {
+        let step = t.o.step.max(1);
+        let mut at = want;
+        loop {
+            let r = t.check(c, at, QUICK_SECS);
+            if t.stopped() {
+                break None; // a stop is not a failure of the offset (the shutdown puts the owner's back)
+            }
+            if r.infra {
+                lg(format!("{} the quick check after the OC apply could not run ({}): mining at the base {}", c.label(), r.reason, signed(c.base)));
+                let _ = offset::set(&c.r.bus, c.base);
+                break Some(c.base);
+            }
+            if r.ok {
+                lg(format!("{} quick check after the OC apply at {}: ok ({})", c.label(), signed(at), r.brief()));
+                if let Some(mut e) = db.entry(&c.uuid, live.mode) {
+                    if e.offset == at {
+                        e.verified_at = now();
+                        db.save(&c.uuid, live.mode, &e);
+                    }
+                }
+                break Some(at);
+            }
+            let new = (at - step).max(c.base);
+            lg(format!("{} quick check after the OC apply at {} FAILED ({}): stepped back to {}", c.label(), signed(at), r.reason, signed(new)));
+            if let Some(mut e) = db.entry(&c.uuid, live.mode) {
+                e.offset = new;
+                e.stepped_back += 1;
+                db.save(&c.uuid, live.mode, &e);
+            }
+            if r.fault || new <= c.base {
+                let _ = offset::set(&c.r.bus, new);
+                break Some(new);
+            }
+            at = new;
+        }
+    };
+    pause.store(false, Ordering::SeqCst);
+    fin
 }

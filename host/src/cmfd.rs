@@ -37,7 +37,7 @@ const QUICK_FAIL: Duration = Duration::from_secs(120);
 const MAX_QUICK_FAILS: usize = 5;
 
 /// PIDs of the running engine processes, for the "second Ctrl-C: exit at once" path (no orphaned engines on the GPU).
-static CHILDREN: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+pub(crate) static CHILDREN: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
 fn kill_pid(pid: u32) {
     #[cfg(unix)]
@@ -199,9 +199,10 @@ pub struct Opts {
     pub uv_offset: crate::uv::PerGpu, // --uv-offset: one value or one per GPU (in `devices` order)
     pub state_dir: PathBuf,
     pub clocks: clocks::ClockOpts,
+    pub uv: crate::uv::Opts, // --auto-uv (NVIDIA): the CMFD-specific tuner (cmfd_uv.rs), with --uv-max/--uv-min/--uv-step ...
 }
 
-fn exe_dir() -> PathBuf {
+pub(crate) fn exe_dir() -> PathBuf {
     // no canonicalize: on Windows it yields \\?\ paths that the engine refuses; on Linux current_exe is already resolved
     std::env::current_exe()
         .ok()
@@ -209,7 +210,7 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn absolute(p: &Path) -> PathBuf {
+pub(crate) fn absolute(p: &Path) -> PathBuf {
     if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|d| d.join(p)).unwrap_or_else(|_| p.to_path_buf()) }
 }
 
@@ -228,11 +229,11 @@ fn miner_program() -> &'static str {
 }
 
 /// The GPU worker: CUDA `cmfd-v4-replay`, or the OpenCL `cmfd-v4-replay-ocl` with the AMD backend.
-fn replay_worker() -> &'static str {
+pub(crate) fn replay_worker() -> &'static str {
     if amd() { "cmfd-v4-replay-ocl" } else { "cmfd-v4-replay" }
 }
 
-fn bin(name: &str) -> String {
+pub(crate) fn bin(name: &str) -> String {
     if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
 }
 
@@ -287,7 +288,7 @@ fn check_glibc(dir: &Path) -> Result<()> {
 }
 
 /// Engine version line written by cmfd/fetch-engine.* (e.g. "FreeForgeMiner 1.2.4"), for the banner.
-fn engine_label(dir: &Path) -> String {
+pub(crate) fn engine_label(dir: &Path) -> String {
     std::fs::read_to_string(dir.join("ENGINE"))
         .ok()
         .and_then(|t| t.lines().next().map(|l| l.trim().to_string()))
@@ -307,7 +308,7 @@ fn model_dir(given: &Option<PathBuf>) -> PathBuf {
 }
 
 /// Environment of every engine process (and of the self-test).
-fn engine_cmd(engine: &Path, program: &str, uuid: Option<&str>, mode: &str) -> Command {
+pub(crate) fn engine_cmd(engine: &Path, program: &str, uuid: Option<&str>, mode: &str) -> Command {
     // AMD: the patched pool client and the OpenCL worker (see amd())
     let program = match program {
         "cmfd-miner" => miner_program(),
@@ -430,11 +431,11 @@ fn device_uuid(dev: i32) -> Result<String> {
 /// tensor-core path against the DP4A reference path; no model, no pool).
 /// Official test vector of Common Foundry 1.0.16 (AMD HIP worker qualification, MIT, Copyright (c) 2026 Common Foundry AMD HIP
 /// contributors): the mainnet template at nonce 0, 32 nonces; the final activations of one RUNBATCH 32 hash to REF_SHA256.
-const REF_COEFFICIENTS: &str = "fixtures/mainnet-template-nonce0-count32.coefficients.bin";
-const REF_SHA256: &str = "fe67b80af4671210cd33306d0976c7dbb285dd55203d8eff733866cd7ef4a7a7";
+pub(crate) const REF_COEFFICIENTS: &str = "fixtures/mainnet-template-nonce0-count32.coefficients.bin";
+pub(crate) const REF_SHA256: &str = "fe67b80af4671210cd33306d0976c7dbb285dd55203d8eff733866cd7ef4a7a7";
 const REF_RUNS: usize = 2;
 
-fn sha256_hex(path: &Path) -> Result<String> {
+pub(crate) fn sha256_hex(path: &Path) -> Result<String> {
     use sha2::Digest;
     let mut h = sha2::Sha256::new();
     let mut f = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
@@ -511,7 +512,7 @@ pub fn self_test(devices: &Option<Vec<i32>>, engine_dir_opt: &Option<PathBuf>, m
     let with_model = bank.is_file();
     let devs: Vec<i32> = gpus.iter().map(|g| g.0).collect();
     // the same stock-offset rule as for mining: a Pearl undervolt would fail the test vector
-    // NVML only; on AMD nothing to reset (the amduv undervolt is only active while Pearl mines and is restored on exit)
+    // NVML only; on AMD nothing to reset (an amduv point is only active while the miner runs and is restored on exit)
     if !amd() {
         crate::cmfd_offset::recover(state_dir);
     }
@@ -604,6 +605,7 @@ struct Slot {
     fee: bool,
     nv: Option<nvml::Dev>,
     mem_checked: bool, // memory-clock warning check done (once per GPU and run)
+    uv_restart: bool,  // stopped here after an --auto-uv step back: restart soon, not counted as a failed start
 }
 
 impl Slot {
@@ -625,8 +627,34 @@ fn pipe<R: Read + Send + 'static>(r: R, idx: usize, tx: mpsc::Sender<(usize, Str
 }
 
 /// Stops every running engine process: all are asked at once, then waited for together (10 s, then killed).
+/// Linux: the GPU worker processes (`cmfd-v4-replay*`) started by an engine process. An engine stopped while it is still
+/// loading the model can exit (or be killed after 10 s) without stopping its worker, which then keeps the GPU and 7 GB of its
+/// memory (seen on a 4x CMP 50HX HiveOS rig): they are collected before the stop and ended after it.
+fn worker_children(pid: u32) -> Vec<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut out = Vec::new();
+        for t in std::fs::read_dir(format!("/proc/{pid}/task")).into_iter().flatten().flatten() {
+            let kids = std::fs::read_to_string(t.path().join("children")).unwrap_or_default();
+            out.extend(kids.split_whitespace().filter_map(|k| k.parse::<u32>().ok()).filter(|&k| is_worker(k)));
+        }
+        return out;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = pid;
+        Vec::new()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_worker(pid: u32) -> bool {
+    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| String::from_utf8_lossy(&c).split('\0').next().is_some_and(|a| a.contains("cmfd-v4-replay")))
+}
+
 fn stop_children(slots: &mut [Slot]) {
     let mut kids: Vec<&mut Child> = slots.iter_mut().filter_map(|s| s.child.as_mut()).collect();
+    let workers: Vec<u32> = kids.iter().flat_map(|c| worker_children(c.id())).collect();
     for c in kids.iter_mut() {
         if let Ok(mut v) = CHILDREN.lock() {
             v.retain(|&p| p != c.id());
@@ -650,6 +678,20 @@ fn stop_children(slots: &mut [Slot]) {
         }
         let _ = c.wait();
     }
+    // a worker left behind by its engine (still loading the model): give it 5 s to notice its closed stdin, then end it
+    #[cfg(target_os = "linux")]
+    {
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) && workers.iter().any(|&w| is_worker(w)) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        for &w in &workers {
+            if is_worker(w) {
+                kill_pid(w);
+            }
+        }
+    }
+    let _ = workers;
 }
 
 /// CMFD needs the memory clock: a memory clock locked low (a Pearl overclock, e.g. HiveOS "Mem lock" 810 / nvidia-smi -lmc)
@@ -684,7 +726,8 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     let engine = engine_dir(&o.engine_dir)?;
     let gpus = select_devices(&o.devices)?;
     println!(
-        "FreeForGemPear {} | algo cmfd (Common Foundry, ForgeMatrix V4; engine {}) | pool {} | worker {} | {} GPU(s) | mode {}",
+        "{} {} | algo cmfd (Common Foundry, ForgeMatrix V4; engine {}) | pool {} | worker {} | {} GPU(s) | mode {}",
+        crate::PRODUCT,
         env!("CARGO_PKG_VERSION"),
         engine_label(&engine),
         o.pool,
@@ -721,7 +764,40 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     if !amd() {
         crate::cmfd_offset::recover(&o.state_dir);
     }
-    let _offset_guard = if amd() { None } else { crate::cmfd_offset::apply(&devs, &o.uv_offset, &o.state_dir) };
+    // --auto-uv (NVIDIA): every card is recorded first (the owner's offset goes back on exit), the base is 0 (a positive offset
+    // is set to 0 as without --auto-uv), then the CMFD tuner applies its saved result or tunes on the CMFD load (cmfd_uv.rs)
+    let auto_uv = !amd() && o.uv.auto && !o.uv.dry_run;
+    if !amd() && o.uv.auto && o.uv.dry_run {
+        crate::cmfd_uv::dry_run(&o.uv, &devs);
+    }
+    let (_offset_guard, bases) = if amd() {
+        (None, vec![])
+    } else if auto_uv {
+        crate::cmfd_offset::apply_managed(&devs, &o.state_dir)
+    } else {
+        (crate::cmfd_offset::apply(&devs, &o.uv_offset, &o.state_dir), vec![])
+    };
+    // per-GPU scratch of the engine (small batch files); not in $FFGP_STATE_DIR, which is /hive-config (flash) on HiveOS
+    let hive = Path::new("/hive/miners/custom");
+    let work_root = absolute(&std::env::var_os("FFGP_CMFD_WORK").map(PathBuf::from).unwrap_or_else(|| {
+        if !cfg!(windows) && hive.is_dir() { hive.join("freeforgempear-data").join("cmfd-work") } else { exe_dir().join("cmfd-work") }
+    }));
+    if auto_uv && !stop.load(Ordering::Relaxed) {
+        let ctx = crate::cmfd_uv::Ctx { engine: engine.clone(), bank: bank.clone(), mode: o.mode.clone(), batch: o.batch, work: work_root.clone(), core_lock: o.clocks.core_mhz.clone() };
+        crate::cmfd_uv::start(&o.uv, &devs, &bases, &ctx, &stop);
+    }
+    // AMD --auto-uv: amduv applies its CMFD point (tuned on the CMFD load first if there is none) before the engine starts; its
+    // guard process puts the owner's clocks / voltage / power limit back when this process exits (also on a crash or kill)
+    let _amd_uv_guard = if amd() && o.uv.auto && !o.uv.dry_run {
+        if devs.len() > 1 {
+            println!("auto-uv (amd): more than one AMD GPU is not supported yet; tuning only device {}", devs[0]);
+        }
+        let goal = std::env::var("FFGP_AMD_UV_GOAL").unwrap_or_else(|_| "bal".into());
+        let worker = engine.join(bin(replay_worker()));
+        crate::amd_uv::start(devs[0], true, &goal, crate::amd_uv::Load::Cmfd { worker: &worker, model: &bank })
+    } else {
+        None
+    };
 
     let nv = if amd() { None } else { nvml::Nvml::load().ok() };
     let mut slots: Vec<Slot> = gpus
@@ -741,16 +817,12 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             fee: false,
             nv: nv.as_ref().and_then(|n| gpu::device_pci_bus_id(*dev).ok().and_then(|b| n.by_bus(&b).ok())),
             mem_checked: false,
+            uv_restart: false,
         })
         .collect();
     for s in &slots {
         println!("GPU {}: {} ({})", s.dev, s.name, s.uuid);
     }
-    // per-GPU scratch of the engine (small batch files); not in $FFGP_STATE_DIR, which is /hive-config (flash) on HiveOS
-    let hive = Path::new("/hive/miners/custom");
-    let work_root = absolute(&std::env::var_os("FFGP_CMFD_WORK").map(PathBuf::from).unwrap_or_else(|| {
-        if !cfg!(windows) && hive.is_dir() { hive.join("freeforgempear-data").join("cmfd-work") } else { exe_dir().join("cmfd-work") }
-    }));
     let (tx, rx) = mpsc::channel::<(usize, String)>();
     let start = Instant::now();
     let deadline = o.minutes.map(|m| Duration::from_secs_f64(m * 60.0));
@@ -768,7 +840,8 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     if let Ok(mut v) = CHILDREN.lock() {
                         v.retain(|&p| p != c.id());
                     }
-                    s.quick_fails = if lived < QUICK_FAIL { s.quick_fails + 1 } else { 0 };
+                    let uv_restart = std::mem::take(&mut s.uv_restart);
+                    s.quick_fails = if lived < QUICK_FAIL && !uv_restart { s.quick_fails + 1 } else if uv_restart { s.quick_fails } else { 0 };
                     s.base = s.totals();
                     s.last = None;
                     s.fee = false;
@@ -782,6 +855,9 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                             lived.as_secs(),
                             s.quick_fails
                         );
+                    } else if uv_restart {
+                        println!("[GPU{}] CMFD engine stopped by --auto-uv (a step back, or the quick check after an OC apply); restarting in 5s (after the check)", s.dev);
+                        s.restart_at = Some(Instant::now() + Duration::from_secs(5));
                     } else {
                         let delay = RESTART_DELAYS[s.restarts.min(RESTART_DELAYS.len() - 1)];
                         s.restarts += 1;
@@ -790,7 +866,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     }
                 }
             }
-            if s.child.is_none() && s.restart_at.is_some_and(|t| Instant::now() >= t) {
+            if s.child.is_none() && s.restart_at.is_some_and(|t| Instant::now() >= t) && !crate::cmfd_uv::busy(s.dev) {
                 let scratch = work_root.join(&s.uuid);
                 std::fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
                 let mut c = engine_cmd(&engine, "cmfd-miner", Some(&s.uuid), &o.mode);
@@ -856,12 +932,43 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             if line.contains("out of memory") {
                 println!("[GPU{}] hint: CMFD needs about 7 GB of free GPU memory (6.4 GB model); stop other programs/miners on this GPU", s.dev);
             }
-            if line.contains("illegal memory access") || line.contains("unspecified launch failure") || line.contains("INTEGRITY | ERROR") {
-                println!(
-                    "[GPU{}] hint: the GPU computed wrongly. Typical cause: a core clock offset / undervolt (e.g. one tuned for Pearl). CMFD loads the tensor cores harder: use offset 0 (stock) or only a power limit / --lock-cclock",
-                    s.dev
-                );
+            if line.contains("illegal memory access") || line.contains("unspecified launch failure") || line.contains("misaligned address") || line.contains("INTEGRITY | ERROR") {
+                // --auto-uv: a tuned card steps its CMFD offset back; the engine restarts at the new offset (it exits by itself
+                // after a CUDA fault; after an INTEGRITY error it is stopped here)
+                let why = if line.contains("INTEGRITY | ERROR") { "engine integrity check: wrong results" } else { "CUDA fault in the engine" };
+                if crate::cmfd_uv::on_fault(s.dev, why) {
+                    s.uv_restart = true;
+                    if line.contains("INTEGRITY | ERROR") {
+                        if let Some(c) = s.child.as_ref() {
+                            let workers = worker_children(c.id());
+                            kill_pid(c.id());
+                            for w in workers {
+                                kill_pid(w); // its GPU worker too: the next engine needs the GPU memory
+                            }
+                        }
+                    }
+                } else {
+                    println!(
+                        "[GPU{}] hint: the GPU computed wrongly. Typical cause: a core clock offset / undervolt (e.g. one tuned for Pearl). CMFD loads the tensor cores harder: use offset 0 (stock) or only a power limit / --lock-cclock",
+                        s.dev
+                    );
+                }
             }
+        }
+        // --auto-uv: an OC apply (HiveOS) reset a tuned card's CMFD offset: its engine stops, the saved offset gets a quick check
+        // (cmfd_uv), then the engine restarts at it
+        for dev in crate::cmfd_uv::poll_oc() {
+            if let Some(s) = slots.iter_mut().find(|s| s.dev == dev) {
+                if let Some(c) = s.child.as_ref() {
+                    s.uv_restart = true;
+                    let workers = worker_children(c.id());
+                    kill_pid(c.id());
+                    for w in workers {
+                        kill_pid(w); // its GPU worker too: the check needs the GPU memory
+                    }
+                }
+            }
+            crate::cmfd_uv::begin_reapply(dev);
         }
         if slots.iter().all(|s| s.disabled) {
             stop.store(true, Ordering::SeqCst);
