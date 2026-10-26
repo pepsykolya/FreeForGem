@@ -24,6 +24,7 @@
 #   s6c              a migrated result below the owner's offset FAILS its quick check -> after a restart: paused at the owner's
 #                    offset, never applied as "verified" (Rig01 1.7.2 soak)
 #   p5 p6 p7         clock probe without --lock-cclock (profile found / tuning while mining), HiveOS owner offset
+#   t1 t2            beta3: default start by card / lock, progress tags + summary + RESULT, colours + h-stats.sh (t2: NOID)
 #   n1 n2 n3 n4      NOID: fault, profiles 1400 / 1900 / 1400            c1 c2   CMFD: migration + clock probe, --lock-cclock 1500
 set -u
 [ -n "${CUDA_VISIBLE_DEVICES:-}" ] || { echo "set CUDA_VISIBLE_DEVICES to the ONE GPU to test"; exit 2; }
@@ -284,6 +285,22 @@ d.pop('trying',None); json.dump(d,open('$T/s6c/uv.json','w'),indent=1)"
       bg c2 FFGP_CMFD_WORK=$T/cmfd-work NVIDIA_OC_CONF=$HC -- --algo cmfd --pool "$CP" --wallet $CW --worker gate --minutes 3 --cmfd-model $CMODEL --cmfd-skip-prepare --uv-dir $T/cst --auto-uv --lock-cclock 1500
       waitlog c2 "none for|tuning" 300; sleep 5; stopbg; sleep 3
       show c2 "auto-uv \(cmfd\)" | tail -6; ent $T/cst/uv.json; echo "   cmfd-v4-replay left: $(pgrep -c cmfd-v4-replay)" ;;
+    t1) # beta3: default start of an RTX 3070 by the lock (1400: +270, no --uv-min), per-GPU tag in the stats line, summary line,
+        # RESULT line, colours (FFG_COLOR=1, as h-run.sh) on the other lines only; h-stats.sh parses the coloured log
+      sudo rm -rf $T/t1; sudo mkdir -p $T/t1
+      run t1 900 FFG_COLOR=1 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/t1 --auto-uv --uv-step 30 --uv-warmup 20 --uv-step-secs 15 --uv-confirm-secs 30 --minutes 5
+      show t1 "auto-uv: GPU|auto-uv: tuning|auto-uv: checking" | head -24; stats t1 8; ent $T/t1/uv.json
+      echo "   coloured lines: $(grep -ac $'\x1b\[' $L/t1.log); stats lines with ESC: $(grep -aE '^.{0,8}\[ *[0-9]+s\]' $L/t1.log | grep -ac $'\x1b')"
+      H=$T/hive; mkdir -p $H; cp $P/hive/h-stats.sh $H/ 2>/dev/null || cp $P/h-stats.sh $H/
+      printf 'CUSTOM_LOG_BASENAME=%s
+CUSTOM_VERSION=test
+CUSTOM_ALGO=pearl
+' $L/t1 > $H/h-manifest.conf
+      ( . $H/h-stats.sh; echo "   h-stats: khs=$khs stats=$stats" | cut -c1-240 ) ;;
+    t2) # beta3 NOID: default start at 1400 (+105, no --uv-min), base measured once / short, RESULT never worse than the base
+      sudo rm -rf $T/t2; sudo mkdir -p $T/t2
+      run t2 900 FFG_COLOR=1 NVIDIA_OC_CONF=$HC -- $NOID --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/t2 --auto-uv --uv-step 30 --uv-step-secs 15 --uv-confirm-secs 30 --minutes 5
+      show t2 "auto-uv \(noid\)|noid offset|RESULT" | sed 's/\x1b\[[0-9;]*m//g' | head -30; stats t2 4; ent $T/t2/uv.json ;;
     *) echo "   unknown step $step" ;;
   esac
 done
