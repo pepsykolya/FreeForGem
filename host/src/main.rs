@@ -856,7 +856,8 @@ fn parse_devices(s: &str) -> Result<Vec<i32>> {
     for p in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
         let d: i32 = p.parse().map_err(|_| anyhow::anyhow!("bad device id {p:?}"))?;
         ensure!(d >= 0, "bad device id {p:?}");
-        if !v.contains(&d) {
+        // test hook (faults.rs scenario s5d): FFG_TEST_DUP_DEVICES=1 keeps a repeated id = two workers on one GPU, a simulated second device
+        if !v.contains(&d) || std::env::var("FFG_TEST_DUP_DEVICES").is_ok_and(|x| x == "1") {
             v.push(d);
         }
     }

@@ -206,7 +206,7 @@ json.dump(d,open('$T/s5b/uv.json','w'),indent=1)"
     s5d) # two workers (--devices 0,0: a simulated second device on the same GPU), one of them faults.
          # expect: "1 GPU worker(s) keep mining", hashrate lines go on with one worker DEAD, no restart
       sudo rm -rf $T/s5d; sudo mkdir -p $T/s5d
-      run s5d 200 NVIDIA_OC_CONF=$HC FFGP_STATE_DIR=$T/s5d FFG_TEST_FAULT=0:20 -- $PEARL --devices 0,0 --minutes 1.2
+      run s5d 200 NVIDIA_OC_CONF=$HC FFGP_STATE_DIR=$T/s5d FFG_TEST_FAULT=0:20 FFG_TEST_DUP_DEVICES=1 -- $PEARL --devices 0,0 --minutes 1.2
       show s5d "faults:|worker stopped|restarting|Error"; stats s5d 12 | tail -4 ;;
     s5e) # a GPU that faults at every offset (auto-uv, kept offset): lowered 2 crash starts at a time down to 0, then left out;
          # the single-GPU miner waits instead of exiting (no restart loop).  expect: "CRASHED ... running it at" several times,
@@ -236,9 +236,9 @@ json.dump(d,open('$T/s6/uv.json','w'))"
     p5) # lock 1400 set outside the miner: the clock under mining load picks the 1400 profile
       lock 1400; run p5 300 NVIDIA_OC_CONF=$HC -- $PEARL --uv-dir $P7 --auto-uv $SHORT --minutes 1
       show p5 "auto-uv: GPU"; stats p5 3 ;;
-    p6) # lock 1650 set outside the miner: no profile -> mining at the owner's offset first, then tuned in the background
+    p6) # lock 1550 set outside the miner: no profile -> mining at the owner's offset first, then tuned in the background
       sudo rm -rf $T/p6; sudo mkdir -p $T/p6; sudo cp $P7/uv.json $T/p6/
-      lock 1650; run p6 900 NVIDIA_OC_CONF=$HC -- $PEARL --uv-dir $T/p6 --auto-uv $SHORT --minutes 3.5
+      lock 1550; run p6 900 NVIDIA_OC_CONF=$HC -- $PEARL --uv-dir $T/p6 --auto-uv $SHORT --minutes 3.5
       show p6 "auto-uv: GPU|^\[ *[0-9]+s\]" | cut -c1-150; ent $T/p6/uv.json ;;
     p7) # HiveOS profile Core Clock +30: the owner's offset is +30, not ORIG; put back on exit
       sudo rm -rf $T/p7; sudo mkdir -p $T/p7; sudo cp $P7/uv.json $T/p7/
