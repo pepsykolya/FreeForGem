@@ -3,6 +3,7 @@
 # Release gate (1.7.2): HiveOS-like scenarios on ONE real NVIDIA GPU, with a fake HiveOS OC profile (nvidia-oc.conf).
 #
 #   CUDA_VISIBLE_DEVICES=<n> FFG_PKG=<unpacked package dir> tests/hiveos_scenarios.sh STEP...   (or: all)
+#   (FreeForGem or FreeForGemPear package; NOID steps only with FreeForGem)
 #
 # Needs: sudo (NVML writes), nvidia-smi, python3, network to the pools below.  Touches only the GPU of CUDA_VISIBLE_DEVICES
 # (offset, locks, power limit are put back at the end: the owner's offset and PL as found, locks reset).  Kills only its own
@@ -22,6 +23,7 @@ set -u
 [ -n "${CUDA_VISIBLE_DEVICES:-}" ] || { echo "set CUDA_VISIBLE_DEVICES to the ONE GPU to test"; exit 2; }
 T=${FFG_TEST_DIR:-$HOME/ffg-scenarios}; L=$T/logs; mkdir -p $L
 P=${FFG_PKG:?set FFG_PKG to the unpacked package directory}
+BIN=${FFG_BIN:-$( [ -x $P/freeforgem ] && echo freeforgem || echo freeforgempear )}   # FreeForGem or FreeForGemPear
 WAL=${FFG_WALLET:-prl1phsns9p42mdt5ft2zv90xp34yk7tckz6c7kv9ewty2ct4x8gmgqssy9c7wa}
 POOL=${FFG_POOL:-pearl-ru.luckypool.io:3360}
 NW=${FFG_NOID_WALLET:-o1qxh67m5rugg8t43gcn47lp775thsq4padlacn2jv9l3d7lmv7cmq4gmhdc}
@@ -49,7 +51,7 @@ finish() {
   echo "== end $(date -Is): offset $(off) (owner $ORIG), PL $(nvidia-smi -i $UUID --query-gpu=power.limit --format=csv,noheader) (owner $PL0), locks reset"
 }
 trap finish EXIT
-echo "== start $(date -Is): $UUID (NVML index $IDX), owner offset $ORIG, PL $PL0; binary $(sha256sum $P/freeforgem | cut -c1-16)"
+echo "== start $(date -Is): $UUID (NVML index $IDX), owner offset $ORIG, PL $PL0; binary $(sha256sum $P/$BIN | cut -c1-16)"
 # fake HiveOS OC profiles: the list item of this GPU's NVML index carries the value, the others something else
 hc() { # FILE CLOCK LCLOCK
   local c=() l=() i; for i in $(seq 0 $IDX); do c+=(0); l+=(1111); done; c[$IDX]=$2; l[$IDX]=$3
@@ -63,14 +65,14 @@ run() { # TAG MAXSECS ENV... -- ARGS...
   local tag=$1 max=$2; shift 2
   local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
   echo "-- $tag: ${envs[*]} freeforgem $*"
-  ( cd $P && sudo env $E "${envs[@]}" timeout --foreground -s INT $max ./freeforgem "$@" ) > $L/$tag.log 2>&1
+  ( cd $P && sudo env $E "${envs[@]}" timeout --foreground -s INT $max ./$BIN "$@" ) > $L/$tag.log 2>&1
   echo "   exit $?; offset after $(off)"
 }
 bg() { # TAG ENV... -- ARGS...   (own process group, like HiveOS screen)
   local tag=$1; shift
   local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
   echo "-- $tag (bg): ${envs[*]} freeforgem $*"
-  ( cd $P && exec setsid sudo env $E "${envs[@]}" ./freeforgem "$@" ) > $L/$tag.log 2>&1 &
+  ( cd $P && exec setsid sudo env $E "${envs[@]}" ./$BIN "$@" ) > $L/$tag.log 2>&1 &
   BGPID=$!
 }
 waitlog() { for i in $(seq 1 $3); do grep -aqE "$2" $L/$1.log 2>/dev/null && return 0; sleep 1; done; echo "   (timeout waiting for '$2')"; return 1; }
@@ -95,6 +97,7 @@ print('   old sections left:', [k for k in ('gpus','cmfd') if d.get(k)], '; tryi
 faults() { echo "   gpu-faults.json: $(sudo cat $1/gpu-faults.json 2>/dev/null | tr -d '\n ' | cut -c1-300)"; }
 P7=$T/p   # the profiles of s7 (1400 and 1900)
 steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s3a s3b s4 s5a s5b s5c s5d s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
+[ "$BIN" = freeforgem ] || steps=$(echo " $steps " | sed "s/ n[1-4]//g")
 for step in $steps; do
   echo "=== $step $(date +%T)"
   sudo nvidia-smi -i $UUID -rgc >/dev/null; setoff $ORIG
