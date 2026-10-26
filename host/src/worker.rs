@@ -73,6 +73,8 @@ pub struct GpuStat {
     pub pause: AtomicBool,
     pub paused: AtomicBool,
     pub uv_bad: AtomicU64,
+    /// Why the worker stopped (for the fault attribution in main.rs, faults.rs).
+    pub err: Mutex<Option<String>>,
 }
 
 /// An attempt in flight on the GPU, with everything needed to turn its hits into shares.
@@ -132,6 +134,7 @@ pub fn spawn(
         };
         if let Err(e) = run(dev, m_dev, &sh, &gs, &work_tx) {
             eprintln!("!! GPU {dev} worker stopped: {e:#}");
+            *gs.err.lock().unwrap() = Some(format!("{e:#}"));
         }
         gs.alive.store(false, Ordering::Relaxed);
         drop(work_tx); // let the prover drain its queue, then wait for it
@@ -149,7 +152,12 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
     let mut counter = (gs.dev as u64 + 1) << 40; // disjoint nonce ranges per GPU; never reset
     let mut hit_buf = vec![gpu::Hit::default(); MAX_HITS];
     let mut fd = FeedDiag::new(dev);
+    // test hook (faults.rs): a fault of this GPU after N s of mining (FFG_TEST_FAULT_ALL=1: of every GPU, as a real CUDA fault)
+    let inject = crate::faults::test_fault_for(dev).map(|secs| Instant::now() + std::time::Duration::from_secs(secs));
     while !sh.stop.load(Ordering::Relaxed) {
+        if inject.is_some_and(|t| Instant::now() >= t && gs.attempts.load(Ordering::Relaxed) > 0) {
+            anyhow::bail!("pg_wait: injected fault (FFG_TEST_FAULT): an illegal memory access was encountered");
+        }
         if gs.pause.load(Ordering::Acquire) {
             // the undervolt tuner wants the GPU for a check (its own process): finish what is in flight and wait
             if let Some(p) = pending.take() {

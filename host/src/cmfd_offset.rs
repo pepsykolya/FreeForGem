@@ -52,8 +52,11 @@ pub fn recover(dir: &Path) {
         for g in v["gpus"].as_array().into_iter().flatten() {
             let (Some(bus), Some(orig)) = (g["bus"].as_str(), g["orig"].as_i64()) else { continue };
             if let Ok(d) = nv.by_bus(bus) {
-                if let Ok((mode, _, _, _)) = nv.probe_offset(d) {
-                    match nv.set_offset(d, mode, orig as i32) {
+                if let Ok((mode, cur, lo, hi)) = nv.probe_offset(d) {
+                    // on HiveOS the profile's Core Clock value (1.7.2), not a value another program may have left
+                    let orig = crate::hiveoc::owner_offset(&nv, d, orig as i32, lo, hi);
+                    let _ = cur;
+                    match nv.set_offset(d, mode, orig) {
                         Ok(()) => lg(format!("GPU bus {bus}: offset {orig:+} MHz put back (left changed by an earlier CMFD run)")),
                         Err(e) => lg(format!("GPU bus {bus}: cannot put back offset {orig:+} ({e:#})")),
                     }
@@ -107,7 +110,7 @@ pub fn apply(devices: &[i32], fixed_all: &crate::uv::PerGpu, dir: &Path) -> Opti
                         "GPU{dev}: core offset {cur:+} -> 0 MHz (an undervolt offset makes CMFD compute wrong results; --uv-offset N overrides); put back on exit"
                     ));
                 }
-                items.push(Item { dev: d, bus: bus.clone(), mode, orig: cur, cur: target });
+                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::hiveoc::owner_offset(&nv, d, cur, -1000, 1000), cur: target });
             }
             Err(e) => lg(format!(
                 "GPU{dev}: cannot change core offset {cur:+} ({e:#}); run as root/Administrator or set the offset to 0 yourself, otherwise CMFD will likely fail on this GPU"
@@ -157,7 +160,7 @@ pub fn apply_managed(devices: &[i32], dir: &Path) -> (Option<Guard>, Vec<Option<
                 if target != cur {
                     lg(format!("GPU{dev}: core offset {cur:+} -> 0 MHz (CMFD base; --auto-uv tunes the CMFD offset from here); put back on exit"));
                 }
-                items.push(Item { dev: d, bus: bus.clone(), mode, orig: cur, cur: target });
+                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::hiveoc::owner_offset(&nv, d, cur, -1000, 1000), cur: target });
                 bases[pos] = Some(target);
             }
             Err(e) => lg(format!(

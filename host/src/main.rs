@@ -45,6 +45,7 @@ mod cmfd;
 mod cmfd_offset;
 mod cmfd_uv;
 mod devfee;
+mod faults;
 mod gpu;
 mod hiveoc;
 mod mining;
@@ -411,7 +412,8 @@ fn mine(a: Args) -> Result<()> {
     if nv {
         uv::recover(&a.uv);
     }
-    let uv_state = if nv { uv::start(&a.uv, &devices, &stop) } else { None };
+    let uv_opts = uv::Opts { locks: clocks::core_locks(devices.len()), mlocks: clocks::mem_locks(devices.len()), ..a.uv.clone() };
+    let uv_state = if nv { uv::start(&uv_opts, &devices, &stop) } else { None };
     println!("devfee: {}% (one {}s slot per {} min cycle, random position) on the same pool", devfee::FEE_PERCENT, devfee::Params::from_env().slot.as_secs(), devfee::Params::from_env().cycle.as_secs() / 60);
 
     let (user_wallet, note) = stratum::login_wallet(&a.pool, &a.wallet, &a.worker);
@@ -449,16 +451,38 @@ fn mine(a: Args) -> Result<()> {
     );
 
     let sh = Arc::new(Shared::new(stop.clone(), stats.clone()));
+    // which GPU failed while mining (driver Xid events), remembered across restarts (faults.rs)
+    let fault_dir = uv::state_dir(&a.uv);
+    let watch = if nv { faults::Watch::new(&devices.iter().map(|&d| (d, gpu::device_pci_bus_id(d).unwrap_or_default(), gpu::device_name(d))).collect::<Vec<_>>()) } else { None };
     let mut gstats = Vec::new();
     let mut handles = Vec::new();
+    let mut excluded = vec![false; devices.len()];
     for (i, &dev) in devices.iter().enumerate() {
-        let gs = Arc::new(GpuStat { dev, name: gpu::device_name(dev), attempts: AtomicU64::new(0), alive: AtomicBool::new(true), pause: AtomicBool::new(false), paused: AtomicBool::new(false), uv_bad: AtomicU64::new(0) });
+        let gs = Arc::new(GpuStat { dev, name: gpu::device_name(dev), attempts: AtomicU64::new(0), alive: AtomicBool::new(true), pause: AtomicBool::new(false), paused: AtomicBool::new(false), uv_bad: AtomicU64::new(0), err: std::sync::Mutex::new(None) });
+        if let Some(w) = &watch {
+            if let Some(c) = w.by_dev(dev).map(|k| &w.cards[k]) {
+                if let (Some(left), Some(r)) = (faults::excluded(&fault_dir, &c.uuid), faults::get(&fault_dir, &c.uuid)) {
+                    println!("faults: {}", faults::excluded_line(&c.label(), &r, left));
+                    gs.alive.store(false, Ordering::Relaxed);
+                    excluded[i] = true;
+                    gstats.push(gs);
+                    continue;
+                }
+            }
+        }
         let (rtx, rrx) = mpsc::channel();
         handles.push(worker::spawn(dev, device_ms[i], sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
         rrx.recv()??; // GPU initialised (or the error that stopped it)
         println!("GPU {dev}: {} ({} backend, kernel {})", gs.name, gpu::backend().name(), gpu::kernel_label_for(dev));
         gstats.push(gs);
     }
+    ensure!(excluded.iter().any(|&e| !e), "every mining GPU is left out after repeated crashes (see the faults: lines above)");
+    // mining runs now: the start checks / tunings begin, each pausing only its own GPU for the check itself
+    if let Some((m, _)) = &uv_state {
+        m.attach(&gstats);
+    }
+    let mut dead_seen = excluded.clone();
+    let mut ok_cleared = false;
     drop((user_sub_tx, fee_sub_tx));
 
     let (prep_tx, prep_rx) = mpsc::channel::<(Src, PoolJob)>();
@@ -483,9 +507,59 @@ fn mine(a: Args) -> Result<()> {
     });
 
     while !stop.load(Ordering::Relaxed) && deadline.map_or(true, |d| start.elapsed() < d) {
-        if gstats.iter().all(|g| !g.alive.load(Ordering::Relaxed)) {
-            stop.store(true, Ordering::SeqCst);
-            anyhow::bail!("all GPU workers have stopped");
+        if (0..gstats.len()).any(|i| !dead_seen[i] && !gstats[i].alive.load(Ordering::Relaxed)) {
+            // a worker stopped: wait a moment for the driver's Xid events and for the workers a CUDA fault takes along, then tell
+            // which GPU failed and remember it (the next start lowers its offset / leaves it out, faults.rs)
+            std::thread::sleep(Duration::from_millis(1500));
+            let mut dead = Vec::new();
+            for (i, g) in gstats.iter().enumerate() {
+                if !dead_seen[i] && !g.alive.load(Ordering::Relaxed) {
+                    dead_seen[i] = true;
+                    dead.push((g.dev, g.err.lock().unwrap().clone().unwrap_or_else(|| "stopped".into())));
+                }
+            }
+            let alive_n = gstats.iter().filter(|g| g.alive.load(Ordering::Relaxed)).count();
+            let injected = faults::test_fault().map(|f| f.0).filter(|d| dead.iter().any(|x| x.0 == *d));
+            let v = faults::attribute(watch.as_ref(), &dead, alive_n, injected);
+            for (k, x) in &v.culprits {
+                let w = watch.as_ref().unwrap();
+                let c = &w.cards[*k];
+                let r = faults::record_crash(&fault_dir, &c.uuid, &c.bus, &c.name, *x, w.offset(*k));
+                let managed = uv::manages(c.dev);
+                if !managed && r.n >= faults::LOWER_AFTER {
+                    let mut r = r.clone();
+                    r.excluded_until = uv::now() + faults::EXCLUDE_SECS;
+                    faults::put(&fault_dir, &c.uuid, &r);
+                    println!("faults: {}", faults::excluded_line(&c.label(), &r, faults::EXCLUDE_SECS));
+                } else {
+                    println!(
+                        "faults: {} crash {} in a row at offset {} remembered in {}{}",
+                        c.label(),
+                        r.n,
+                        uv::signed(r.offset),
+                        fault_dir.join("gpu-faults.json").display(),
+                        if managed { " (auto-uv acts on it at the next start)" } else { " (without --auto-uv / --uv-offset the miner does not change offsets: a GPU that keeps crashing is left out of mining for an hour)" }
+                    );
+                }
+            }
+            for l in &v.lines {
+                println!("faults: {l}");
+            }
+            if alive_n == 0 {
+                stop.store(true, Ordering::SeqCst);
+                uv::restore_all();
+                clocks::restore_all();
+                let why = faults::restart_self("every GPU worker stopped");
+                println!("faults: {why}");
+                anyhow::bail!("all GPU workers have stopped");
+            }
+        }
+        if !ok_cleared && start.elapsed() >= Duration::from_secs(faults::OK_SECS) {
+            ok_cleared = true;
+            if let Some(w) = &watch {
+                let ok: Vec<String> = w.cards.iter().filter(|c| gstats.iter().any(|g| g.dev == c.dev && g.alive.load(Ordering::Relaxed))).map(|c| c.uuid.clone()).collect();
+                faults::mined_ok(&fault_dir, &ok);
+            }
         }
         if let Some((m, _)) = &uv_state {
             m.tick(&gstats, &stats[0]);
@@ -682,7 +756,18 @@ OPTIONS:
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
-    --uv-reset           forget the saved undervolt results
+    --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load, and
+                         the coin / NOID mode); the profiles of other locks stay (since 1.7.2)
+    --uv-reset-all       forget every saved undervolt result (all locks, coins and modes)
+                         Profiles (1.7.2): auto-uv keeps one result per core clock lock (--lock-cclock N; without it the
+                         clock under mining load picks the profile: unlocked or ~1815), per GPU and coin / mode; the start
+                         log lists them (profiles: 1410:+450, 1805:+300). Switching locks reuses each lock's verified result.
+                         A result from before 1.7.2 is used only after a check at the clocks of the run.
+                         Checks and tunings run while the miner mines: only the GPU being checked / tuned pauses, the others mine.
+                         On HiveOS the offset put back on exit is the OC profile's Core Clock value.
+                         A GPU that crashes while mining (Xid) is named in the log and remembered in gpu-faults.json: a
+                         crashed undervolt offset is tuned below, a crash at your own offset twice in a row lowers it
+                         (HiveOS profile value, then 60 MHz steps), a GPU with nothing left to lower is left out for 1 h
     --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
                          CMP 30HX/40HX 150, all others 495
     --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120;
@@ -942,6 +1027,7 @@ fn main() -> Result<()> {
                 a.uv.dry_run = true;
             }
             "--uv-reset" => a.uv.reset = true,
+            "--uv-reset-all" => a.uv.reset_all = true,
             "--uv-offset" => a.uv.fixed = uv::PerGpu::parse(&val()?, "--uv-offset")?,
             "--uv-max" => a.uv.max_offset = uv::PerGpu::parse(&val()?, "--uv-max")?,
             "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,
@@ -1027,12 +1113,19 @@ fn main() -> Result<()> {
         std::process::exit(uv::check_child(&c));
     }
     ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
-    if a.uv.reset {
+    if a.uv.reset || a.uv.reset_all {
         if gpu::backend() == gpu::Backend::Amd {
             amd_uv::reset()?;
         }
-        uv::reset(&a.uv);
+        // --uv-reset-all forgets every profile now; --uv-reset only the profile of the clocks / mode of this run, at its start
+        // (1.7.2: the profiles of other locks survive)
+        if a.uv.reset_all {
+            uv::reset(&a.uv);
+        }
         if a.wallet.is_empty() && !test && !a.uv.enabled() {
+            if !a.uv.reset_all {
+                println!("auto-uv: --uv-reset forgets the profile of the clocks a mining run has (at its start, with --auto-uv); --uv-reset-all forgets every saved result now");
+            }
             return Ok(());
         }
     }

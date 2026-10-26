@@ -296,6 +296,7 @@ pub struct GpuStat {
     pub watch_runs: AtomicU64,
     pub pause: Arc<AtomicBool>,  // a quick check after an OC apply asks the mining thread of this GPU to pause
     pub paused: Arc<AtomicBool>, // the mining thread is paused (no launch in flight)
+    pub err: Mutex<Option<String>>, // why the worker stopped (fault attribution, faults.rs)
 }
 
 struct Shared {
@@ -323,6 +324,7 @@ fn worker(dev: i32, pos: usize, mode: i32, sh: Arc<Shared>, gs: Arc<GpuStat>, re
     let r = worker_loop(pos, &sh, &gs);
     if let Err(e) = r {
         eprintln!("GPU{dev}: NOID worker stopped: {e:#}");
+        *gs.err.lock().unwrap() = Some(format!("{e:#}"));
     }
     gs.alive.store(false, Ordering::Relaxed);
     gpu::release();
@@ -372,7 +374,12 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
     let wth = thresh(1500.0 / wn as f64);
     let wwant = if wsecs > 0 { cpu_candidates(&wf, wn, wth) } else { Vec::new() };
     let mut wlast = Instant::now();
+    // test hook (faults.rs): a fault of this GPU after N s of mining
+    let inject = crate::faults::test_fault_for(gs.dev).map(|secs| Instant::now() + Duration::from_secs(secs));
     loop {
+        if inject.is_some_and(|t| Instant::now() >= t && gs.nonces.load(Ordering::Relaxed) > 0) {
+            bail!("injected fault (FFG_TEST_FAULT): an illegal memory access was encountered");
+        }
         if wsecs > 0 && wlast.elapsed() >= Duration::from_secs(wsecs) && flight.iter().all(Option::is_none) && !gs.pause.load(Ordering::Relaxed) {
             wlast = Instant::now();
             gpu::set_job(&wf, &target_hi(wth))?;
@@ -625,6 +632,8 @@ pub fn mine(o: Opts) -> Result<()> {
         stale: AtomicU64::new(0),
         blocks: AtomicU64::new(0),
     });
+    let watch = crate::faults::Watch::new(&devices.iter().enumerate().map(|(p, &d)| (d, buses[p].clone(), gpu::device_name(d))).collect::<Vec<_>>());
+    let mut excluded = vec![false; devices.len()];
     let mut gstats = Vec::new();
     let mut handles = Vec::new();
     for (pos, &dev) in devices.iter().enumerate() {
@@ -641,7 +650,17 @@ pub fn mine(o: Opts) -> Result<()> {
             watch_runs: AtomicU64::new(0),
             pause: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(false)),
+            err: Mutex::new(None),
         });
+        if let Some(c) = watch.as_ref().and_then(|w| w.by_dev(dev).map(|k| &w.cards[k])) {
+            if let (Some(left), Some(r)) = (crate::faults::excluded(&dir, &c.uuid), crate::faults::get(&dir, &c.uuid)) {
+                println!("faults: {}", crate::faults::excluded_line(&c.label(), &r, left));
+                gs.alive.store(false, Ordering::Relaxed);
+                excluded[pos] = true;
+                gstats.push(gs);
+                continue;
+            }
+        }
         live.attach(pos, gs.pause.clone(), gs.paused.clone());
         let (rtx, rrx) = mpsc::channel();
         let (sh2, gs2, mode) = (sh.clone(), gs.clone(), o.mode);
@@ -660,10 +679,58 @@ pub fn mine(o: Opts) -> Result<()> {
     let mut last_n = vec![0u64; gstats.len()];
     let mut win = Instant::now();
     let mut last_bad = 0u64;
+    ensure!(excluded.iter().any(|&e| !e), "every mining GPU is left out after repeated crashes (see the faults: lines above)");
+    // mining runs: the NOID checks / tunings start now, each pausing only its own GPU
+    tune::start_jobs(&live);
+    let mut dead_seen = excluded.clone();
+    let mut ok_cleared = false;
     while !stop.load(Ordering::Relaxed) && deadline.map_or(true, |d| start.elapsed() < d) {
-        if gstats.iter().all(|g| !g.alive.load(Ordering::Relaxed)) {
-            stop.store(true, Ordering::SeqCst);
-            bail!("all GPU workers have stopped");
+        if (0..gstats.len()).any(|i| !dead_seen[i] && !gstats[i].alive.load(Ordering::Relaxed)) {
+            // which GPU failed (driver Xid events), remembered for the next start (faults.rs); a CUDA fault stops every worker
+            std::thread::sleep(Duration::from_millis(1500));
+            let mut dead = Vec::new();
+            for (i, g) in gstats.iter().enumerate() {
+                if !dead_seen[i] && !g.alive.load(Ordering::Relaxed) {
+                    dead_seen[i] = true;
+                    dead.push((g.dev, g.err.lock().unwrap().clone().unwrap_or_else(|| "stopped".into())));
+                }
+            }
+            let alive_n = gstats.iter().filter(|g| g.alive.load(Ordering::Relaxed)).count();
+            let injected = crate::faults::test_fault().map(|f| f.0).filter(|d| dead.iter().any(|x| x.0 == *d));
+            let v = crate::faults::attribute(watch.as_ref(), &dead, alive_n, injected);
+            for (k, x) in &v.culprits {
+                let w = watch.as_ref().unwrap();
+                let c = &w.cards[*k];
+                let r = crate::faults::record_crash(&dir, &c.uuid, &c.bus, &c.name, *x, w.offset(*k));
+                // with --auto-uv a crash at a tuned NOID offset makes the next start tune below it; at the base (0 or the owner's
+                // negative offset) there is nothing to lower: after 2 crash starts the GPU is left out for an hour
+                let tunable = o.uv.auto && r.offset > 0;
+                if !tunable && r.n >= crate::faults::LOWER_AFTER {
+                    let mut r = r.clone();
+                    r.excluded_until = crate::uv::now() + crate::faults::EXCLUDE_SECS;
+                    crate::faults::put(&dir, &c.uuid, &r);
+                    println!("faults: {}", crate::faults::excluded_line(&c.label(), &r, crate::faults::EXCLUDE_SECS));
+                } else {
+                    println!("faults: {} crash {} in a row at offset {} remembered{}", c.label(), r.n, crate::uv::signed(r.offset), if tunable { " (NOID auto-uv tunes below it at the next start)" } else { "" });
+                }
+            }
+            for l in &v.lines {
+                println!("faults: {l}");
+            }
+            if alive_n == 0 {
+                stop.store(true, Ordering::SeqCst);
+                offset::restore_all();
+                clocks::restore_all();
+                println!("faults: {}", crate::faults::restart_self("every GPU worker stopped"));
+                bail!("all GPU workers have stopped");
+            }
+        }
+        if !ok_cleared && start.elapsed() >= Duration::from_secs(crate::faults::OK_SECS) {
+            ok_cleared = true;
+            if let Some(w) = &watch {
+                let ok: Vec<String> = w.cards.iter().filter(|c| gstats.iter().any(|g| g.dev == c.dev && g.alive.load(Ordering::Relaxed))).map(|c| c.uuid.clone()).collect();
+                crate::faults::mined_ok(&dir, &ok);
+            }
         }
         while let Ok((src, ev)) = ev_rx.try_recv() {
             let s = &mut st[src.idx()];

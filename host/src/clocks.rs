@@ -155,7 +155,9 @@ struct Item {
     pos: usize,
     n: usize,
     core_locked: bool,
+    core_mhz: u32,
     mem_locked: bool,
+    mem_mhz: u32,
     mem_off: bool,
     core_prev: Prev,
     mem_prev: Prev,
@@ -237,6 +239,8 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     };
     let mut items = Vec::new();
     let n = devices.len();
+    // one value given for every GPU (not a per-GPU list)
+    let single_core = n > 1 && o.core_mhz.len() == n && o.core_mhz.iter().all(|v| v.is_some() && *v == o.core_mhz[0]);
     for (i, &dev) in devices.iter().enumerate() {
         let core = o.core_mhz.get(i).copied().flatten();
         let mem = o.mem_mhz.get(i).copied().flatten();
@@ -258,14 +262,23 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 continue;
             }
         };
-        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, mem_locked: false, mem_off: false, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
+        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
         if let Some(mhz) = core {
             let (prev, src) = prev_lock(&nv, d, Kind::Core, i, n);
             match nv.set_core_locked(d, mhz) {
                 Ok(()) => {
                     it.core_locked = true;
+                    it.core_mhz = mhz;
                     it.core_prev = prev;
                     lg(format!("GPU{dev} (bus {bus}): core clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
+                    // one --lock-cclock value for all GPUs replaces per-GPU HiveOS locks (Rig01: 1805 replaced 1775 on two cards)
+                    if let (Prev::Locked(p), true) = (prev, single_core && src == "HiveOS OC profile") {
+                        if p != mhz {
+                            lg(format!(
+                                "GPU{dev} (bus {bus}): WARNING the single --lock-cclock {mhz} replaces this GPU's own HiveOS lock {p} MHz while mining (it is put back on exit);                                  for per-GPU locks give a list (one value per GPU, '-' = leave that GPU alone) or leave --lock-cclock out: the HiveOS profile locks stay then"
+                            ));
+                        }
+                    }
                 }
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot lock core clock ({e:#}); needs root/Administrator and a driver that supports it", )),
             }
@@ -275,6 +288,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
             match nv.set_mem_locked(d, mhz) {
                 Ok(()) => {
                     it.mem_locked = true;
+                    it.mem_mhz = mhz;
                     it.mem_prev = prev;
                     lg(format!("GPU{dev} (bus {bus}): memory clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
                 }
@@ -307,6 +321,32 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
     *state().lock().unwrap() = Some(State { nv, marker, items });
     Some(Guard)
+}
+
+/// Core clock lock this run set on each of `n` mining GPUs (by position; None = not set by the miner).
+pub fn core_locks(n: usize) -> Vec<Option<u32>> {
+    let mut v = vec![None; n];
+    if let Some(st) = state().lock().unwrap().as_ref() {
+        for it in &st.items {
+            if it.core_locked && it.pos < n {
+                v[it.pos] = Some(it.core_mhz);
+            }
+        }
+    }
+    v
+}
+
+/// Memory clock lock this run set on each of `n` mining GPUs (by position; None = not set by the miner).
+pub fn mem_locks(n: usize) -> Vec<Option<u32>> {
+    let mut v = vec![None; n];
+    if let Some(st) = state().lock().unwrap().as_ref() {
+        for it in &st.items {
+            if it.mem_locked && it.pos < n {
+                v[it.pos] = Some(it.mem_mhz);
+            }
+        }
+    }
+    v
 }
 
 /// Puts back every clock setting this run applied (the lock from before, else default), and removes the marker.  Safe to

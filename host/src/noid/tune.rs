@@ -77,6 +77,8 @@ struct Entry {
     verified_at: u64,
     disabled_until: u64,
     stepped_back: u32,
+    clk: u32,    // load clock at the base check (1.7.2)
+    clk_ok: u32, // load clock at the result (confirmation / last quick check); 0 = unknown
 }
 
 impl Entry {
@@ -85,7 +87,7 @@ impl Entry {
                "power_limit": self.pl, "orig_offset": self.orig, "base_offset": self.base, "offset": self.offset, "cap": self.cap,
                "step": self.step, "edge": self.edge, "mhs_base": self.mhs_base, "watts_base": self.w_base, "mhs": self.mhs,
                "watts": self.w, "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until,
-               "stepped_back_in_mining": self.stepped_back})
+               "stepped_back_in_mining": self.stepped_back, "clk_mhz": self.clk, "clk_ok_mhz": self.clk_ok})
     }
     fn from_json(v: &Value) -> Option<Entry> {
         let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
@@ -111,6 +113,8 @@ impl Entry {
             verified_at: u("verified_at"),
             disabled_until: u("disabled_until"),
             stepped_back: u("stepped_back_in_mining") as u32,
+            clk: u("clk_mhz") as u32,
+            clk_ok: u("clk_ok_mhz") as u32,
         })
     }
 }
@@ -119,6 +123,41 @@ impl Entry {
 struct Db {
     dir: PathBuf,
     v: Mutex<Value>,
+    keys: Mutex<std::collections::HashMap<String, String>>, // uuid -> profile key in use ("eff@1400", "eff@~1815")
+}
+
+/// Key of a NOID profile (1.7.2): the mode and the core lock set by the miner ("eff@1400"), else the clock under load at the base
+/// check ("eff@~1815").
+fn pkey(mode: &str, e: &Entry) -> String {
+    if e.core_lock != 0 {
+        format!("{mode}@{}", e.core_lock)
+    } else if e.clk != 0 {
+        format!("{mode}@~{}", e.clk)
+    } else {
+        format!("{mode}@?")
+    }
+}
+
+/// Two NOID profiles of the same clocks.
+fn same_clocks(a: &Entry, b: &Entry) -> bool {
+    if a.core_lock != 0 && b.core_lock != 0 {
+        return a.core_lock == b.core_lock;
+    }
+    let (ca, cb) = (if a.core_lock != 0 { a.core_lock + 10 } else { a.clk }, if b.core_lock != 0 { b.core_lock + 10 } else { b.clk });
+    ca != 0 && cb != 0 && (ca as i64 - cb as i64).abs() <= (ca as i64 * 3 / 100).max(45)
+}
+
+/// Does the profile fit the lock set by this run, or (lock unknown) the clock `clk` under load at the base check?
+fn fits(e: &Entry, lock: Option<u32>, clk: Option<u32>) -> bool {
+    let tol = |c: u32| (c as i64 * 3 / 100).max(45) + 15;
+    match (lock, clk) {
+        (Some(l), _) => if e.core_lock != 0 { e.core_lock == l } else { e.clk != 0 && (e.clk as i64 - l as i64).abs() <= tol(e.clk) },
+        (None, Some(k)) => {
+            let c = if e.clk != 0 { e.clk } else { e.core_lock + 10 };
+            c > 10 && (c as i64 - k as i64).abs() <= tol(c)
+        }
+        _ => false,
+    }
 }
 
 impl Db {
@@ -128,17 +167,66 @@ impl Db {
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({"version": 1, "gpus": {}}));
-        Db { dir: dir.to_path_buf(), v: Mutex::new(v) }
+        let mut v = v;
+        // before 1.7.2: one result per card and mode ("eff"); kept as the profile of its --lock-cclock, dropped without one (the
+        // clock it was found at is unknown)
+        let mut moved = 0;
+        if let Some(sec) = v[SECTION].as_object_mut() {
+            for (_, card) in sec.iter_mut() {
+                let Some(m) = card.as_object_mut() else { continue };
+                let old: Vec<String> = m.keys().filter(|k| !k.contains('@')).cloned().collect();
+                for k in old {
+                    let e = m.remove(&k).and_then(|x| Entry::from_json(&x));
+                    if let Some(e) = e.filter(|e| e.core_lock != 0) {
+                        m.insert(pkey(&k, &e), e.to_json());
+                        moved += 1;
+                    }
+                }
+            }
+        }
+        if moved > 0 {
+            lg(format!("{moved} NOID result(s) from before 1.7.2 kept as the profiles of their --lock-cclock"));
+        }
+        Db { dir: dir.to_path_buf(), v: Mutex::new(v), keys: Mutex::new(Default::default()) }
+    }
+    /// All profiles of this card and mode.
+    fn profiles(&self, uuid: &str, mode: &str) -> Vec<(String, Entry)> {
+        let pre = format!("{mode}@");
+        let v = self.v.lock().unwrap();
+        let mut out: Vec<(String, Entry)> = v[SECTION][uuid].as_object().map(|m| m.iter().filter(|(k, _)| k.starts_with(&pre)).filter_map(|(k, x)| Entry::from_json(x).map(|e| (k.clone(), e))).collect()).unwrap_or_default();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+    fn line(&self, uuid: &str, mode: &str) -> String {
+        let p = self.profiles(uuid, mode);
+        if p.is_empty() {
+            return "none".into();
+        }
+        p.iter().map(|(k, e)| format!("{}:{}{}", k.split_once('@').map_or(k.as_str(), |x| x.1), signed(e.offset), if e.disabled_until > now() { " (paused)" } else { "" })).collect::<Vec<_>>().join(", ")
+    }
+    fn use_key(&self, uuid: &str, key: &str) {
+        self.keys.lock().unwrap().insert(uuid.into(), key.into());
+    }
+    fn forget(&self, uuid: &str, key: &str) {
+        let mut v = self.v.lock().unwrap();
+        if v[SECTION][uuid].as_object_mut().is_some_and(|m| m.remove(key).is_some()) {
+            self.write(&v);
+        }
+        self.keys.lock().unwrap().remove(uuid);
     }
     fn write(&self, v: &Value) {
         if let Err(e) = uv::write_atomic(&uv::results_path(&self.dir), &serde_json::to_string_pretty(v).unwrap()) {
             lg(format!("cannot save {}: {e:#}", uv::results_path(&self.dir).display()));
         }
     }
-    fn entry(&self, uuid: &str, mode: &str) -> Option<Entry> {
-        self.v.lock().unwrap()[SECTION].get(uuid).and_then(|c| c.get(mode)).and_then(Entry::from_json)
+    /// The profile in use on this card (chosen at start), if any.
+    fn entry(&self, uuid: &str, _mode: &str) -> Option<Entry> {
+        let k = self.keys.lock().unwrap().get(uuid).cloned()?;
+        self.v.lock().unwrap()[SECTION].get(uuid).and_then(|c| c.get(&k)).and_then(Entry::from_json)
     }
+    /// Saves `e` as the profile of its mode and clocks; the profile of the same clocks is replaced, the others stay.
     fn save(&self, uuid: &str, mode: &str, e: &Entry) {
+        let key = pkey(mode, e);
         let mut v = self.v.lock().unwrap();
         if !v[SECTION].is_object() {
             v[SECTION] = json!({});
@@ -146,8 +234,16 @@ impl Db {
         if !v[SECTION][uuid].is_object() {
             v[SECTION][uuid] = json!({});
         }
-        v[SECTION][uuid][mode] = e.to_json();
+        let pre = format!("{mode}@");
+        let same: Vec<String> = v[SECTION][uuid].as_object().unwrap().iter().filter(|(k, x)| k.starts_with(&pre) && **k != key && Entry::from_json(x).is_some_and(|o| same_clocks(&o, e))).map(|(k, _)| k.clone()).collect();
+        let m = v[SECTION][uuid].as_object_mut().unwrap();
+        for k in same {
+            m.remove(&k);
+        }
+        m.insert(key.clone(), e.to_json());
         self.write(&v);
+        drop(v);
+        self.use_key(uuid, &key);
     }
     fn mark_trying(&self, uuid: &str, at: i32) {
         let mut v = self.v.lock().unwrap();
@@ -193,6 +289,7 @@ pub fn forget_trying_on_stop() {
 /// Cards whose core offset this run changed (base 0 for a positive owner's offset, a tuned NOID offset, --uv-offset): stepped
 /// back when a hit fails the CPU check (tuned ones), and watched for OC applies that reset the offset while mining.
 struct LiveCard {
+    job: bool, // its check / tuning runs once mining has started (start_jobs)
     pos: usize,
     dev: i32,
     bus: String,
@@ -493,6 +590,43 @@ impl Tuner<'_> {
         }
     }
 
+    /// At start, before mining: the offset when no check is needed (known lock and a recently verified profile of it, a
+    /// pause, nothing above the base, a GPU left out); None = a check or a tuning, run once mining has started (start_jobs).
+    fn quick(&self, c: &Card) -> Option<i32> {
+        let mode = super::mode_name(self.mode);
+        if self.db.v.lock().unwrap()[TRYING].get(&c.uuid).is_some() || self.o.reset {
+            return None;
+        }
+        if let Some(r) = crate::faults::get(&self.db.dir, &c.uuid) {
+            if crate::faults::excluded(&self.db.dir, &c.uuid).is_some() {
+                let _ = offset::set(&c.r.bus, c.base);
+                return Some(c.base);
+            }
+            if r.n >= 1 && r.offset > c.base {
+                return None;
+            }
+        }
+        let l = c.r.core_lock?;
+        let (key, e) = self.db.profiles(&c.uuid, mode).into_iter().filter(|(_, e)| fits(e, Some(l), None)).min_by_key(|(_, e)| u64::MAX - e.verified_at)?;
+        if e.driver != self.driver || e.kernel != c.kernel || (e.pl > 0.0 && c.pl > 0.0 && (c.pl - e.pl).abs() > 0.03 * e.pl) || e.base != c.base {
+            return None;
+        }
+        self.db.use_key(&c.uuid, &key);
+        let line = self.db.line(&c.uuid, mode);
+        if e.disabled_until > now() || e.offset <= c.base {
+            lg(format!("{} NOID profiles ({mode}): {line}; using {key}: {}; mining at {}", c.label(), if e.disabled_until > now() { "paused after a failure" } else { "nothing above the base" }, signed(c.base)));
+            let _ = offset::set(&c.r.bus, c.base);
+            return Some(c.base);
+        }
+        let age = now().saturating_sub(e.verified_at);
+        if saved_vs_limit(e.offset, e.cap, c.max) != Saved::Apply || self.o.reval_hours <= 0.0 || (age as f64) >= self.o.reval_hours * 3600.0 {
+            return None;
+        }
+        lg(format!("{} NOID profiles ({mode}): {line}; using {key}: offset {} (verified {} ago at this lock): applied", c.label(), signed(e.offset), fmt_age(age)));
+        offset::set(&c.r.bus, e.offset).ok()?;
+        Some(e.offset)
+    }
+
     /// Offset to mine at for this card.
     fn run_card(&self, c: &Card) -> i32 {
         let mode = super::mode_name(self.mode);
@@ -500,16 +634,53 @@ impl Tuner<'_> {
             lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): tuning again below it", c.label(), signed(at)));
             return self.tune(c, Some(at));
         }
+        // a crash while mining at a tuned NOID offset (faults.rs, 1.7.2): that offset counts as failed
+        if let Some(mut r) = crate::faults::get(&self.db.dir, &c.uuid) {
+            if crate::faults::excluded(&self.db.dir, &c.uuid).is_some() {
+                let _ = offset::set(&c.r.bus, c.base);
+                return c.base; // left out of mining (logged by the miner)
+            }
+            if r.n >= 1 && r.offset > c.base {
+                lg(format!("{} crashed while mining at NOID offset {} in the previous run (Xid {}): tuning again below it", c.label(), signed(r.offset), r.xid));
+                r.n = 0;
+                crate::faults::put(&self.db.dir, &c.uuid, &r);
+                return self.tune(c, Some(r.offset));
+            }
+        }
+        // 1.7.2: one profile per mode and core clock lock.  The lock is known when this run sets it (--lock-cclock); else a short
+        // check at the base offset measures the clock under load, which picks the profile
+        let lock = c.r.core_lock;
+        let profs = self.db.profiles(&c.uuid, mode);
+        let clk = if lock.is_none() && !profs.is_empty() {
+            let r = self.check(c, c.base, 12);
+            if r.infra {
+                return self.abort(c, &r);
+            }
+            r.clk
+        } else {
+            None
+        };
+        let sel = profs.iter().filter(|(_, e)| fits(e, lock, clk)).min_by_key(|(_, e)| u64::MAX - e.verified_at).map(|(k, _)| k.clone());
+        let what = match (lock, clk) {
+            (Some(l), _) => format!("core lock {l} MHz"),
+            (None, Some(k)) => format!("{k} MHz under load at the base (lock not set by the miner)"),
+            _ => "these clocks".into(),
+        };
+        lg(format!("{} NOID profiles ({mode}): {}; {}", c.label(), self.db.line(&c.uuid, mode), sel.as_ref().map_or(format!("none for {what}"), |k| format!("using {k} for {what}"))));
         if self.o.reset {
+            if let Some(k) = &sel {
+                self.db.forget(&c.uuid, k);
+            }
+            lg(format!("{} --uv-reset: {} forgotten; the other NOID profiles are kept (--uv-reset-all forgets all)", c.label(), sel.as_deref().unwrap_or("no profile")));
             return self.tune(c, None);
         }
+        let Some(key) = sel else { return self.tune(c, None) };
+        self.db.use_key(&c.uuid, &key);
         let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, None) };
         let why = if e.driver != self.driver {
             Some(format!("driver {} when tuned, {} now", e.driver, self.driver))
         } else if e.kernel != c.kernel {
             Some(format!("kernel {} when tuned, {} now", e.kernel, c.kernel))
-        } else if e.core_lock != c.r.core_lock.unwrap_or(0) {
-            Some(format!("core clock lock {} MHz when tuned, {} now", e.core_lock, c.r.core_lock.unwrap_or(0)))
         } else if e.pl > 0.0 && c.pl > 0.0 && (c.pl - e.pl).abs() > 0.03 * e.pl {
             Some(format!("power limit {:.0} W when tuned, {:.0} W now", e.pl, c.pl))
         } else if e.base != c.base {
@@ -541,7 +712,9 @@ impl Tuner<'_> {
             }
         };
         let age = now().saturating_sub(e.verified_at);
-        if (age as f64) < self.o.reval_hours * 3600.0 && self.o.reval_hours > 0.0 {
+        // 1.7.2: without --lock-cclock the lock is not known to the miner (HiveOS / nvidia-smi may have changed it since): never
+        // applied without the quick check, whose load clock is compared with the one the offset was verified at
+        if c.r.core_lock.is_some() && (age as f64) < self.o.reval_hours * 3600.0 && self.o.reval_hours > 0.0 {
             lg(format!("{} NOID offset {} (tuned, verified {} ago): applied", c.label(), signed(at), fmt_age(age)));
             let _ = offset::set(&c.r.bus, at);
             return at;
@@ -552,9 +725,18 @@ impl Tuner<'_> {
             return self.abort(c, &r);
         }
         if r.ok {
+            if let (true, Some(k)) = (e.clk_ok != 0, r.clk) {
+                if let uv::Regime::Differs(d) = uv::regime_probe(e.clk_ok, at, k, at) {
+                    lg(format!("{} {}: the check passed, but at {k} MHz under load, {} MHz when verified ({d}: the clock lock changed): tuning again", c.label(), signed(at), e.clk_ok));
+                    return self.tune(c, None);
+                }
+            }
             lg(format!("{} {}: ok ({}); mining at it", c.label(), signed(at), r.brief()));
             let mut e2 = e.clone();
             e2.verified_at = now();
+            if e2.clk_ok == 0 {
+                e2.clk_ok = r.clk.unwrap_or(0);
+            }
             self.db.save(&c.uuid, mode, &e2);
             return at;
         }
@@ -596,6 +778,7 @@ impl Tuner<'_> {
         if r.infra {
             return self.abort(c, &r);
         }
+        e.clk = r.clk.unwrap_or(0);
         if !r.ok {
             lg(format!("{} base {}: FAILED ({}): NOID auto-uv off on this GPU for 24 h; mining at the base", c.label(), signed(c.base), r.reason));
             e.offset = c.base;
@@ -607,6 +790,8 @@ impl Tuner<'_> {
         }
         lg(format!("{} base {}: ok ({})", c.label(), signed(c.base), r.brief()));
         (e.mhs_base, e.w_base) = (r.mhs, r.watts.unwrap_or(0.0));
+        e.clk = r.clk.unwrap_or(0);
+        let mut conf_clk = r.clk;
         let mut last_ok = c.base;
         let mut good = (r.mhs, r.watts.unwrap_or(0.0));
         let mut edge = 0;
@@ -699,6 +884,7 @@ impl Tuner<'_> {
             if r.ok {
                 lg(format!("{} confirmation {}: ok ({})", c.label(), signed(res), r.brief()));
                 good = (r.mhs, r.watts.unwrap_or(0.0));
+                conf_clk = r.clk;
                 break;
             }
             lg(format!("{} confirmation {}: FAILED ({}): one step lower", c.label(), signed(res), r.reason));
@@ -711,6 +897,7 @@ impl Tuner<'_> {
         e.offset = res;
         e.cap = max;
         e.edge = edge;
+        e.clk_ok = conf_clk.unwrap_or(0);
         (e.mhs, e.w) = good;
         e.tested_at = now();
         e.verified_at = now();
@@ -750,12 +937,12 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         return Ok(Arc::new(live));
     };
     live.driver = nv.driver_version();
-    if o.reset {
+    if o.reset_all {
         let db = Db::load(dir);
         let mut v = db.v.lock().unwrap();
         if v.as_object_mut().is_some_and(|m| m.remove(SECTION).is_some()) {
             db.write(&v);
-            lg("saved NOID results forgotten (--uv-reset)");
+            lg("saved NOID results forgotten (--uv-reset-all)");
         }
     }
     let mut list = Vec::new();
@@ -783,6 +970,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
     }
     // the offset each card mines at (None: left as the owner had it), and whether it is a tuned (verified) NOID offset
     let mut set_to: Vec<(Option<i32>, bool)> = vec![(None, false); list.len()];
+    let mut pending: Vec<usize> = Vec::new(); // positions whose check / tuning runs once mining has started
     if o.fixed.is_set() {
         for (i, c) in list.iter().enumerate() {
             let Some(v) = o.fixed.get(c.r.pos) else { continue };
@@ -801,13 +989,21 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         for c in &list {
             nv.watch_xid(c.nv);
         }
+        // 1.7.2: only what needs no check is decided here; tunings and checks run once mining has started (start_jobs), each
+        // pausing only its own GPU: the other GPUs mine meanwhile (before, every GPU waited for the slowest tuning)
         let t = Tuner { nv, o, mode, db: &db, driver: live.driver.clone(), stop };
-        let res: Vec<i32> = std::thread::scope(|s| {
-            let hs: Vec<_> = list.iter().map(|c| s.spawn(|| t.run_card(c))).collect();
-            hs.into_iter().zip(&list).map(|(h, c)| h.join().unwrap_or(c.base)).collect()
-        });
-        for (i, (c, &v)) in list.iter().zip(&res).enumerate() {
-            set_to[i] = (Some(v), v > c.base);
+        for (i, c) in list.iter().enumerate() {
+            match t.quick(c) {
+                Some(v) => set_to[i] = (Some(v), v > c.base),
+                None => {
+                    if c.orig != c.base {
+                        let _ = offset::set(&c.r.bus, c.base);
+                    }
+                    set_to[i] = (Some(c.base), false);
+                    pending.push(c.r.pos);
+                    lg(format!("{} NOID check / tuning starts once mining runs (this GPU mines at {} until then and pauses for it; the other GPUs mine)", c.label(), signed(c.base)));
+                }
+            }
         }
         live.db = Some(db);
     } else {
@@ -826,10 +1022,12 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
     let mut live_cards = Vec::new();
     for (c, (v, tuned)) in list.into_iter().zip(set_to) {
         let Some(v) = v else { continue };
-        if v == c.orig && !tuned {
+        let job = pending.contains(&c.r.pos);
+        if v == c.orig && !tuned && !job {
             continue; // nothing changed on this card: nothing to keep
         }
         live_cards.push(LiveCard {
+            job,
             pos: c.r.pos,
             dev: c.r.dev,
             bus: c.r.bus.clone(),
@@ -841,10 +1039,10 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
             tuned,
             want: v,
             owned: true,
-            busy: Arc::new(AtomicBool::new(false)),
+            busy: Arc::new(AtomicBool::new(job)),
             next_read: Instant::now() + Duration::from_secs(30),
             resets: Arc::new(ResetLimit::default()),
-            card: tuned.then_some(c),
+            card: (tuned || job).then_some(c),
             pause: None,
             last: None,
         });
@@ -874,6 +1072,37 @@ impl Live {
         if let Some(c) = self.cards.lock().unwrap().iter_mut().find(|c| c.pos == pos) {
             c.pause = Some((pause, paused));
         }
+    }
+}
+
+/// Mining has started (the pause handshakes are attached): the NOID checks / tunings that need the GPU run now, one thread per
+/// GPU, each pausing only the mining of its own GPU.
+pub fn start_jobs(live: &Arc<Live>) {
+    let jobs: Vec<(usize, Card, Option<(Arc<AtomicBool>, Arc<AtomicBool>)>)> =
+        live.cards.lock().unwrap().iter_mut().filter(|c| c.job).filter_map(|c| { c.job = false; c.card.clone().map(|k| (c.pos, k, c.pause.clone())) }).collect();
+    for (pos, card, pause) in jobs {
+        let l2 = live.clone();
+        std::thread::spawn(move || {
+            let (Some(nv), Some(db)) = (l2.nv, l2.db.as_ref()) else { return };
+            let t = Tuner { nv, o: &l2.o, mode: l2.mode_id, db, driver: l2.driver.clone(), stop: &l2.stop };
+            if let Some((p, _)) = &pause {
+                p.store(true, Ordering::SeqCst);
+            }
+            let t0 = Instant::now();
+            while pause.as_ref().is_some_and(|(_, d)| !d.load(Ordering::SeqCst)) && t0.elapsed() < Duration::from_secs(60) && !t.stopped() {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let v = if t.stopped() { card.base } else { t.run_card(&card) };
+            if let Some(c) = l2.cards.lock().unwrap().iter_mut().find(|c| c.pos == pos) {
+                c.want = v;
+                c.tuned = v > card.base;
+                c.next_read = Instant::now() + Duration::from_secs(30);
+                c.busy.store(false, Ordering::SeqCst);
+            }
+            if let Some((p, _)) = &pause {
+                p.store(false, Ordering::SeqCst);
+            }
+        });
     }
 }
 

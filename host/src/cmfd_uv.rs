@@ -39,7 +39,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const SECTION: &str = "cmfd";
+const SECTION: &str = "cmfd"; // before 1.7.2: one result per GPU
+const PROFILES: &str = "cmfd_profiles"; // 1.7.2: uuid -> core lock / clock key -> result
 const TRYING: &str = "cmfd_trying";
 /// version of the fixed check inputs (coefficients/challenges); part of the identity, so saved references always match them
 const INPUTS: &str = "in1";
@@ -80,6 +81,8 @@ struct Entry {
     clk_before: u32,
     clk_after: u32,
     pl: f64, // enforced power limit (W) when tuned: the edge moves with the operating point
+    lock: u32,      // core lock this miner set (--lock-cclock) when tuned; 0 = not set by the miner (keyed by clk_before)
+    migrated: bool, // from before 1.7.2 without a lock: used only after the quick check
     tested_at: u64,
     verified_at: u64,
     disabled_until: u64,
@@ -91,7 +94,7 @@ impl Entry {
                "base_offset": self.base, "offset": self.offset, "cap": self.cap, "step": self.step, "refs": self.refs,
                "fws_before": self.fws_before, "fws_after": self.fws_after, "watts_before": self.w_before, "watts_after": self.w_after,
                "clk_before": self.clk_before, "clk_after": self.clk_after, "power_limit": self.pl, "tested_at": self.tested_at,
-               "verified_at": self.verified_at, "disabled_until": self.disabled_until})
+               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "core_lock": self.lock, "migrated": self.migrated})
     }
 
     fn from_json(v: &Value) -> Option<Entry> {
@@ -115,6 +118,8 @@ impl Entry {
             clk_before: u("clk_before") as u32,
             clk_after: u("clk_after") as u32,
             pl: f("power_limit"),
+            lock: u("core_lock") as u32,
+            migrated: v["migrated"].as_bool().unwrap_or(false),
             tested_at: u("tested_at"),
             verified_at: u("verified_at"),
             disabled_until: u("disabled_until"),
@@ -126,6 +131,37 @@ impl Entry {
 struct Db {
     dir: PathBuf,
     v: Mutex<Value>,
+    keys: Mutex<std::collections::HashMap<String, String>>, // uuid -> profile key in use
+}
+
+/// Key of a CMFD profile: the core lock set by the miner ("1805"), else the clock under load at the base ("~1650").
+fn pkey(e: &Entry) -> String {
+    if e.lock != 0 { e.lock.to_string() } else { format!("~{}", e.clk_before) }
+}
+
+fn clk_of(e: &Entry) -> u32 {
+    if e.lock != 0 { e.lock + 10 } else { e.clk_before }
+}
+
+fn near(a: u32, b: u32) -> bool {
+    a != 0 && b != 0 && (a as i64 - b as i64).abs() <= (a as i64 * 3 / 100).max(45) + 15
+}
+
+/// Does the profile fit the lock of this run (`lock`), or (lock unknown) the base clock `clk` under load?
+fn fits(e: &Entry, lock: Option<u32>, clk: Option<u32>) -> bool {
+    match (lock, clk) {
+        (Some(l), _) => if e.lock != 0 { e.lock == l } else { near(e.clk_before, l + 10) },
+        (None, Some(k)) => near(clk_of(e), k),
+        _ => false,
+    }
+}
+
+/// The engine identity of 1.7.1 carried the lock (" | lock-cclock 1805"); since 1.7.2 the lock is the profile key.
+fn split_lock(kernel: &str) -> (String, u32) {
+    match kernel.rsplit_once(" | lock-cclock ") {
+        Some((k, l)) => (k.to_string(), l.trim().parse().unwrap_or(0)),
+        None => (kernel.to_string(), 0),
+    }
 }
 
 impl Db {
@@ -135,7 +171,66 @@ impl Db {
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({"version": 1, "gpus": {}}));
-        Db { dir: dir.to_path_buf(), v: Mutex::new(v) }
+        let mut v = v;
+        // before 1.7.2: one result per GPU; the lock (if any) was part of the engine identity
+        if let Some(old) = v[SECTION].as_object().cloned() {
+            let mut n = 0;
+            for (uuid, x) in old {
+                let Some(mut e) = Entry::from_json(&x) else { continue };
+                let (k, l) = split_lock(&e.kernel);
+                e.kernel = k;
+                e.lock = l;
+                if l == 0 {
+                    if e.clk_before == 0 {
+                        continue;
+                    }
+                    e.migrated = true;
+                    e.verified_at = 0;
+                }
+                if !v[PROFILES].is_object() {
+                    v[PROFILES] = json!({});
+                }
+                if !v[PROFILES][&uuid].is_object() {
+                    v[PROFILES][&uuid] = json!({});
+                }
+                v[PROFILES][&uuid][pkey(&e)] = e.to_json();
+                n += 1;
+            }
+            if let Some(m) = v.as_object_mut() {
+                m.remove(SECTION);
+            }
+            if n > 0 {
+                lg(format!("{n} CMFD result(s) from before 1.7.2 kept as profiles of their lock / clock (one without a lock is used only after the quick check)"));
+            }
+        }
+        Db { dir: dir.to_path_buf(), v: Mutex::new(v), keys: Mutex::new(Default::default()) }
+    }
+
+    fn profiles(&self, uuid: &str) -> Vec<(String, Entry)> {
+        let v = self.v.lock().unwrap();
+        let mut out: Vec<(String, Entry)> = v[PROFILES][uuid].as_object().map(|m| m.iter().filter_map(|(k, x)| Entry::from_json(x).map(|e| (k.clone(), e))).collect()).unwrap_or_default();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    fn line(&self, uuid: &str) -> String {
+        let p = self.profiles(uuid);
+        if p.is_empty() {
+            return "none".into();
+        }
+        p.iter().map(|(k, e)| format!("{k}:{}{}", signed(e.offset), if e.disabled_until > now() { " (paused)" } else { "" })).collect::<Vec<_>>().join(", ")
+    }
+
+    fn use_key(&self, uuid: &str, key: &str) {
+        self.keys.lock().unwrap().insert(uuid.into(), key.into());
+    }
+
+    fn forget(&self, uuid: &str, key: &str) {
+        let mut v = self.v.lock().unwrap();
+        if v[PROFILES][uuid].as_object_mut().is_some_and(|m| m.remove(key).is_some()) {
+            self.write(&v);
+        }
+        self.keys.lock().unwrap().remove(uuid);
     }
 
     fn write(&self, v: &Value) {
@@ -144,17 +239,37 @@ impl Db {
         }
     }
 
+    /// The profile in use on this card (chosen at start).
     fn entry(&self, uuid: &str) -> Option<Entry> {
-        self.v.lock().unwrap()[SECTION].get(uuid).and_then(Entry::from_json)
+        let k = self.keys.lock().unwrap().get(uuid).cloned()?;
+        self.v.lock().unwrap()[PROFILES][uuid].get(&k).and_then(Entry::from_json)
     }
 
+    /// Saves `e` as the profile of its clocks (the profile of the same clocks is replaced, the others stay).
     fn save(&self, uuid: &str, e: &Entry) {
+        let key = pkey(e);
         let mut v = self.v.lock().unwrap();
-        if !v[SECTION].is_object() {
-            v[SECTION] = json!({});
+        if !v[PROFILES].is_object() {
+            v[PROFILES] = json!({});
         }
-        v[SECTION][uuid] = e.to_json();
+        if !v[PROFILES][uuid].is_object() {
+            v[PROFILES][uuid] = json!({});
+        }
+        let same: Vec<String> = v[PROFILES][uuid]
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(k, x)| **k != key && Entry::from_json(x).is_some_and(|o| if o.lock != 0 && e.lock != 0 { o.lock == e.lock } else { near(clk_of(&o), clk_of(e)) }))
+            .map(|(k, _)| k.clone())
+            .collect();
+        let m = v[PROFILES][uuid].as_object_mut().unwrap();
+        for k in same {
+            m.remove(&k);
+        }
+        m.insert(key.clone(), e.to_json());
         self.write(&v);
+        drop(v);
+        self.use_key(uuid, &key);
     }
 
     // crash marker: the offset under check, written before the check and removed after it (a driver crash or a killed miner
@@ -198,6 +313,8 @@ struct Card {
     batch: u32,
     kernel: String,
     pl: f64, // enforced power limit now (0 = unknown)
+    locked: bool, // --lock-cclock of this run is set on it; false: the lock is not known to the miner
+    lock: u32,    // that lock (0 = none)
 }
 
 impl Card {
@@ -651,7 +768,7 @@ impl Tuner<'_> {
     }
 
     fn new_entry(&self, c: &Card) -> Entry {
-        Entry { name: c.name.clone(), bus: c.bus.clone(), driver: self.driver.clone(), kernel: c.kernel.clone(), orig: c.orig, base: c.base, step: self.o.step, ..Default::default() }
+        Entry { name: c.name.clone(), bus: c.bus.clone(), driver: self.driver.clone(), kernel: c.kernel.clone(), orig: c.orig, base: c.base, step: self.o.step, lock: c.lock, ..Default::default() }
     }
 
     fn go_live(&self, c: &Card) {
@@ -735,7 +852,38 @@ impl Tuner<'_> {
             lg(format!("{} the previous run died while checking CMFD offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(at)));
             return self.tune(c, self.sh.db.entry(&c.uuid), crashed);
         }
-        let saved = self.sh.db.entry(&c.uuid);
+        // 1.7.2: one profile per core lock (or clock under load at the base when the miner does not set the lock)
+        let lock = c.locked.then_some(c.lock);
+        let profs = self.sh.db.profiles(&c.uuid);
+        let clk = if lock.is_none() && !profs.is_empty() {
+            let mut w = None;
+            let r0 = self.check(c, &mut w, &Spec { secs: 0, measure: 8, tv: false }, &[]);
+            drop(w);
+            if self.stopped() {
+                return Ok(());
+            }
+            r0.clk
+        } else {
+            None
+        };
+        let sel = profs.iter().filter(|(_, e)| fits(e, lock, clk)).min_by_key(|(_, e)| (e.migrated, u64::MAX - e.verified_at)).map(|(k, _)| k.clone());
+        let what = match (lock, clk) {
+            (Some(l), _) => format!("core lock {l} MHz"),
+            (None, Some(k)) => format!("{k} MHz under load at the base (lock not set by the miner)"),
+            _ => "these clocks".into(),
+        };
+        lg(format!("{} CMFD profiles: {}; {}", c.label(), self.sh.db.line(&c.uuid), sel.as_ref().map_or(format!("none for {what}"), |k| format!("using {k} for {what}"))));
+        if self.o.reset {
+            if let Some(k) = &sel {
+                self.sh.db.forget(&c.uuid, k);
+            }
+            lg(format!("{} --uv-reset: CMFD profile {} forgotten; the others are kept (--uv-reset-all forgets all)", c.label(), sel.as_deref().unwrap_or("(none)")));
+            return self.tune(c, None, None);
+        }
+        if let Some(k) = &sel {
+            self.sh.db.use_key(&c.uuid, k);
+        }
+        let saved = if sel.is_some() { self.sh.db.entry(&c.uuid) } else { None };
         if let Some(e) = &saved {
             if e.driver != self.driver || e.kernel != c.kernel {
                 lg(format!("{} saved CMFD result is for driver {} / {}, now driver {} / {}: tuning again", c.label(), e.driver, e.kernel, self.driver, c.kernel));
@@ -767,7 +915,9 @@ impl Tuner<'_> {
             return Ok(());
         }
         let clamped = target != e.offset;
-        let fresh = !clamped && self.o.reval_hours > 0.0 && now().saturating_sub(e.verified_at) < (self.o.reval_hours * 3600.0) as u64;
+        // 1.7.2: without --lock-cclock the lock is not known to the miner (HiveOS / nvidia-smi may have changed it since the
+        // result was verified): never applied without the quick check, whose load clock is compared with the saved one
+        let fresh = c.locked && !e.migrated && !clamped && self.o.reval_hours > 0.0 && now().saturating_sub(e.verified_at) < (self.o.reval_hours * 3600.0) as u64;
         if fresh {
             self.set(c, target)?;
             lg(format!(
@@ -798,6 +948,13 @@ impl Tuner<'_> {
         if self.stopped() {
             return Ok(());
         }
+        if let (true, true, Some(k)) = (r.ok, e.clk_after != 0, r.clk) {
+            if let uv::Regime::Differs(d) = uv::regime_probe(e.clk_after, target, k, target) {
+                lg(format!("{} CMFD quick check at {} passed, but at {k} MHz under load, {} MHz when verified ({d}: the clock lock changed): tuning again", c.label(), signed(target), e.clk_after));
+                self.set(c, c.base)?;
+                return self.tune(c, Some(e.clone()), None);
+            }
+        }
         if r.ok {
             lg(format!(
                 "{} CMFD offset {} -> {}{}, saved {} ago, quick check passed ({})",
@@ -811,6 +968,10 @@ impl Tuner<'_> {
             if !clamped {
                 let mut e2 = e.clone();
                 e2.verified_at = now();
+                if e2.migrated {
+                    e2.migrated = false;
+                    e2.lock = c.lock;
+                }
                 self.sh.db.save(&c.uuid, &e2);
             }
             self.go_live(c);
@@ -992,10 +1153,10 @@ fn map_card(nv: &Nvml, dev: i32, pos: usize, base: i32, o: &uv::Opts, ctx: &Ctx,
     };
     let batch = mining_batch(&uuid, ctx.batch);
     let orig = crate::cmfd_offset::orig(&bus).unwrap_or(base);
-    let lock = ctx.core_lock.get(pos).copied().flatten().map_or(String::new(), |l| format!(" | lock-cclock {l}"));
-    let kernel = format!("{engine} | worker {worker_tag} | {} | batch {batch} | {INPUTS}{lock}", ctx.mode);
+    // 1.7.2: the lock is the profile key, no longer part of the identity
+    let kernel = format!("{engine} | worker {worker_tag} | {} | batch {batch} | {INPUTS}", ctx.mode);
     let pl = nv.power_limit_w(h).unwrap_or(0.0);
-    Ok(Card { dev, name, bus, uuid, nv: h, orig, base, hi, max: max.min(hi), max_src, min: o.min_offset.get(pos), batch, kernel, pl })
+    Ok(Card { dev, name, bus, uuid, nv: h, orig, base, hi, max: max.min(hi), max_src, min: o.min_offset.get(pos), batch, kernel, pl, locked: ctx.core_lock.get(pos).copied().flatten().is_some(), lock: ctx.core_lock.get(pos).copied().flatten().unwrap_or(0) })
 }
 
 /// `--auto-uv-dry-run`: what would be tuned (nothing is changed).
@@ -1077,18 +1238,31 @@ pub fn start(o: &uv::Opts, devices: &[i32], bases: &[Option<i32>], ctx: &Ctx, st
             Err(e) => lg(format!("GPU{dev}: cannot manage ({e:#}); left alone")),
         }
     }
-    let t = Tuner { nv: &nv, ctx, o, sh, driver: nv.driver_version(), stop };
-    std::thread::scope(|s| {
-        for c in &cards {
-            let t = &t;
-            s.spawn(move || {
-                if let Err(e) = t.run_card(c) {
-                    lg(format!("{} error: {e:#}; back to the base offset {}", c.label(), signed(c.base)));
-                    let _ = t.set(c, c.base);
-                }
-            });
-        }
+    // 1.7.2: the start checks / tunings run in the background; only the engine of the GPU being checked waits (busy), the
+    // engines of the other GPUs start mining at once (before, every GPU waited for the slowest tuning)
+    starting().lock().unwrap().extend(cards.iter().map(|c| c.dev));
+    let (ctx, o, stop) = (ctx.clone(), o.clone(), stop.clone());
+    std::thread::spawn(move || {
+        let t = Tuner { nv: &nv, ctx: &ctx, o: &o, sh, driver: nv.driver_version(), stop: &stop };
+        std::thread::scope(|s| {
+            for c in &cards {
+                let t = &t;
+                s.spawn(move || {
+                    if let Err(e) = t.run_card(c) {
+                        lg(format!("{} error: {e:#}; back to the base offset {}", c.label(), signed(c.base)));
+                        let _ = t.set(c, c.base);
+                    }
+                    starting().lock().unwrap().retain(|&d| d != c.dev);
+                });
+            }
+        });
     });
+}
+
+/// GPUs whose start check / tuning still runs (their engine waits).
+fn starting() -> &'static Mutex<Vec<i32>> {
+    static S: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    &S
 }
 
 /// The engine of `dev` reported wrong results (`INTEGRITY | ERROR`) or a CUDA fault: when that card runs a tuned CMFD offset,
@@ -1177,6 +1351,9 @@ pub fn poll_oc() -> Vec<i32> {
 
 /// A quick check after an OC apply runs on `dev` (its engine must stay stopped).
 pub fn busy(dev: i32) -> bool {
+    if starting().lock().unwrap().contains(&dev) {
+        return true;
+    }
     let Some(sh) = shared().lock().unwrap().clone() else { return false };
     sh.live.lock().unwrap().iter().any(|l| l.dev == dev && l.busy)
 }

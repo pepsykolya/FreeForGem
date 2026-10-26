@@ -49,7 +49,7 @@ FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installati
 **Installation URL (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -79,8 +79,8 @@ To update, change the Installation URL to the new version. The same guide with m
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.1-beta-linux-x86_64.tar.gz
-cd freeforgem-1.7.1-beta
+tar xzf freeforgem-1.7.2-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.2-beta
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -101,8 +101,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.1-beta-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1-beta-windows-x64.zip`
+1. Download **`freeforgem-1.7.2-beta-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2-beta-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -153,7 +153,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.1-beta-windows-x64
+cd /d C:\Mining\freeforgem-1.7.2-beta-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -266,7 +266,7 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 | Line | Meaning |
 |---|---|
-| `FreeForGem 1.7.1-beta \| pool ... \| worker ... \| N GPU(s)` | start banner |
+| `FreeForGem 1.7.2-beta \| pool ... \| worker ... \| N GPU(s)` | start banner |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | the tuned kernel is loaded. `embedded search kernel could not be loaded (reason)` = the miner stops with an error (driver older than 525 or an unsupported GPU) |
 | `new job ... prepared in ...` | a new pool job is ready |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | every 10 s: hashrate per GPU and in total; shares submitted / accepted / rejected for you and for the dev fee; `[DEVFEE]` while a fee slot runs Since 1.5.3 each GPU also shows its board power and efficiency, e.g. `GPU0 49.906 (151 W, 0.330 TH/W)`, and the total `\| 151 W, 0.330 TH/W` (when NVML is available) |
@@ -278,9 +278,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.1-beta-linux-x86_64.tar.gz freeforgem-1.7.1beta.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.1-beta-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.1-beta-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.2-beta-linux-x86_64.tar.gz freeforgem-1.7.2beta.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.2-beta-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.2-beta-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -776,7 +776,7 @@ wrong NOID results; RTX 4070 Ti: the owner's Pearl +300 crashes NOID). So:
 **Log (NOID)**
 
 ```
-FreeForGem 1.7.1-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
+FreeForGem 1.7.2-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
 [  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
@@ -805,7 +805,7 @@ How FreeForGem handles it (Pearl, CMFD and NOID follow the same rule):
    of a fixed job, every tile digest compared with the first run and found results verified on the CPU with the official
    verifier. NOID: the long stress check — full-grid launches for 40 s per step, every launch's candidate set compared with the
    CPU set of the official crate (about 4000 launches per step on an RTX 3070). CMFD: digests of fixed batches on the real
-   6.4 GB model compared with the stock reference (CMFD runs at offset 0 in 1.7.1-beta; the CMFD tuner ships separately).
+   6.4 GB model compared with the stock reference (CMFD runs at offset 0 in 1.7.2-beta; the CMFD tuner ships separately).
 2. **The first failing step marks the edge.** The result is **one step lower** (15 MHz margin; `--uv-keep-last` keeps the last
    good step) and is **confirmed** by a 2-minute run; if the confirmation fails, one more step down.
 3. **While mining, results keep being checked:** every Pearl hit and every NOID candidate is recomputed on the CPU before it
@@ -829,6 +829,56 @@ auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, on
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
 auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
+
+### 17. Profiles per clock lock, mining during tuning, crashes while mining (new in 1.7.2)
+
+**Why.** The undervolt edge moves with the core clock: an offset verified at 1410 MHz is not safe at 1805 MHz. On an 8x RTX 3070
+HiveOS rig another miner left a 1400 MHz lock behind, auto-uv found +450..+495 there, and after the HiveOS 1805 MHz lock came back
+these offsets were "applied without a start check": illegal memory access, Xid 13/43, a restart loop. 1.7.2 changes this:
+
+**One profile per lock.** auto-uv keeps one result per GPU, per coin / NOID mode and per core clock lock (`uv.json`, sections
+`profiles`, `noid`, `cmfd_profiles`; the memory lock is part of the key when the miner sets it, e.g. `1805/mem810`):
+
+* with `--lock-cclock N` the lock is known and picks its profile; switching 1805 -> 1410 -> 1805 reuses each lock's verified result
+  at once (applied without a check when verified within `--uv-reval-hours`, else after the usual quick check); a lock without a
+  profile is tuned, and the profiles of the other locks stay as they are;
+* without `--lock-cclock` the miner cannot read the lock (NVML has no call for it; HiveOS or another miner may have changed it):
+  mining starts at your offset, the clock under mining load (~20 s) picks the profile: `1805`, `~1815` (a lock set outside the
+  miner) or `unlocked` (the clock floated during the tuning); none fits: the GPU is tuned for these clocks. NOID and CMFD measure
+  the clock with a short check at the base offset;
+* the start log lists the profiles of each GPU: `profiles: 1400:+210, 1900:+180; using 1400 for the core clock lock 1400 MHz`;
+* `--uv-reset` forgets only the profile of the clocks (and coin / mode) of this run, the others stay; `--uv-reset-all` forgets all;
+* a result from before 1.7.2 (one per GPU, no lock recorded) becomes the profile of the clock it was found at under load
+  (`~1410`) and is used only after a check at the clocks of the run (CMFD: the lock in its engine identity becomes its key);
+  NOID results are kept only when they were tuned with `--lock-cclock`;
+* while mining, a rise of the load clock at the same offset (a lock raised under the miner) puts your offset back and lets the clock
+  pick the profile again; after an OC apply without `--lock-cclock` the clock decides first, too.
+
+**Mining during tuning.** Before 1.7.2 no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now mining starts at
+once; each GPU's checks and tuning run in the background and pause only that GPU (for its tuning or its quick check); the
+other GPUs mine meanwhile. The RAM
+queue of the checks ("waits for RAM") lets the waiting GPU mine meanwhile.
+
+**Your offset.** On HiveOS the offset put back on exit is the OC profile's *Core Clock* value of that GPU (`/hive-config/nvidia-oc.conf`),
+not whatever the card had at start (Rig01: +325 left by an interrupted ffgs instead of the profile's +275); at start such a leftover
+is replaced by the profile value. A result verified below your offset at these clocks is **used instead of it** (your offset is
+past the edge there); it is never kept unchecked. A tuning whose start offset itself fails looks for a lower one that passes
+(60 MHz steps) and keeps it as the profile. `WARNING`: a single `--lock-cclock` value for all GPUs replaces per-GPU HiveOS locks.
+
+**Which GPU failed.** A CUDA fault on one GPU (Xid 13 "Out Of Range Address", Xid 43, "an illegal memory access") ends CUDA for
+the **whole miner process**: every worker stops with the same error, also on GPUs without any Xid. The miner now:
+
+1. tells the failing GPU from the driver's Xid events (NVML): `faults: GPU3 (bus 04, RTX 3070) FAILED: Xid 13 ...; the workers of
+   GPU0, GPU1, ... stopped with it: ... they are not at fault`;
+2. remembers it in `gpu-faults.json` next to `uv.json` (crashes in a row, Xid, the offset it had);
+3. restarts itself (Linux / HiveOS: in the same process, HiveOS does not count a restart; at most 10 times an hour, then it exits
+   as before; Windows: start.ps1 restarts it);
+4. with `--auto-uv`: a crashed undervolt offset counts as failed and the GPU is tuned below it; a crash at your own / kept offset
+   **2 starts in a row** lowers it (`CRASHED while mining at +325 2 starts in a row ...: running it at +275`): the HiveOS profile
+   Core Clock value first, then 60 MHz steps down to 0; a new offset of yours forgets the lowered one;
+5. a GPU that still crashes with nothing left to lower (without `--auto-uv`: after 2 crash starts in a row) is **left out of mining
+   for an hour**, the other GPUs mine. 30 min without a fault clear the count; `--uv-reset` does not clear `gpu-faults.json`
+   (delete the file to clear it now).
 
 ---
 
@@ -873,7 +923,7 @@ FreeForGem запускается в HiveOS как **Custom miner**: SSH и ру
 **Ссылка для установки (1.4.9):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -903,8 +953,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforge
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.1-beta-linux-x86_64.tar.gz
-cd freeforgem-1.7.1-beta
+tar xzf freeforgem-1.7.2-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.2-beta
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -925,8 +975,8 @@ cd freeforgem-1.7.1-beta
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.1-beta-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1-beta-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.2-beta-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2-beta-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -977,7 +1027,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.1-beta-windows-x64
+cd /d C:\Mining\freeforgem-1.7.2-beta-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1088,7 +1138,7 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 | Строка | Значение |
 |---|---|
-| `FreeForGem 1.7.1-beta \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
+| `FreeForGem 1.7.2-beta \| pool ... \| worker ... \| N GPU(s)` | стартовая строка |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | загружено настроенное ядро. `embedded search kernel could not be loaded (причина)` = майнер останавливается с ошибкой (драйвер старше 525 или неподдерживаемая карта) |
 | `new job ... prepared in ...` | готово новое задание пула |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | каждые 10 с: хэшрейт по картам и общий; отправленные / принятые / отклонённые шары ваши и комиссии; `[DEVFEE]` пока идёт слот комиссии С 1.5.3 у каждой карты также видны потребление и эффективность, например `GPU0 49.906 (151 W, 0.330 TH/W)`, и итог `\| 151 W, 0.330 TH/W` (если доступен NVML) |
@@ -1100,9 +1150,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.1-beta-linux-x86_64.tar.gz freeforgem-1.7.1beta.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.1-beta-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.1-beta-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.2-beta-linux-x86_64.tar.gz freeforgem-1.7.2beta.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.2-beta-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.2-beta-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1603,7 +1653,7 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
 **Лог (NOID)**
 
 ```
-FreeForGem 1.7.1-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
+FreeForGem 1.7.2-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
 [  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
@@ -1631,7 +1681,7 @@ new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expir
    фиксированного задания, дайджест каждого тайла сравнивается с первым прогоном, найденные результаты проверяются на CPU
    официальным верификатором. NOID: длинная stress-проверка — запуски на всю сетку по 40 с на шаг, набор кандидатов каждого
    запуска сравнивается с набором CPU официального крейта (около 4000 запусков на шаг на RTX 3070). CMFD: дайджесты
-   фиксированных батчей на настоящей модели 6.4 ГБ сравниваются с эталоном на стоке (в 1.7.1-beta CMFD работает с offset 0;
+   фиксированных батчей на настоящей модели 6.4 ГБ сравниваются с эталоном на стоке (в 1.7.2-beta CMFD работает с offset 0;
    тюнер CMFD выходит отдельно).
 2. **Первый шаг с ошибкой — это край.** Результат берётся **на шаг ниже** (запас 15 МГц; `--uv-keep-last` оставляет последний
    хороший шаг) и **подтверждается** 2-минутным прогоном; если подтверждение не прошло — ещё на шаг ниже.
@@ -1656,6 +1706,55 @@ auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, on
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
 auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
+
+### 17. Профили по локу частоты, майнинг во время тюнинга, падения в майнинге (новое в 1.7.2)
+
+**Зачем.** Край андервольта зависит от частоты ядра: offset, проверенный на 1410 МГц, небезопасен на 1805 МГц. На риге 8x RTX 3070
+(HiveOS) другой майнер оставил лок 1400 МГц, auto-uv нашёл там +450..+495, а после возврата лока HiveOS 1805 МГц эти offset'ы были
+«применены без стартовой проверки»: illegal memory access, Xid 13/43, цикл перезапусков. В 1.7.2:
+
+**Профиль на каждый лок.** auto-uv хранит отдельный результат для каждой карты, монеты / режима NOID и лока ядра (`uv.json`,
+секции `profiles`, `noid`, `cmfd_profiles`; лок памяти входит в ключ, если его ставит майнер, например `1805/mem810`):
+
+* с `--lock-cclock N` лок известен и выбирает свой профиль; переключение 1805 -> 1410 -> 1805 сразу берёт проверенный результат
+  каждого лока (без проверки, если проверен в пределах `--uv-reval-hours`, иначе после обычной быстрой проверки); лок без профиля
+  тюнится, профили других локов не трогаются;
+* без `--lock-cclock` майнер не может прочитать лок (в NVML нет такой функции; его могли сменить HiveOS или другой майнер):
+  майнинг стартует на вашем offset, частота под нагрузкой (~20 с) выбирает профиль: `1805`, `~1815` (лок поставлен не майнером)
+  или `unlocked` (частота «плавала» при тюнинге); подходящего нет — карта тюнится для этих частот. NOID и CMFD меряют частоту
+  короткой проверкой на базовом offset;
+* стартовый лог показывает профили каждой карты: `profiles: 1400:+210, 1900:+180; using 1400 for the core clock lock 1400 MHz`;
+* `--uv-reset` забывает только профиль частот (и монеты / режима) этого запуска, остальные остаются; `--uv-reset-all` — все;
+* результат до 1.7.2 (один на карту, лок не записан) становится профилем частоты, на которой найден (`~1410`), и используется
+  только после проверки на частотах запуска (CMFD: лок из идентификатора движка становится ключом); результаты NOID сохраняются,
+  только если тюнились с `--lock-cclock`;
+* в майнинге рост частоты под нагрузкой при том же offset (лок подняли) возвращает ваш offset, и профиль заново выбирает частота;
+  после OC-apply без `--lock-cclock` тоже сначала решает частота.
+
+**Майнинг во время тюнинга.** До 1.7.2 ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт). Теперь майнинг
+стартует сразу; проверки и тюнинг каждой карты идут в фоне и ставят на паузу только её (на время её тюнинга или быстрой проверки); остальные
+карты майнят. Очередь
+проверок по RAM («waits for RAM») не останавливает майнинг ждущей карты.
+
+**Ваш offset.** На HiveOS при выходе возвращается значение *Core Clock* профиля разгона этой карты (`/hive-config/nvidia-oc.conf`),
+а не то, что было на карте при старте (Rig01: +325 — остаток прерванного ffgs вместо +275 профиля); такой остаток при старте
+заменяется значением профиля. Результат, проверенный на этих частотах ниже вашего offset, **используется вместо него** (ваш offset
+там за краем); вслепую он никогда не оставляется. Если не проходит сам стартовый offset тюнинга, ищется меньший (шагами 60 МГц),
+и он сохраняется как профиль. `WARNING`: одно значение `--lock-cclock` на все карты заменяет поканальные локи HiveOS.
+
+**Какая карта упала.** Сбой CUDA на одной карте (Xid 13 «Out Of Range Address», Xid 43, «an illegal memory access») завершает CUDA
+**всего процесса майнера**: все воркеры останавливаются с той же ошибкой, в том числе на картах без Xid. Теперь майнер:
+
+1. определяет упавшую карту по событиям Xid драйвера (NVML): `faults: GPU3 (bus 04, RTX 3070) FAILED: Xid 13 ...; the workers of
+   GPU0, GPU1, ... stopped with it: ... they are not at fault`;
+2. запоминает её в `gpu-faults.json` рядом с `uv.json` (падений подряд, Xid, offset в момент падения);
+3. перезапускает себя (Linux / HiveOS — в том же процессе, HiveOS не считает перезапуск; не больше 10 раз в час, дальше выходит,
+   как раньше; Windows — перезапускает start.ps1);
+4. с `--auto-uv`: упавший андервольт-offset считается провальным, карта тюнится ниже; падение на вашем / оставленном offset
+   **2 старта подряд** понижает его (`CRASHED while mining at +325 2 starts in a row ...: running it at +275`): сначала до Core Clock
+   профиля HiveOS, затем шагами по 60 МГц до 0; ваш новый offset отменяет понижение;
+5. карта, которая падает и дальше, когда понижать некуда (без `--auto-uv` — после 2 стартов подряд с падением), **исключается из
+   майнинга на час**, остальные майнят. 30 мин без сбоя обнуляют счёт; `--uv-reset` не очищает `gpu-faults.json` (удалите файл).
 
 ---
 
@@ -1699,7 +1798,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.4.9)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1729,8 +1828,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforge
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.1-beta-linux-x86_64.tar.gz
-cd freeforgem-1.7.1-beta
+tar xzf freeforgem-1.7.2-beta-linux-x86_64.tar.gz
+cd freeforgem-1.7.2-beta
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1751,8 +1850,8 @@ cd freeforgem-1.7.1-beta
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.1-beta-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.1-beta/freeforgem-1.7.1-beta-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.2-beta-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2-beta-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1794,7 +1893,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.1-beta-windows-x64
+cd /d C:\Mining\freeforgem-1.7.2-beta-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1888,7 +1987,7 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 | 行 | 含义 |
 |---|---|
-| `FreeForGem 1.7.1-beta \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
+| `FreeForGem 1.7.2-beta \| pool ... \| worker ... \| N GPU(s)` | 启动横幅 |
 | `[pearlgpu] search kernel: SASS-patched cubin (...)` | 已加载调优内核。`embedded search kernel could not be loaded (原因)` = 矿工报错退出（驱动低于 525 或显卡不受支持） |
 | `new job ... prepared in ...` | 新的矿池任务已就绪 |
 | `[ 120s] GPU0 ... \| total X TH/s \| hits ... \| user sub S acc A rej R \| fee sub ... acc ... rej ...` | 每 10 秒：每块显卡和总算力；你和抽水的已提交 / 已接受 / 已拒绝份额；抽水时段显示 `[DEVFEE]` 自 1.5.3 起每块显卡还显示功耗和能效，例如 `GPU0 49.906 (151 W, 0.330 TH/W)`，以及总计 `\| 151 W, 0.330 TH/W`（需要 NVML） |
@@ -1900,9 +1999,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.1-beta-linux-x86_64.tar.gz freeforgem-1.7.1beta.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.1-beta-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.1-beta-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.2-beta-linux-x86_64.tar.gz freeforgem-1.7.2beta.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.2-beta-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.2-beta-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -2332,7 +2431,7 @@ RTX 4070 Ti：机主为 Pearl 设置的 +300 会让 NOID 崩溃）。因此：
 **日志（NOID）**
 
 ```
-FreeForGem 1.7.1-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
+FreeForGem 1.7.2-beta | NOID (parano1d) | pool stratum+ssl://eu2.innovlab.cc:19601 | worker rig1 | 1 GPU(s) [0] | mode eff
 [noid-pool:user] subscribed: parano1d-stratum-v1, nonce_bits 64, session namespace 24e67d0000000200
 new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expires in 262s)
 [  60s] GPU0 34.700 (73 W, 0.474 MH/W) | total 34.700 MH/s, 73 W, 0.474 MH/W | hits 412 (bad 0, stale 0) | user sub 3 acc 3 rej 0 | fee sub 0 acc 0 rej 0
@@ -2357,7 +2456,7 @@ FreeForGem 的做法（Pearl、CMFD 和 NOID 遵循同一原则）：
 1. **每一步都在满负载下多次逐位检查**——而不是只做一次自检。Pearl：固定任务的数千次尝试，每个 tile 的摘要与第一次运行比对，
    找到的结果用官方验证器在 CPU 上验证。NOID：长时间压力检查——每步 40 秒的整网格启动，每次启动的候选集合与官方 crate
    在 CPU 上算出的集合比对（RTX 3070 上每步约 4000 次启动）。CMFD：在真实的 6.4 GB 模型上将固定批次的摘要与默认设置下的
-   参考值比对（1.7.1-beta 中 CMFD 以偏移 0 运行；CMFD 调整器单独发布）。
+   参考值比对（1.7.2-beta 中 CMFD 以偏移 0 运行；CMFD 调整器单独发布）。
 2. **第一个失败的步骤标记边缘。** 结果取**再低一步**（15 MHz 余量；`--uv-keep-last` 保留最后一个成功步骤），并用 2 分钟运行
    **确认**；确认失败则再降一步。
 3. **挖矿期间持续检查结果：** 每个 Pearl 命中和每个 NOID 候选在提交前都在 CPU 上重新计算；NOID 还每 120 秒进行一次看门狗
@@ -2379,3 +2478,34 @@ auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +195 (edge +225, on
 GPU0: WATCHDOG: 1 of 6 check launches gave WRONG results (silent undervolt edge?)
 auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / watchdog): stepped back to +265 and mining on
 ```
+
+### 17. 按锁频保存的配置、调优期间继续挖矿、挖矿中的崩溃（1.7.2 新增）
+
+**原因。** 降压边缘随核心频率移动：在 1410 MHz 验证的偏移在 1805 MHz 下并不安全。在一台 8x RTX 3070 的 HiveOS 矿机上，另一个挖矿
+程序留下了 1400 MHz 锁频，auto-uv 在此找到 +450..+495；HiveOS 的 1805 MHz 锁频恢复后，这些偏移被"不经启动检查直接应用"，导致
+illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
+
+**每个锁频一个配置。** auto-uv 按显卡、币种 / NOID 模式与核心锁频分别保存结果（`uv.json` 的 `profiles`、`noid`、`cmfd_profiles`；
+矿工设置显存锁频时其也属于键，如 `1805/mem810`）：
+
+* 使用 `--lock-cclock N` 时锁频已知并选择对应配置；1805 -> 1410 -> 1805 切换时立即复用各锁频已验证的结果（`--uv-reval-hours`
+  内验证过则直接应用，否则先做常规快速检查）；没有配置的锁频进行调优，其他锁频的配置保持不变；
+* 不使用 `--lock-cclock` 时矿工无法读取锁频：先以您的偏移开始挖矿，用约 20 秒的挖矿负载频率选择配置（`1805`、`~1815` 或
+  `unlocked`）；没有合适的配置则针对当前频率调优。NOID 与 CMFD 在基础偏移上做短检查来测频率；
+* 启动日志列出每张卡的配置：`profiles: 1400:+210, 1900:+180; using 1400 ...`；
+* `--uv-reset` 只清除本次运行频率（及币种 / 模式）的配置；`--uv-reset-all` 清除全部；
+* 1.7.2 之前的结果（每卡一个，未记录锁频）成为其负载频率（`~1410`）的配置，仅在当前频率下检查通过后使用；NOID 旧结果仅保留
+  使用 `--lock-cclock` 调优的；
+* 挖矿中同一偏移下负载频率上升（锁频被提高）时恢复您的偏移并重新按频率选择配置。
+
+**调优期间继续挖矿。** 1.7.2 之前所有显卡都要等最慢的调优结束才开始挖矿。现在挖矿立即开始；每张卡的检查与调优在后台进行，只在检查
+期间暂停该卡（其调优或快速检查期间），其他卡继续挖矿。
+
+**您的偏移。** 在 HiveOS 上，退出时恢复的是该卡 OC 配置的 *Core Clock* 值（`/hive-config/nvidia-oc.conf`），而不是启动时卡上残留
+的值。在当前频率下验证过且低于您的偏移的结果会**代替您的偏移使用**，绝不在未检查的情况下保留。若调优的起始偏移本身失败，会以
+60 MHz 步进寻找能通过的更低偏移并保存为配置。
+
+**哪张卡出错。** 一张卡上的 CUDA 故障会结束**整个矿工进程**的 CUDA。矿工现在：通过驱动 Xid 事件确定出错的卡并记录在
+`gpu-faults.json`；自行重启（Linux / HiveOS 同一进程内，每小时最多 10 次）；使用 `--auto-uv` 时崩溃的降压偏移视为失败并在其下方
+重新调优，在您自己的偏移上连续 2 次启动崩溃则降低它（先降到 HiveOS 配置的 Core Clock 值，再以 60 MHz 步进降到 0）；无可再降仍
+崩溃的卡暂停挖矿一小时，其他卡继续。无故障 30 分钟清零计数；`--uv-reset` 不清除 `gpu-faults.json`（删除该文件即可）。
