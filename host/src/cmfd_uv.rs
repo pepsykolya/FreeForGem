@@ -640,6 +640,21 @@ impl Tuner<'_> {
     /// start / from the web UI) makes the check say nothing about the offset under check: it is set again and the check
     /// repeated (twice at most); any other value there is a failed check.
     fn check(&self, c: &Card, w: &mut Option<Worker>, sp: &Spec, refs: &[String]) -> Res {
+        // the stats line / summary show what this GPU does (status.rs); a single check clears its state after
+        let tuning = crate::status::is_tuning(c.dev);
+        if tuning {
+            crate::status::set(c.dev, format!("CMFD tuning {}", signed(Self::cur(c))), true, None);
+        } else {
+            crate::status::set(c.dev, format!("CMFD check {}", signed(Self::cur(c))), false, Some(Instant::now() + Duration::from_secs(sp.secs as u64 + sp.measure as u64 + 90)));
+        }
+        let r = self.check_states(c, w, sp, refs);
+        if !tuning {
+            crate::status::clear(c.dev);
+        }
+        r
+    }
+
+    fn check_states(&self, c: &Card, w: &mut Option<Worker>, sp: &Spec, refs: &[String]) -> Res {
         let cur = Self::cur(c);
         let mut r = Res::default();
         for attempt in 0..3 {
@@ -1003,6 +1018,12 @@ impl Tuner<'_> {
     }
 
     fn tune(&self, c: &Card, prev: Option<Entry>, crashed: Option<(i32, i32)>) -> Result<()> {
+        let _status = crate::status::Guard(c.dev);
+        {
+            let steps = ((c.max - c.base).max(0) / self.o.step.max(1)) as u64 + 2;
+            let eta = Instant::now() + Duration::from_secs(120 + steps * (self.o.step_secs as u64 + 20) + self.o.confirm_secs as u64 + 60);
+            crate::status::set(c.dev, "CMFD tuning".into(), true, Some(eta));
+        }
         let step = self.o.step;
         let mut cap = c.max;
         if let Some((at, _)) = crashed {

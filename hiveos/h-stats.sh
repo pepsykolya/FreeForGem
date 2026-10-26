@@ -7,7 +7,8 @@
 _ffgp_dir=$(dirname "${BASH_SOURCE[0]}")
 . "$_ffgp_dir/h-manifest.conf"
 _log="${CUSTOM_LOG_BASENAME}.log"
-_line=$(tail -n 400 "$_log" 2>/dev/null | grep -aE ' total [0-9.]+ (TH|FW|MH)/s' | tail -n 1)
+# ANSI colour codes (1.7.2 colours the log; the stats line itself is never coloured) are stripped before parsing
+_line=$(tail -n 400 "$_log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -aE ' total [0-9.]+ (TH|FW|MH)/s' | tail -n 1)
 _age=$(( $(date +%s) - $(stat -c %Y "$_log" 2>/dev/null || echo 0) ))
 
 if [[ -z $_line || $_age -gt 60 ]]; then

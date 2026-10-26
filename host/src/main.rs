@@ -19,7 +19,8 @@ macro_rules! println {
     }};
     ($($t:tt)*) => {{
         use std::io::Write as _;
-        let _ = writeln!(std::io::stdout(), $($t)*);
+        // coloured by the kind of line (color.rs); the stats line never
+        let _ = writeln!(std::io::stdout(), "{}", crate::color::paint(format!($($t)*)));
     }};
 }
 macro_rules! print {
@@ -35,7 +36,7 @@ macro_rules! eprintln {
     }};
     ($($t:tt)*) => {{
         use std::io::Write as _;
-        let _ = writeln!(std::io::stderr(), $($t)*);
+        let _ = writeln!(std::io::stderr(), "{}", crate::color::paint(format!($($t)*)));
     }};
 }
 
@@ -44,6 +45,7 @@ mod clocks;
 mod cmfd;
 mod cmfd_offset;
 mod cmfd_uv;
+mod color;
 mod devfee;
 mod faults;
 mod gpu;
@@ -51,6 +53,7 @@ mod hiveoc;
 mod mining;
 mod noid;
 mod nvml;
+mod status;
 mod stratum;
 mod uv;
 mod wintune;
@@ -579,6 +582,9 @@ fn mine(a: Args) -> Result<()> {
                 anyhow::bail!("all GPU workers have stopped");
             }
         }
+        if let Some(l) = status::summary_due() {
+            println!("{l}");
+        }
         if !ok_cleared && start.elapsed() >= Duration::from_secs(faults::OK_SECS) {
             ok_cleared = true;
             if let Some(w) = &watch {
@@ -705,7 +711,7 @@ fn mine(a: Args) -> Result<()> {
                         String::new()
                     }
                 };
-                parts.push(format!("GPU{} {:.3}{}{}", g.dev, ths, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));
+                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, ths, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, status::tag(g.dev)));
             }
             let power_part = if all_w && total_w > 0.0 { format!(" | {:.0} W, {:.3} TH/W", total_w, total_ths / total_w) } else { String::new() };
             let (u, f) = (&stats[0], &stats[1]);
@@ -984,6 +990,10 @@ fn import_legacy_uv(dir: &std::path::Path) {
 
 fn main() -> Result<()> {
     std::hint::black_box(&BUILD_LAYOUT_ID);
+    // colours: never in the check child processes (the parent parses their lines), not with --no-color / NO_COLOR
+    if std::env::args().any(|x| x == "--uv-check" || x == "--noid-uv-check" || x == "--no-color") {
+        color::disable();
+    }
     if std::env::args().any(|x| x == "--noid-uv-check") {
         noid_check_main();
     }
@@ -1054,6 +1064,7 @@ fn main() -> Result<()> {
             }
             "--uv-reset" => a.uv.reset = true,
             "--uv-reset-all" => a.uv.reset_all = true,
+            "--no-color" => color::disable(),
             "--uv-offset" => a.uv.fixed = uv::PerGpu::parse(&val()?, "--uv-offset")?,
             "--uv-max" => a.uv.max_offset = uv::PerGpu::parse(&val()?, "--uv-max")?,
             "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,

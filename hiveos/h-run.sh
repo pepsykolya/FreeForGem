@@ -8,6 +8,8 @@ mkdir -p "$(dirname "$CUSTOM_LOG_BASENAME")"
 [[ -d /hive-config ]] && export FFGP_STATE_DIR=${FFGP_STATE_DIR:-/hive-config/freeforgem}
 # GPU numbering in PCI bus order, the same as nvidia-smi and the HiveOS dashboard
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
+# colours in the miner log (the HiveOS miner screen shows them through tee; h-stats.sh strips them); NO_COLOR=1 turns them off
+[[ -z ${NO_COLOR:-} ]] && export FFG_COLOR=${FFG_COLOR:-1}
 # no filename globbing of the arguments: a CMFD pool URL contains '?' (cmfd+tls://IP:PORT?pin=...)
 set -f
 # A saved uv.json of FreeForGemPear (/hive-config/freeforgempear) is imported on the first start (see HIVEOS.md)

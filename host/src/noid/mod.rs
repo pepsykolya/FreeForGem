@@ -244,6 +244,9 @@ fn check_inner(a: &CheckArgs) -> Result<(u64, u64, f64, usize, Option<f64>)> {
     ensure!(!want.is_empty() && want.len() < gpu::max_hits(), "bad expected candidate count {}", want.len());
     let mut buf = vec![0u32; gpu::max_hits()];
     let (mut launches, mut bad, mut first) = (0u64, 0u64, None);
+    // the GPU load starts now (the CPU reference above can take long while other checks run): the parent measures the power
+    // from here on only, so the MH/W of every check compares like with like (Rig01 beta2: MH/W "losses" of 15-33 % were noise)
+    println!("NOID_LOAD");
     let t0 = Instant::now();
     gpu::launch(0, 0, CHECK_ITERS)?;
     let mut s = 0;
@@ -750,6 +753,9 @@ pub fn mine(o: Opts) -> Result<()> {
                 bail!("all GPU workers have stopped");
             }
         }
+        if let Some(l) = crate::status::summary_due() {
+            println!("{l}");
+        }
         if !ok_cleared && start.elapsed() >= Duration::from_secs(crate::faults::OK_SECS) {
             ok_cleared = true;
             if let Some(w) = &watch {
@@ -843,7 +849,7 @@ pub fn mine(o: Opts) -> Result<()> {
                         String::new()
                     }
                 };
-                parts.push(format!("GPU{} {:.3}{}{}", g.dev, mhs, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }));
+                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, mhs, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, crate::status::tag(g.dev)));
             }
             hashrate[0].store((tot * 1e6) as u64, Ordering::Relaxed);
             hashrate[1].store(if fee.active() { (tot * 1e6) as u64 } else { 0 }, Ordering::Relaxed);

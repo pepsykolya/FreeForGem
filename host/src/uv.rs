@@ -1469,7 +1469,9 @@ impl Manager {
             e2.lock = c.lock.unwrap_or(0);
             e2.mlock = c.mlock.unwrap_or(0);
         }
+        let _status = crate::status::Guard(c.dev);
         for attempt in 0..5 {
+            crate::status::set(c.dev, format!("check {}", signed(want)), false, Some(Instant::now() + Duration::from_secs(60)));
             // the reference digests depend on the test job and m, not on the offset
             let back = if want - step >= floor { want - step } else { c.orig };
             let r = self.step_check(c, want, back, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
@@ -1527,6 +1529,8 @@ impl Manager {
             lg(format!("{} already at {}", c.label(), signed(f)));
             return Ok(());
         }
+        let _status = crate::status::Guard(c.dev);
+        crate::status::set(c.dev, format!("check {}", signed(f)), false, Some(Instant::now() + Duration::from_secs(60)));
         let r = self.step_check(c, f, c.orig, &self.quick_spec(vec![]));
         if self.stopped() {
             return Ok(()); // a stop is not a failure of the offset (the shutdown restore puts the owner's back)
@@ -1685,6 +1689,13 @@ impl Manager {
             lg(format!("{} start offset {} leaves no room below the cap {} ({}); nothing to do", c.label(), signed(start), signed(cap), c.max_src));
             return Ok(());
         }
+        let _status = crate::status::Guard(c.dev);
+        let nsteps = ((cap - start) / step).max(0) as u64;
+        let est = |steps_left: u64| {
+            Instant::now()
+                + Duration::from_secs(steps_left * (self.opts.step_secs as u64 + 22) + self.opts.confirm_secs as u64 + 30)
+        };
+        crate::status::set(c.dev, format!("tuning: warm-up at {}", signed(start)), true, Some(est(nsteps) + Duration::from_secs(self.opts.warmup_secs as u64 + 40)));
         lg(format!(
             "{} tuning: {} s warm-up at {}, then +{step} MHz steps up to {} ({} s each); the other GPUs mine meanwhile",
             c.label(),
@@ -1708,6 +1719,7 @@ impl Manager {
                 if v < c.lo || self.stopped() {
                     break;
                 }
+                crate::status::set(c.dev, format!("tuning: looking lower, {}", signed(v)), true, Some(Instant::now() + Duration::from_secs(self.opts.confirm_secs as u64 + 40)));
                 let r = self.step_check(c, v, (v - 60).max(c.lo), &Spec { secs: self.opts.confirm_secs, min_reruns: 150, cpu: 4, measure: 20, refs: golden.clone() });
                 if self.stopped() {
                     return Ok(());
@@ -1762,6 +1774,8 @@ impl Manager {
         c.last_good.store(good, Ordering::Relaxed);
         while good + step <= cap {
             let cand = good + step;
+            let i = ((cand - start) / step) as u64;
+            crate::status::set(c.dev, format!("tuning {} (step {}/{})", signed(cand), i, nsteps), true, Some(est(nsteps.saturating_sub(i) + 1)));
             let r = self.step_check(c, cand, good, &Spec { secs: self.opts.step_secs, min_reruns: 30, cpu: 2, measure: 12, refs: refs.clone() });
             if self.stopped() {
                 return Ok(());
@@ -1794,6 +1808,7 @@ impl Manager {
         let mut conf_w = good_w;
         let mut conf_clk: Option<u32> = None;
         while fin > start {
+            crate::status::set(c.dev, format!("tuning: confirming {}", signed(fin)), true, Some(Instant::now() + Duration::from_secs(self.opts.confirm_secs as u64 + 40)));
             let r = self.step_check(c, fin, (fin - step).max(start), &Spec { secs: self.opts.confirm_secs, min_reruns: 150, cpu: 4, measure: 20, refs: refs.clone() });
             if self.stopped() {
                 return Ok(());
@@ -1842,6 +1857,11 @@ impl Manager {
         self.save_entry(c, &e);
         self.clear_trying(c);
         lg(format!("{} offset {} -> {}, {} -> {}, saved as profile {} (profiles now: {})", c.label(), signed(start), signed(fin), fmt_w(base_w), fmt_w(conf_w), profile_key(&e), self.profiles_line(c)));
+        let saving = match (base_w, conf_w) {
+            (Some(b), Some(a)) if b > 0.0 => format!(" ({:+.1} %, the same hashrate)", 100.0 * (a / b - 1.0)),
+            _ => String::new(),
+        };
+        lg(format!("{} RESULT: offset {} at {} MHz, {} under the check load{saving}; mining at it", c.label(), signed(fin), e.clk_ok, fmt_w(conf_w)));
         if e.unlocked {
             lg(format!(
                 "{} the core clock was NOT locked during the tuning: it moved {lo}..{hi} MHz with the offset; this profile holds for the unlocked clock only (a lock - HiveOS Core Clock lock, --lock-cclock - has its own profile)",
@@ -2357,7 +2377,9 @@ impl Manager {
                 if cur <= c.orig || !c.owned.load(Ordering::SeqCst) || self.stopped() {
                     break;
                 }
+                crate::status::set(c.dev, format!("check {}", signed(cur)), false, Some(Instant::now() + Duration::from_secs(60)));
                 let r = self.run_check(c, &self.quick_spec(refs.clone()));
+                crate::status::clear(c.dev);
                 if self.stopped() {
                     break;
                 }

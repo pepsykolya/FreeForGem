@@ -389,6 +389,21 @@ impl Tuner<'_> {
     /// (HiveOS nvidia-oc at a miner start / from the web UI) makes the check say nothing about `at`: `at` is set again and the
     /// check repeated (twice at most); any other value there is a failed check.
     fn check(&self, c: &Card, at: i32, secs: u32) -> Res {
+        // the stats line / summary show what this GPU does (status.rs); a single check clears its state after
+        let tuning = crate::status::is_tuning(c.r.dev);
+        if tuning {
+            crate::status::set(c.r.dev, format!("NOID tuning {}", signed(at)), true, None);
+        } else {
+            crate::status::set(c.r.dev, format!("NOID check {}", signed(at)), false, Some(Instant::now() + Duration::from_secs(secs as u64 + 25)));
+        }
+        let r = self.check_states(c, at, secs);
+        if !tuning {
+            crate::status::clear(c.r.dev);
+        }
+        r
+    }
+
+    fn check_states(&self, c: &Card, at: i32, secs: u32) -> Res {
         let mut r = Res::default();
         for attempt in 0..3 {
             r = self.check_once(c, at, secs);
@@ -471,6 +486,7 @@ impl Tuner<'_> {
         let t0 = Instant::now();
         let mut samples: Vec<(f64, u32, u32)> = Vec::new();
         let mut last_sample = Instant::now();
+        let mut load_at: Option<Instant> = None; // the child started its GPU loop (NOID_LOAD)
         let mut result: Option<String> = None;
         let mut tail: Vec<String> = Vec::new();
         let limit = Duration::from_secs(secs as u64 + 180); // + CPU reference, CUDA start
@@ -481,7 +497,9 @@ impl Tuner<'_> {
                 Err(_) => break,
             }
             while let Ok(l) = rx.try_recv() {
-                if l.starts_with("NOID_CHECK") {
+                if l.starts_with("NOID_LOAD") {
+                    load_at = Some(Instant::now());
+                } else if l.starts_with("NOID_CHECK") {
                     result = Some(l);
                 } else {
                     tail.push(l);
@@ -512,8 +530,9 @@ impl Tuner<'_> {
                 res.fault = true;
                 return res;
             }
-            // power after the CPU reference and warm-up: the last two thirds of the run
-            if t0.elapsed() > Duration::from_secs(8 + secs as u64 / 3) && last_sample.elapsed() >= Duration::from_millis(500) {
+            // power under the GPU load only (after the child's CPU reference), past a warm-up of a third of the run
+            let warm = Duration::from_secs((secs as u64 / 3).max(3));
+            if result.is_none() && load_at.is_some_and(|t| t.elapsed() > warm) && last_sample.elapsed() >= Duration::from_millis(500) {
                 last_sample = Instant::now();
                 if let Some(p) = self.nv.power_w(c.nv) {
                     samples.push((p, self.nv.clock_mhz(c.nv).unwrap_or(0), self.nv.temp_c(c.nv).unwrap_or(0)));
@@ -814,6 +833,12 @@ impl Tuner<'_> {
     /// Full tune; `below`: an offset known to fail (search stays under it).
     fn tune(&self, c: &Card, below: Option<i32>) -> i32 {
         let mode = super::mode_name(self.mode);
+        let _status = crate::status::Guard(c.r.dev);
+        {
+            let steps = ((c.max - c.start).max(0) / self.o.step.max(1)) as u64 + 2;
+            let eta = Instant::now() + Duration::from_secs(BASE_SECS as u64 + 20 + steps * (self.step_secs() as u64 + 15) + self.o.confirm_secs.max(self.step_secs()) as u64 + 20);
+            crate::status::set(c.r.dev, "NOID tuning".into(), true, Some(eta));
+        }
         let step = self.o.step.max(1);
         let mut max = c.max;
         if let Some(b) = below {
@@ -947,6 +972,23 @@ impl Tuner<'_> {
             res -= step;
         }
         if res <= c.base {
+            res = c.base;
+            good = (e.mhs_base, e.w_base);
+        }
+        // never a result that is less efficient than the base (power barely changes with the offset at a low lock: the voltage
+        // is already at its floor); keep the base and say so
+        let eff = |m: f64, w: f64| if m > 0.0 && w > 0.0 { m / w } else { 0.0 };
+        let (eb, er) = (eff(e.mhs_base, e.w_base), eff(good.0, good.1));
+        if res > c.base && eb > 0.0 && er > 0.0 && er < eb * 1.01 {
+            lg(format!(
+                "{} {}: {:.3} MH/W, the base {}: {:.3} MH/W: no gain at this clock (the voltage is already at its floor): keeping the base {}",
+                c.label(),
+                signed(res),
+                er,
+                signed(c.base),
+                eb,
+                signed(c.base)
+            ));
             res = c.base;
             good = (e.mhs_base, e.w_base);
         }
@@ -1148,7 +1190,10 @@ pub fn start_jobs(live: &Arc<Live>) {
             while pause.as_ref().is_some_and(|(_, d)| !d.load(Ordering::SeqCst)) && t0.elapsed() < Duration::from_secs(60) && !t.stopped() {
                 std::thread::sleep(Duration::from_millis(50));
             }
-            let v = if t.stopped() { card.base } else { t.run_card(&card) };
+            let v = if t.stopped() { card.base } else {
+                let _status = crate::status::Guard(card.r.dev);
+                t.run_card(&card)
+            };
             if let Some(c) = l2.cards.lock().unwrap().iter_mut().find(|c| c.pos == pos) {
                 c.want = v;
                 c.tuned = v > card.base;

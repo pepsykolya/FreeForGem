@@ -975,6 +975,9 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             stop_children(&mut slots);
             anyhow::bail!("CMFD: every GPU failed {MAX_QUICK_FAILS} starts in a row; see the messages above");
         }
+        if let Some(l) = crate::status::summary_due() {
+            println!("{l}");
+        }
         if last_report.elapsed() >= Duration::from_secs(10) {
             last_report = Instant::now();
             println!("{}", report_line(&slots, nv.as_ref(), start.elapsed()));
@@ -1041,7 +1044,7 @@ fn report_line(slots: &[Slot], nv: Option<&nvml::Nvml>, up: Duration) -> String 
         } else {
             ""
         };
-        parts.push(format!("GPU{} {:.2}{pw}{state}", s.dev, rate));
+        parts.push(format!("GPU{} {:.2}{pw}{state}{}", s.dev, rate, crate::status::tag(s.dev)));
         let t = s.totals();
         acc += t.accepted;
         rej += t.rejected;
