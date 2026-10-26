@@ -1168,7 +1168,7 @@ impl Tuner<'_> {
         self.sh.db.clear_trying(&c.uuid);
         let eff = |f: f64, w: f64| if w > 0.0 { f * 3_600_000.0 / w } else { 0.0 };
         lg(format!(
-            "{} CMFD offset {} -> {}: {:.2} -> {:.2} FW/s, {:.1} -> {:.1} W, {:.0} -> {:.0} FW/kWh ({:+.1} %), saved",
+            "{} RESULT (CMFD): offset {} -> {}: {:.2} -> {:.2} FW/s, {:.1} -> {:.1} W, {:.0} -> {:.0} FW/kWh ({:+.1} %), saved; mining at it",
             c.label(),
             signed(c.base),
             signed(fin),

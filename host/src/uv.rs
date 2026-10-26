@@ -1785,6 +1785,7 @@ impl Manager {
                     self.save_entry(c, &e);
                     self.clear_trying(c);
                     lg(format!("{} {} passes ({} reruns, cpu ok {}), {}, {} MHz: mining at it, saved as profile {} (your {} is put back on exit)", c.label(), signed(v), r.reruns, r.cpu_ok, fmt_w(r.watts), r.clk.unwrap_or(0), profile_key(&e), signed(c.orig)));
+                    lg(format!("{} RESULT: offset {} at {} MHz, {} under the check load (the start {} failed at these clocks: 30 MHz steps down); mining at it", c.label(), signed(v), e.clk_ok, fmt_w(r.watts), signed(start)));
                     return Ok(());
                 }
                 lg(format!("{} {} FAILS too ({})", c.label(), signed(v), r.reason));
@@ -1793,7 +1794,7 @@ impl Manager {
                 }
                 v = (v - 30).max(0);
             }
-            lg(format!("{} no offset down to {} passes the check at these clocks: check the clocks / memory / power of this GPU (left at {})", c.label(), signed(v.max(c.lo)), signed(c.cur.load(Ordering::Relaxed))));
+            lg(format!("{} RESULT: FAILED, no offset down to {} passes the check at these clocks: check the clocks / memory / power of this GPU (left at {})", c.label(), signed(v.max(c.lo)), signed(c.cur.load(Ordering::Relaxed))));
             return Ok(());
         }
         let refs = if golden.is_empty() { base.refs.clone() } else { golden };
