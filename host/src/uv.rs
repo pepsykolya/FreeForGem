@@ -1810,6 +1810,17 @@ impl Manager {
             conf_w = base_w;
         }
         let (lo, hi) = (clks.iter().min().copied().unwrap_or(0), clks.iter().max().copied().unwrap_or(0));
+        // the lock changed during the tuning (an OC apply / another tool): the result belongs to no single clock, it is not saved;
+        // the card goes back to the owner's offset and the clock under mining load picks the profile again
+        if let (None, Some(b), Some(k)) = (c.lock, base.clk, conf_clk) {
+            if (k as i64 - b as i64).abs() > 150 {
+                lg(format!("{} the core clock changed during the tuning ({b} MHz at the start, {k} MHz at the end: the clock lock was changed): not saved; back to {}, the clock picks the profile again", c.label(), signed(c.orig)));
+                let _ = self.set_checked(c, c.orig);
+                self.clear_trying(c);
+                *c.probe.lock().unwrap() = Some(ProbeSt::new(false, false));
+                return Ok(());
+            }
+        }
         let mut e = self.new_entry(c);
         e.offset = fin;
         e.cap = c.max;

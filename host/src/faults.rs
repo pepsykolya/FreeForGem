@@ -322,7 +322,9 @@ pub fn restart_self(why: &str) -> String {
         let list = hist.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
         // --uv-reset is for the start the owner made: the restart keeps what this run found (and the remembered faults)
         let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).filter(|a| a != "--uv-reset").collect();
-        let err = std::process::Command::new(exe).args(args).env("FFG_SELF_RESTARTS", list).exec();
+        // the same argv[0] as before (HiveOS / scripts that look for "./freeforgem" still find the process)
+        let arg0 = std::env::args_os().next().unwrap_or_else(|| exe.clone().into_os_string());
+        let err = std::process::Command::new(&exe).arg0(arg0).args(args).env("FFG_SELF_RESTARTS", list).exec();
         return format!("restart failed: {err}");
     }
     #[allow(unreachable_code)]
