@@ -495,6 +495,7 @@ pub struct Card {
     plan: Mutex<Option<Plan>>,         // what runs once mining has started (attach)
     gs: Mutex<Option<Arc<GpuStat>>>,   // the mining thread of this GPU (pause handshake for its checks)
     crashed_at: Mutex<Option<i32>>,    // it crashed while mining at this offset (faults.rs): decide() steps back from it
+    next_clk: Mutex<Instant>,          // next sample of the load clock (clock_watch)
 }
 
 /// The clock probe of a card whose lock the miner does not know.
@@ -969,6 +970,7 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
         plan: Mutex::new(None),
         gs: Mutex::new(None),
         crashed_at: Mutex::new(None),
+        next_clk: Mutex::new(Instant::now()),
     }
 }
 
@@ -2144,6 +2146,17 @@ impl Manager {
                         continue;
                     }
                 }
+            }
+            // the load clock at an undervolt offset, every 10 s (a lock raised under the miner is seen within ~1 min)
+            let clk_due = {
+                let mut nc = c.next_clk.lock().unwrap();
+                let d = Instant::now() >= *nc;
+                if d {
+                    *nc = Instant::now() + Duration::from_secs(10);
+                }
+                d
+            };
+            if clk_due && !c.reval_busy.load(Ordering::Relaxed) {
                 if c.cur.load(Ordering::Relaxed) > c.orig && c.probe.lock().unwrap().is_none() && !gs.paused.load(Ordering::Relaxed) {
                     if let Some(why) = self.clock_watch(c, gs.attempts.load(Ordering::Relaxed)) {
                         lg(format!("{} the core clock under mining load changed at the same offset ({why}): the clock lock changed while mining; back to {}, the clock picks the profile again", c.label(), signed(c.orig)));
@@ -2202,8 +2215,8 @@ impl Manager {
         }
     }
 
-    /// Every 30 s while mining at an undervolt offset: the load clock against the one seen after the offset was set (3 samples
-    /// each).  Some(text) when it rose by more than 75 MHz / 5 %: the clock lock was raised (or removed) under the miner.
+    /// Every 10 s while mining at an undervolt offset: the load clock against the one seen after the offset was set (median of 3
+    /// samples each).  Some(text) when it rose by more than 75 MHz / 5 %: the clock lock was raised (or removed) under the miner.
     fn clock_watch(&self, c: &Card, attempts: u64) -> Option<String> {
         let clk = self.nv.clock_mhz(c.nv)?;
         let mut rc = c.run_clk.lock().unwrap();
