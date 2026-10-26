@@ -93,6 +93,10 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - HiveOS with NVIDIA driver 525 or newer.
 - Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too (CMP 50HX: only ~2.6 TH/s, not recommended for Pearl).
 - Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
+- **HiveOS reboots the rig at a high load average, even with its watchdog off** (`/hive/bin/wd`, check_la: `sreboot fast` when the
+  5-min load average reaches the rig's max_la, 28 on a 4C/8T Xeon rig). Weak CPUs (4 cores) with many GPUs are at risk while
+  several GPUs tune at once. Since 1.7.2-beta4 the miner keeps its runnable threads low (no busy wait for the GPU, one CPU reference
+  at a time at nice 10) and the tuning summary shows the load average, with a WARNING above 2 x the CPU threads.
 
 ### Developer fee
 
@@ -215,6 +219,10 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 - HiveOS с драйвером NVIDIA 525 или новее.
 - Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: всего ~2,6 TH/s, для Pearl не рекомендуется).
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
+- **HiveOS перезагружает риг при высоком load average, даже с выключенным вотчдогом** (`/hive/bin/wd`, check_la: `sreboot fast`,
+  когда load average за 5 мин доходит до max_la рига, 28 на риге с Xeon 4C/8T). Слабые CPU (4 ядра) с многими картами
+  рискуют, пока тюнятся несколько карт сразу. С 1.7.2-beta4 майнер держит мало готовых к исполнению потоков (без активного ожидания
+  GPU, одна CPU-сверка за раз с nice 10), а сводка тюнинга показывает load average с WARNING выше 2 x числа потоков CPU.
 
 ### NOID (Parano1d), с 1.7.0
 

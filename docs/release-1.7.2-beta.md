@@ -60,6 +60,14 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   (`--no-color` / `NO_COLOR`); h-stats.sh strips the colour codes.
 * **NOID**: a result less efficient than the base keeps the base ("no gain at this clock"); MH/W is measured only under the GPU load.
 
+* **beta4, HiveOS reboot at a high load average** (Rig01 NOID tuning, 4C/8T Xeon, 8 GPUs): the NOID GPU threads no longer
+  busy-wait for the GPU (one core at 100 % per GPU before), the CPU reference of the checks runs once per machine at a time on
+  CPU threads - 1 at nice 10 and is cached (8 parallel checks computed it 8 times on all threads before); the tuning summary
+  shows the load average (Linux) with a WARNING above 2 x the CPU threads.
+* **beta4, NOID stale shares**: a share of a job the pool has voided (pause / clean job) is dropped before it is sent, also
+  results still in flight; `clean: false` keeps the older job valid; stale rejects counted (`rej N (stale N)`) and each logged
+  with whether it was sent before the pool's pause reached the miner; shares go out within 20 ms.
+
 ### Checks
 
 Release gate `tests/hiveos_scenarios.sh` (one real GPU, fake HiveOS OC profile): lock switching and `--uv-reset` per lock, a
@@ -125,6 +133,14 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
 * **Прогресс и цвета**: состояние карты в строке статистики, сводка раз в минуту, строка RESULT по каждой карте; цветной лог
   (`--no-color` / `NO_COLOR`); h-stats.sh убирает коды цвета.
 * **NOID**: результат менее эффективный, чем база, не применяется ("no gain at this clock"); MH/W меряется только под нагрузкой GPU.
+
+* **beta4, перезагрузка HiveOS при высоком load average** (Rig01, тюнинг NOID, Xeon 4C/8T, 8 карт): потоки GPU в NOID больше не
+  ждут GPU активно (раньше одно ядро на 100 % на каждую карту), CPU-сверка проверок идёт одна на машину за раз на (потоки CPU - 1)
+  с nice 10 и кэшируется (раньше 8 параллельных проверок считали её 8 раз на всех потоках); сводка тюнинга показывает load
+  average (Linux) с WARNING выше 2 x числа потоков CPU.
+* **beta4, устаревшие шары NOID**: шара задания, которое пул отменил (pause / clean job), отбрасывается до отправки, в том числе
+  результаты в полёте; `clean: false` оставляет старое задание действующим; отказы stale считаются отдельно (`rej N (stale N)`), и
+  у каждого в логе видно, отправлена ли шара до того, как пауза пула дошла до майнера; шары уходят за 20 мс.
 
 ### Проверки
 
