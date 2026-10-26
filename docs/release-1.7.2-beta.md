@@ -48,6 +48,12 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
 * **Nothing sets an offset after the exit restore** (a check thread still running cannot leave an undervolt behind); the restore
   runs before any log line, so a dead log pipe (`tee` killed by HiveOS `miner stop`) cannot stop it halfway.
 
+* **A failed offset is never applied.** A saved offset that fails its quick check is not kept as the profile's offset: the profile
+  holds your offset, paused at these clocks for 24 h; only an offset that passed a check is ever applied without one (found in
+  the 1.7.2 soak test: a migrated +270 that failed was applied after the next restart).
+* A crash while mining steps the offset back 30 MHz (two default steps), not 15: on the soak rig two RTX 3070 whose +315 had
+  passed tuning and checks crashed after hours at 1805 MHz.
+
 ### Checks
 
 Release gate `tests/hiveos_scenarios.sh` (one real GPU, fake HiveOS OC profile): lock switching and `--uv-reset` per lock, a
@@ -101,6 +107,12 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   больше 12 собственных перезапусков в час; если исключены все карты, майнер ждёт, а не выходит.
 * **После восстановления на выходе offset больше никто не ставит** (ещё работающий поток проверки не оставит андервольт);
   восстановление идёт до любой строки лога, поэтому мёртвый канал лога (`tee`, убитый `miner stop` HiveOS) его не прерывает.
+
+* **Не прошедший проверку offset никогда не применяется.** Сохранённый offset, не прошедший быструю проверку, не остаётся offset'ом
+  профиля: в профиле ваш offset, пауза на этих частотах 24 ч; без проверки применяется только offset, прошедший проверку (найдено
+  при длительном тесте 1.7.2: мигрированный +270 после провала применялся при следующем перезапуске).
+* Падение в майнинге понижает offset на 30 МГц (два шага по умолчанию), а не на 15: на тестовом риге две RTX 3070 с +315,
+  прошедшим тюнинг и проверки, упали через несколько часов на 1805 МГц.
 
 ### Проверки
 
