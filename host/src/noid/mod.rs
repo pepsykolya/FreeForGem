@@ -177,12 +177,52 @@ fn target_hi(th: u64) -> [u8; 32] {
     t
 }
 
-/// The expected candidate set (sorted nonce indexes) of nonces 0 .. n of `raw` for threshold `th`, on the CPU.
+/// The expected candidate set (sorted nonce indexes) of nonces 0 .. n of `raw` for threshold `th`, on the CPU.  The tuning
+/// checks and the in-mining watchdog ask for the same fixed job again and again (every check process, every GPU): computed once
+/// per machine and kept in this process and in a file of the temp directory (read under the machine-wide lock, so a second
+/// process waits for the first instead of computing it too).
 pub fn cpu_candidates(raw: &[u8; 256], n: u64, th: u64) -> Vec<u32> {
+    use sha2::{Digest, Sha256};
+    static MEM: Mutex<Vec<(String, Vec<u32>)>> = Mutex::new(Vec::new());
     let f = zero_low(raw);
-    let n0 = u128::from_le_bytes(f[160..176].try_into().unwrap());
-    let d = cpu::digests(&f, n0, n as usize);
-    d.iter().enumerate().filter(|(_, x)| cpu::hi64(x) <= th).map(|(i, _)| i as u32).collect()
+    let mut h = Sha256::new();
+    h.update(f);
+    h.update(n.to_le_bytes());
+    h.update(th.to_le_bytes());
+    let key = hex(&h.finalize()[..12]);
+    if let Some((_, v)) = MEM.lock().unwrap().iter().find(|(k, _)| *k == key) {
+        return v.clone();
+    }
+    let _l = cpu::machine_lock();
+    let dir = std::env::temp_dir().join("freeforgem-noid-ref");
+    let file = dir.join(format!("{key}.bin"));
+    let parse = |b: &[u8]| -> Option<Vec<u32>> {
+        // u32 LE indexes, then the u32 LE count (a cut file does not parse)
+        if b.len() < 4 || b.len() % 4 != 0 {
+            return None;
+        }
+        let v: Vec<u32> = b.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+        let (cnt, idx) = v.split_last()?;
+        (*cnt as usize == idx.len() && idx.windows(2).all(|w| w[0] < w[1]) && idx.last().is_none_or(|&x| (x as u64) < n)).then(|| idx.to_vec())
+    };
+    let v = match std::fs::read(&file).ok().and_then(|b| parse(&b)) {
+        Some(v) => v,
+        None => {
+            let n0 = u128::from_le_bytes(f[160..176].try_into().unwrap());
+            let d = cpu::digests_locked(&f, n0, n as usize);
+            let v: Vec<u32> = d.iter().enumerate().filter(|(_, x)| cpu::hi64(x) <= th).map(|(i, _)| i as u32).collect();
+            let mut b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+            b.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            let _ = std::fs::create_dir_all(&dir);
+            let tmp = dir.join(format!("{key}.{}.tmp", std::process::id()));
+            if std::fs::write(&tmp, &b).is_ok() {
+                let _ = std::fs::rename(&tmp, &file);
+            }
+            v
+        }
+    };
+    MEM.lock().unwrap().push((key, v.clone()));
+    v
 }
 
 /// One launch of `iters` over nonces 0..: (GPU set, CPU set, nonces), both sorted.

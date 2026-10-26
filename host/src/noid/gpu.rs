@@ -2,6 +2,7 @@
 //! Safe wrappers around the C ABI of the NOID search library (gpu/noidgpu.h): `libnoidgpu.so` / `noidgpu.dll`, loaded at run
 //! time from the binary's folder (then the system search path).  Closed-source kernels like the Pearl library; separate from it.
 use crate::gpu::dl;
+use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -164,15 +165,61 @@ pub fn set_job(fields: &[u8; 256], target: &[u8; 32]) -> Result<()> {
     }
     Ok(())
 }
+// nd_wait spins on the CPU until the launch is done (one core at 100 % per GPU thread: a runnable thread all the time, which
+// the load average counts -- HiveOS reboots a rig at a high load average, Rig01 1.7.2 beta2).  The calling thread sleeps until
+// shortly before the launch should be done (from the measured time per nonce of this GPU), then waits the rest: a few % CPU.
+struct Pace {
+    launched: [Option<(Instant, u64)>; 2], // per slot: when, nonces
+    last_done: Option<Instant>,
+    per_nonce: f64, // seconds per nonce on this GPU (0 = not measured yet)
+}
+thread_local! {
+    static PACE: std::cell::RefCell<Pace> = const { std::cell::RefCell::new(Pace { launched: [None, None], last_done: None, per_nonce: 0.0 }) };
+}
+
 pub fn launch(slot: i32, base: u32, iters: u32) -> Result<()> {
     if unsafe { nd_launch(slot, base, iters as i32) } != 0 {
         bail!("nd_launch: {}", last_error());
     }
+    let n = grid_nonces() * iters.max(1) as u64;
+    PACE.with(|p| p.borrow_mut().launched[(slot & 1) as usize] = Some((Instant::now(), n)));
     Ok(())
 }
-/// Returns (candidates found, candidates stored in `buf`).
+/// Returns (candidates found, candidates stored in `buf`).  Sleeps (no CPU) through most of the launch first.
 pub fn wait(slot: i32, buf: &mut [u32]) -> Result<(usize, usize)> {
+    let s = (slot & 1) as usize;
+    let mine = PACE.with(|p| {
+        let p = p.borrow();
+        p.launched[s].map(|(t, n)| {
+            // it runs after the launch before it (two in flight): from the later of its start and the last completion
+            let begin = p.last_done.map_or(t, |d| d.max(t));
+            (begin, n, p.per_nonce)
+        })
+    });
+    if let Some((begin, n, per)) = mine {
+        if per > 0.0 {
+            let due = begin + Duration::from_secs_f64(n as f64 * per * 0.85);
+            let now = Instant::now();
+            if due > now + Duration::from_millis(2) {
+                std::thread::sleep(due - now);
+            }
+        }
+    }
     let r = unsafe { nd_wait(slot, buf.as_mut_ptr(), buf.len() as i32) };
+    let now = Instant::now();
+    PACE.with(|p| {
+        let mut p = p.borrow_mut();
+        if let Some((t, n)) = p.launched[s].take() {
+            let begin = p.last_done.map_or(t, |d| d.max(t));
+            let took = now.duration_since(begin).as_secs_f64();
+            if n > 0 && took > 0.0 {
+                let x = took / n as f64;
+                // a sleep that overshot makes `took` too long: only shorter times pull the estimate down quickly
+                p.per_nonce = if p.per_nonce == 0.0 { x } else if x < p.per_nonce { 0.5 * p.per_nonce + 0.5 * x } else { 0.9 * p.per_nonce + 0.1 * x };
+            }
+        }
+        p.last_done = Some(now);
+    });
     if r < 0 {
         bail!("nd_wait: {}", last_error());
     }
@@ -187,6 +234,7 @@ pub fn digest(start: u32, n: u32) -> Result<Vec<[u8; 32]>> {
     Ok(out)
 }
 pub fn release() {
+    PACE.with(|p| *p.borrow_mut() = Pace { launched: [None, None], last_done: None, per_nonce: 0.0 });
     if API.get().is_some() {
         unsafe { nd_release() };
     }

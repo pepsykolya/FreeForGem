@@ -72,7 +72,22 @@ fn line(a: &All, now: Instant) -> Option<String> {
         Some(_) => ", about a minute left".to_string(),
         None => String::new(),
     };
-    Some(format!("auto-uv: {}{eta}; their hashrate shows once they finish (the other GPUs mine)", parts.join(", ")))
+    Some(format!("auto-uv: {}{eta}; their hashrate shows once they finish (the other GPUs mine){}", parts.join(", "), load_note()))
+}
+
+/// Linux: "; load average 3.1 / 2.8 (1 / 5 min, 8 CPU threads)", with a WARNING when the 5-min value is above 2x the CPU
+/// threads (HiveOS reboots a rig at a high load average even with its watchdog off: /hive/bin/wd check_la).
+fn load_note() -> String {
+    let Some((l1, l5)) = loadavg() else { return String::new() };
+    let n = std::thread::available_parallelism().map_or(1, |x| x.get());
+    let warn = if l5 > 2.0 * n as f64 { " -- WARNING: high load average, HiveOS reboots a rig at a high one (even with its watchdog off)" } else { "" };
+    format!("; load average {l1:.1} / {l5:.1} (1 / 5 min, {n} CPU threads){warn}")
+}
+
+pub fn loadavg() -> Option<(f64, f64)> {
+    let s = std::fs::read_to_string("/proc/loadavg").ok()?;
+    let mut it = s.split_whitespace().map(|x| x.parse::<f64>().ok());
+    Some((it.next()??, it.next()??))
 }
 
 /// The summary line when it is due: at once when the set of busy GPUs changes, else about once a minute while any is busy.
@@ -107,10 +122,9 @@ mod tests {
             a.gpus.insert(d, St { what: format!("tuning +150, step 3/10"), tuning: true, eta: Some(now + Duration::from_secs(330)) });
         }
         a.gpus.insert(7, St { what: "check +300".into(), tuning: false, eta: Some(now + Duration::from_secs(40)) });
-        assert_eq!(
-            line(&a, now).unwrap(),
+        assert!(line(&a, now).unwrap().starts_with(
             "auto-uv: tuning 2 GPU(s) (GPU3, GPU4), checking 1 GPU(s) (GPU7), ~6 min left; their hashrate shows once they finish (the other GPUs mine)"
-        );
+        ));
         set(91, "tuning +180, step 2/9".into(), true, Some(Instant::now() + Duration::from_secs(60)));
         assert_eq!(tag(91), " [tuning +180, step 2/9]");
         {

@@ -44,16 +44,69 @@ pub fn hi64(d: &[u8; 32]) -> u64 {
     u64::from_le_bytes(d[24..32].try_into().unwrap())
 }
 
-/// Digests of the nonces `nonce0 .. nonce0 + n` (field 10 as u128) over all CPU threads (official batch kernel).
+/// Threads of one CPU reference run: the CPU threads minus one (1..32), FFG_CPU_THREADS overrides.  Only ONE such run at a
+/// time on the whole machine (all GPUs, all check processes: machine_lock), so the miner never has more runnable CPU threads
+/// than the CPU has (the load average counts runnable threads; HiveOS reboots a rig at a high one, Rig01 1.7.2 beta2: 8 tuning
+/// checks x 8 reference threads on a 4C/8T Xeon).
+pub fn ref_threads() -> usize {
+    std::env::var("FFG_CPU_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |x| x.get()).saturating_sub(1)).clamp(1, 32)
+}
+
+/// Blocks (sleeping, not spinning) until no other CPU reference runs in this process or another FreeForGem process.
+pub struct RefLock {
+    _p: std::sync::MutexGuard<'static, ()>,
+    _f: Option<std::fs::File>,
+}
+pub fn machine_lock() -> RefLock {
+    static P: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let p = P.lock().unwrap_or_else(|e| e.into_inner());
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(std::env::temp_dir().join("freeforgem-cpu-ref.lock")).ok();
+    if let Some(f) = &f {
+        let _ = f.lock();
+    }
+    RefLock { _p: p, _f: f }
+}
+
+/// The calling thread at a lower CPU priority (Linux nice 10, Windows below normal): the CPU reference must not make the rig
+/// (HiveOS agent, ssh, the pool connections) slow.
+pub fn low_priority() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        unsafe extern "C" {
+            fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+            fn syscall(n: i64, ...) -> i64;
+        }
+        let tid = syscall(186) as u32; // SYS_gettid (x86_64)
+        setpriority(0, tid, 10);
+    }
+    #[cfg(windows)]
+    unsafe {
+        unsafe extern "system" {
+            fn GetCurrentThread() -> *mut std::ffi::c_void;
+            fn SetThreadPriority(h: *mut std::ffi::c_void, p: i32) -> i32;
+        }
+        SetThreadPriority(GetCurrentThread(), -1);
+    }
+}
+
+/// Digests of the nonces `nonce0 .. nonce0 + n` (field 10 as u128) on ref_threads() low-priority threads (official batch
+/// kernel), one run per machine at a time.
 pub fn digests(raw: &[u8; 256], nonce0: u128, n: usize) -> Vec<[u8; 32]> {
+    let _l = machine_lock();
+    digests_locked(raw, nonce0, n)
+}
+
+/// digests() for a caller that holds machine_lock().
+pub fn digests_locked(raw: &[u8; 256], nonce0: u128, n: usize) -> Vec<[u8; 32]> {
     let f: Vec<Block128> = fields_of(raw).iter().map(|&x| Block128(x)).collect();
     let mut out = vec![[0u8; 32]; n];
-    let threads = std::thread::available_parallelism().map_or(4, |x| x.get()).clamp(1, 32);
+    let threads = ref_threads();
     let chunk = n.div_ceil(threads).max(4096);
     std::thread::scope(|s| {
         for (k, part) in out.chunks_mut(chunk).enumerate() {
             let f = &f;
             s.spawn(move || {
+                low_priority();
                 let mut b = FixedFieldNonceBatch::new(TAG_POWHDR, f, NONCE_FIELD);
                 for (j, sub) in part.chunks_mut(4096).enumerate() {
                     b.hash_into(nonce0 + (k * chunk + j * 4096) as u128, sub);
