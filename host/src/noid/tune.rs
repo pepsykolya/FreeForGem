@@ -682,8 +682,8 @@ impl Tuner<'_> {
         self.db.use_key(&c.uuid, &key);
         let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash_at) };
         if let Some(at) = crash_at {
-            let want = if e.offset < at { e.offset } else { at - self.o.step.max(1) };
-            lg(format!("{} NOID profile {key}: {} {} after a quick check (no tuning from scratch)", c.label(), if e.offset < at { "back to the verified" } else { "one step below the crash:" }, signed(want)));
+            let want = if e.offset < at { e.offset } else { at - uv::crash_back(self.o.step.max(1)) };
+            lg(format!("{} NOID profile {key}: {} {} after a quick check (no tuning from scratch)", c.label(), if e.offset < at { "back to the verified" } else { "30 MHz below the crash:" }, signed(want)));
             return self.step_down(c, &e, want);
         }
         let why = if e.driver != self.driver {

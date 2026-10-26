@@ -42,7 +42,7 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
 * A single `--lock-cclock` value for all GPUs that replaces different per-GPU HiveOS locks is now warned about.
 
 * **The miner fixes a crashing offset itself, without a tuning from scratch.** A crash (Xid) at a reused or kept offset steps
-  that GPU back to the verified offset of its lock (or one step below the crash) after a quick check; a verified offset that fails
+  that GPU back to the verified offset of its lock (or 30 MHz below the crash) after a quick check; a verified offset that fails
   its quick check steps down from it; a tuning runs only when the lock has no verified result. No restart loops: at most 12 own
   restarts an hour; when every GPU is left out the miner waits instead of exiting.
 * **Nothing sets an offset after the exit restore** (a check thread still running cannot leave an undervolt behind); the restore
@@ -96,7 +96,7 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
 * Предупреждение, если одно значение `--lock-cclock` на все карты заменяет разные поканальные локи HiveOS.
 
 * **Майнер сам исправляет падающий offset, без тюнинга с нуля.** Падение (Xid) на повторно применённом или оставленном offset
-  возвращает карту к проверенному offset её лока (или на шаг ниже падения) после быстрой проверки; проверенный offset, не прошедший
+  возвращает карту к проверенному offset её лока (или на 30 МГц ниже падения) после быстрой проверки; проверенный offset, не прошедший
   быструю проверку, понижается по шагу; тюнинг — только если для лока нет проверенного результата. Без циклов перезапуска: не
   больше 12 собственных перезапусков в час; если исключены все карты, майнер ждёт, а не выходит.
 * **После восстановления на выходе offset больше никто не ставит** (ещё работающий поток проверки не оставит андервольт);

@@ -1284,8 +1284,8 @@ impl Manager {
                 lg(format!("{} crashed while mining at {}: back to the verified {} of profile {key} after a quick check (no tuning from scratch)", c.label(), signed(at), signed(e.offset)));
                 return Plan::Check { want: e.offset, e };
             }
-            let want = at - self.opts.step;
-            lg(format!("{} crashed while mining at {} (the offset of profile {key}): one step below it, {}, after a quick check (no tuning from scratch)", c.label(), signed(at), signed(want)));
+            let want = at - crash_back(self.opts.step);
+            lg(format!("{} crashed while mining at {} (the offset of profile {key}): {} MHz below it, {}, after a quick check (no tuning from scratch)", c.label(), signed(at), crash_back(self.opts.step), signed(want)));
             e.offset = want;
             e.edge = at;
             e.verified_at = 0;
@@ -2550,6 +2550,13 @@ fn verified(e: &Entry) -> bool {
     e.verified_at > 0 && !e.migrated
 }
 
+/// How far below a crashed offset the step back goes: 30 MHz (two default steps) at least.  Rig01 soak (8x RTX 3070, 1805/810):
+/// two cards whose +315 (edge minus one 15 MHz step) passed tuning and quick checks crashed with Xid 43 after hours of mining.
+const CRASH_BACK_MHZ: i32 = 30;
+pub(crate) fn crash_back(step: i32) -> i32 {
+    step.max(CRASH_BACK_MHZ)
+}
+
 /// 0 = never (only after a step back)
 fn reval_interval(hours: f64) -> Duration {
     if hours <= 0.0 { Duration::from_secs(10 * 365 * 24 * 3600) } else { Duration::from_secs_f64((hours * 3600.0).max(30.0)) }
@@ -3063,6 +3070,13 @@ mod tests {
         assert_eq!(start_choice(&e(315, 5000), 275, 1000), Choice::Paused);
         // the result is the start itself (it passed the baseline check)
         assert_eq!(start_choice(&e(275, 0), 275, 1000), Choice::Keep);
+    }
+
+    #[test]
+    fn crash_steps_back_30() {
+        assert_eq!(crash_back(15), 30); // Rig01: +315 crashed -> +285, not +300
+        assert_eq!(crash_back(30), 30);
+        assert_eq!(crash_back(45), 45);
     }
 
     #[test]
