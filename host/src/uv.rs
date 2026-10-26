@@ -1308,12 +1308,14 @@ impl Manager {
                 // (Rig01, 1.7.1: results +270..+315 at 1805 MHz, the start offset +325 a leftover of another miner; "keeping" the +325 without a
                 // check crashed GPU3 with Xid 13/43 and stopped all 8 GPUs).  The verified offset is used, never the unchecked start.
                 lg(format!(
-                    "{} the offset {} verified at these clocks (profile {key}{}) is below your offset {}: mining at {} (yours is put back on exit)",
+                    "{} the offset {} {} at these clocks (profile {key}{}) is below your offset {}: mining at {}{} (yours is put back on exit)",
                     c.label(),
                     signed(e.offset),
+                    if verified(&e) { "verified" } else { "saved (not checked yet)" },
                     if e.edge != 0 { format!(", {} failed", signed(e.edge)) } else { String::new() },
                     signed(c.orig),
-                    signed(e.offset)
+                    signed(e.offset),
+                    if verified(&e) { "" } else { " once its quick check passes" }
                 ));
                 return if verified(&e) { Plan::Apply { want: e.offset, e } } else { Plan::Check { want: e.offset, e } };
             }
