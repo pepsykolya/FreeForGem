@@ -775,8 +775,12 @@ pub fn mine(o: Opts) -> Result<()> {
                         hex(&j.share_target[24..32].iter().rev().copied().collect::<Vec<u8>>()),
                         j.expires.map_or(0, |e| e.saturating_duration_since(Instant::now()).as_secs())
                     );
+                    // a clean job voids the older ones (their results in flight are dropped); clean=false keeps them valid
+                    let clean = j.clean;
                     s.job = Some(Arc::new(j));
-                    sh.jgen[src.idx()].fetch_add(1, Ordering::Relaxed);
+                    if clean {
+                        sh.jgen[src.idx()].fetch_add(1, Ordering::Relaxed);
+                    }
                 }
                 Event::Pause(why) => {
                     if s.job.take().is_some() {
@@ -857,17 +861,18 @@ pub fn mine(o: Opts) -> Result<()> {
             let bad: u64 = gstats.iter().map(|g| g.bad.load(Ordering::Relaxed)).sum();
             let (u, f) = (&stats[0], &stats[1]);
             println!(
-                "[{:>4}s] {} | total {:.3} MH/s{} | hits {} (bad {}, stale {}) | user sub {} acc {} rej {} | fee sub {} acc {} rej {}{}{}{}",
+                "[{:>4}s] {} | total {:.3} MH/s{} | hits {} (bad {}, stale {}) | user sub {} acc {} rej {} (stale {}) | fee sub {} acc {} rej {}{}{}{}",
                 start.elapsed().as_secs(),
                 parts.join("  "),
                 tot,
                 pp,
                 sh.hits.load(Ordering::Relaxed),
                 bad,
-                sh.stale.load(Ordering::Relaxed),
+                sh.stale.load(Ordering::Relaxed) + u.stale_drop.load(Ordering::Relaxed) + f.stale_drop.load(Ordering::Relaxed),
                 u.submitted.load(Ordering::Relaxed),
                 u.accepted.load(Ordering::Relaxed),
                 u.rejected.load(Ordering::Relaxed),
+                u.stale_rej.load(Ordering::Relaxed),
                 f.submitted.load(Ordering::Relaxed),
                 f.accepted.load(Ordering::Relaxed),
                 f.rejected.load(Ordering::Relaxed),

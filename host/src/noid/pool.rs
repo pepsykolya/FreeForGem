@@ -23,6 +23,8 @@ pub const PROTOCOL: &str = "parano1d-stratum-v1";
 const SILENCE_LIMIT: Duration = Duration::from_secs(300);
 const BACKOFF_MIN: Duration = Duration::from_secs(2);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
+// the session loop sends the queued shares once per read timeout: short, so a share waits at most this long (stale risk)
+const READ_TICK_MS: u64 = 20;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoolUrl {
@@ -74,7 +76,6 @@ pub struct NJob {
     pub block_target: Option<[u8; 32]>,
     pub work_domain_id: String,
     pub height: u64,
-    #[allow(dead_code)]
     pub clean: bool,
     pub expires: Option<Instant>,
 }
@@ -267,7 +268,7 @@ fn connect(u: &PoolUrl) -> std::io::Result<Conn> {
     let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(30)).with_interval(Duration::from_secs(10));
     let _ = socket2::SockRef::from(&sock).set_tcp_keepalive(&ka);
     if !u.tls {
-        sock.set_read_timeout(Some(Duration::from_millis(100)))?;
+        sock.set_read_timeout(Some(Duration::from_millis(READ_TICK_MS)))?;
         sock.set_write_timeout(Some(Duration::from_secs(20)))?;
         return Ok(Conn::Plain(sock));
     }
@@ -282,7 +283,7 @@ fn connect(u: &PoolUrl) -> std::io::Result<Conn> {
             std::io::Error::new(e.kind(), format!("TLS handshake with {}:{}: {e}{hint}", u.host, u.port))
         })?;
     }
-    sock.set_read_timeout(Some(Duration::from_millis(100)))?;
+    sock.set_read_timeout(Some(Duration::from_millis(READ_TICK_MS)))?;
     Ok(Conn::Tls(Box::new(c), sock))
 }
 
@@ -309,7 +310,13 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     }
     let mut buf: Vec<u8> = Vec::new();
     let mut chunk = [0u8; 16384];
-    let mut pending: std::collections::HashMap<u64, String> = Default::default();
+    let mut pending: std::collections::HashMap<u64, (String, Instant)> = Default::default();
+    // jobs the pool still accepts shares for, in the order of the protocol stream (a pause voids all, a clean job all older
+    // ones); a share of any other job is dropped here, never sent: it closes the gap between the pool's pause / new job and
+    // the miner switching its GPUs (results in flight included).  voided: job id -> when we learned it was void (for the log
+    // of a stale reject: sent before or after that)
+    let mut valid: Vec<String> = Vec::new();
+    let mut voided: std::collections::HashMap<String, Instant> = Default::default();
     let mut next_id = 100u64;
     let mut namespace: Option<Vec<u8>> = None;
     let mut nonce_bits = 64u32;
@@ -324,7 +331,14 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
             return Err(std::io::Error::new(ErrorKind::TimedOut, format!("no data from the pool for {}s", SILENCE_LIMIT.as_secs())));
         }
         while let Ok(s) = rx.try_recv() {
-            pending.insert(s.id, s.job_id);
+            if !valid.contains(&s.job_id) {
+                stats.submitted.fetch_sub(1, Ordering::Relaxed);
+                stats.stale_drop.fetch_add(1, Ordering::Relaxed);
+                let ago = voided.get(&s.job_id).map_or(String::new(), |t| format!(" {} ms ago", t.elapsed().as_millis()));
+                log(l, &format!("share for job {} dropped, not sent: the pool voided that job{ago} (pause / new clean job)", s.job_id));
+                continue;
+            }
+            pending.insert(s.id, (s.job_id, Instant::now()));
             c.send(format!("{}\n", s.line).as_bytes())?;
         }
         if last_hr.elapsed() >= Duration::from_secs(30) {
@@ -363,6 +377,21 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                     }
                     match parse_job(&v, namespace.as_deref(), nonce_bits) {
                         Ok(j) => {
+                            if j.clean {
+                                for o in valid.drain(..) {
+                                    voided.insert(o, Instant::now());
+                                }
+                            }
+                            valid.retain(|x| x != &j.job_id);
+                            valid.push(j.job_id.clone());
+                            if valid.len() > 8 {
+                                let o = valid.remove(0);
+                                voided.insert(o, Instant::now());
+                            }
+                            voided.remove(&j.job_id);
+                            if voided.len() > 64 {
+                                voided.retain(|_, t| t.elapsed() < Duration::from_secs(600));
+                            }
                             let _ = tx.send((src, Event::Job(j)));
                         }
                         Err(e) => log(l, &format!("job not understood ({e}): {line}")),
@@ -371,19 +400,34 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                 "mining.pause" => {
                     let p = &v["params"];
                     let why = p.get(0).and_then(|x| x.get("reason")).or_else(|| p.get("reason")).and_then(Value::as_str).unwrap_or("?").to_string();
+                    for o in valid.drain(..) {
+                        voided.insert(o, Instant::now());
+                    }
                     let _ = tx.send((src, Event::Pause(why)));
                 }
                 "mining.set_target" | "mining.set_difficulty" => log(l, &format!("ignored: {line}")),
                 "" => {
                     let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
                     let ok = v.get("result").map(|r| r.as_bool().unwrap_or(!r.is_null())).unwrap_or(false) && v.get("error").map_or(true, Value::is_null);
-                    if let Some(job_id) = pending.remove(&id) {
+                    if let Some((job_id, sent)) = pending.remove(&id) {
                         if ok {
                             stats.accepted.fetch_add(1, Ordering::Relaxed);
                             log(l, &format!("share ACCEPTED (id {id}, job {job_id})"));
                         } else {
                             stats.rejected.fetch_add(1, Ordering::Relaxed);
-                            log(l, &format!("share REJECTED (id {id}, job {job_id}): {line}"));
+                            let stale = line.contains("stale") || line.contains("job not found");
+                            if stale {
+                                stats.stale_rej.fetch_add(1, Ordering::Relaxed);
+                            }
+                            // stale: was the job still current here when the share was sent?  (sent before we heard of the
+                            // pause / new job = the pool voided it while the share was on its way: network / pool side)
+                            let when = match (stale, voided.get(&job_id)) {
+                                (false, _) => String::new(),
+                                (true, Some(t)) if *t > sent => format!(" [sent {} ms before the pool's pause / new job reached us; reply after {} ms]", t.duration_since(sent).as_millis(), sent.elapsed().as_millis()),
+                                (true, Some(t)) => format!(" [sent {} ms AFTER the job was voided here]", sent.duration_since(*t).as_millis()),
+                                (true, None) => format!(" [the job was still current here when sent; reply after {} ms]", sent.elapsed().as_millis()),
+                            };
+                            log(l, &format!("share REJECTED (id {id}, job {job_id}): {line}{when}"));
                         }
                     } else if id == 1 {
                         let r = &v["result"];

@@ -43,6 +43,10 @@ pub struct Stats {
     pub rejected: AtomicU64,
     pub low_diff: AtomicU64,
     pub connected: AtomicU64,
+    /// NOID: rejected as stale by the pool ("job not found" / "stale"), part of `rejected`
+    pub stale_rej: AtomicU64,
+    /// NOID: shares for a job the pool had already voided (pause / clean job), dropped before sending (not in `submitted`)
+    pub stale_drop: AtomicU64,
 }
 
 /// Which login a job / share belongs to.
