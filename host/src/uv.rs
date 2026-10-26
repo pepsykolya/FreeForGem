@@ -1042,6 +1042,9 @@ impl Manager {
         self.set_checked(c, f)?;
         std::thread::sleep(Duration::from_secs(3));
         let r = self.run_check(c, &self.quick_spec(vec![]));
+        if self.stopped() {
+            return Ok(()); // a stop is not a failure of the offset (the shutdown restore puts the owner's back)
+        }
         if r.ok {
             lg(format!("{} offset {} -> {}, {} (fixed by --uv-offset), check passed ({} reruns, cpu ok {})", c.label(), signed(before), signed(f), fmt_w(r.watts), r.reruns, r.cpu_ok));
         } else {
@@ -1071,6 +1074,9 @@ impl Manager {
         // references are only valid for the m they were taken at; otherwise check without them and keep the new ones
         let m_changed = e.m != c.m;
         let r = self.run_check(c, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
+        if self.stopped() {
+            return Ok(()); // a stop is not a failure of the offset (the shutdown restore puts the owner's back)
+        }
         if r.ok {
             lg(format!("{} offset {} -> {}, saved {} ago ({:.1} W at tuning), quick check passed ({} reruns, cpu ok {})", c.label(), signed(before), signed(e.offset), fmt_age(now().saturating_sub(e.tested_at)), e.w_after, r.reruns, r.cpu_ok));
             let mut e2 = e.clone();
@@ -1105,6 +1111,9 @@ impl Manager {
         self.set_checked(c, t)?;
         std::thread::sleep(Duration::from_secs(3));
         let r = self.run_check(c, &self.quick_spec(if e.m == c.m { e.refs.clone() } else { vec![] }));
+        if self.stopped() {
+            return Ok(()); // a stop is not a failure of the offset (the shutdown restore puts the owner's back)
+        }
         if r.ok {
             lg(format!("{} offset {} -> {}: the saved {} is above the limit {} ({}), limited to it; quick check passed ({} reruns, cpu ok {})", c.label(), signed(before), signed(t), signed(e.offset), signed(t), c.max_src, r.reruns, r.cpu_ok));
         } else {
@@ -1672,6 +1681,9 @@ impl Manager {
                     break;
                 }
                 let r = self.run_check(c, &self.quick_spec(refs.clone()));
+                if self.stopped() {
+                    break;
+                }
                 if r.ok {
                     lg(format!("{} {what} at {}: ok ({} reruns, cpu ok {}), {}", c.label(), signed(cur), r.reruns, r.cpu_ok, fmt_w(r.watts)));
                     if c.cur.load(Ordering::Relaxed) == cur {
