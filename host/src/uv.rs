@@ -2042,6 +2042,11 @@ impl Manager {
         if !sp.refs.is_empty() {
             cmd.args(["--uv-ref", &sp.refs.join(",")]);
         }
+        // its CPU verification (rayon in the official crates) on 2 threads, not on all of them per check: with 8 GPUs checking at
+        // once that made bursts of 8 x nproc runnable threads (load average; HiveOS reboots a rig at a high one)
+        if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+            cmd.env("RAYON_NUM_THREADS", "2");
+        }
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("cannot start the check process")?;
         let (tx, rx) = std::sync::mpsc::channel::<String>();
