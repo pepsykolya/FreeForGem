@@ -219,6 +219,41 @@ pub fn card_defaults(name: &str, cc: Option<(i32, i32)>, pci_id: Option<u16>) ->
     }
 }
 
+/// Which miner a default start is for.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Coin {
+    Pearl,
+    Noid,
+    Cmfd,
+}
+
+fn round15(v: f64) -> i32 {
+    ((v / 15.0).round() * 15.0) as i32
+}
+
+/// Default first offset of a tuning by card type, coin and core lock (1.7.2 beta3; --uv-min overrides it).  A start near the
+/// edge / the voltage floor saves the long ladder of +15 steps from +0 / +120; it is verified first and stepped down in 30 MHz
+/// steps when it fails.  Data: Rig01 8x RTX 3070 (Pearl at a 1805 lock: results +255..+330, at 1410: +300..+480; NOID at
+/// 1400: voltage floor at +120..+195), Shahtyor RTX 3070 (Pearl 1400: +210 passes, CMFD +195), RTX 3080 Ti (NOID floor
+/// +195..+225 at 1560).  None = the card type has no tuned default (the old rule: current offset or +120, RTX 40 +200,
+/// RTX 50 +300).
+pub(crate) fn arch_start(name: &str, coin: Coin, lock: Option<u32>) -> Option<(i32, &'static str)> {
+    let n = name.to_ascii_uppercase();
+    let ga104 = n.contains("3070") || n.contains("3060 TI");
+    let ga102 = n.contains("3080") || n.contains("3090");
+    let l = lock.map(|x| x as f64);
+    match coin {
+        // Pearl: the edge comes down as the lock goes up (1410: +300..+480, 1805: +255..+330): start a few steps below it
+        Coin::Pearl if ga104 => Some((l.map_or(210, |l| round15(210.0 + (1805.0 - l) * 0.15).clamp(150, 300)), "RTX 3070 default (by the core lock)")),
+        Coin::Pearl if ga102 => Some((180, "RTX 3080/3090 default")),
+        // NOID: the voltage floor moves up with the clock (+120..+195 at 1400)
+        Coin::Noid if ga104 => Some((l.map_or(120, |l| round15(105.0 + (l - 1400.0) * 0.25).clamp(90, 210)), "RTX 3070 default (by the core lock)")),
+        Coin::Noid if ga102 => Some((l.map_or(180, |l| round15(180.0 + (l - 1560.0) * 0.25).clamp(120, 240)), "RTX 3080/3090 default (by the core lock)")),
+        Coin::Cmfd if ga104 => Some((150, "RTX 3070 default")),
+        _ => None,
+    }
+}
+
 fn lg(msg: impl AsRef<str>) {
     println!("auto-uv: {}", msg.as_ref());
 }
@@ -488,6 +523,7 @@ pub struct Card {
     oc_resets: Mutex<Vec<Instant>>, // OC applies (HiveOS nvidia-oc ...) that reset the offset while mining, for the rate limit
     fault: AtomicBool, // a check ended in a driver fault (Xid / hang): its crash marker must survive the shutdown
     lock: Option<u32>,  // core clock lock this run sets on the card (--lock-cclock); None = not set by the miner (lock unknown)
+    lock_hint: Option<u32>, // the lock for the default start: --lock-cclock, else the HiveOS profile's lock
     mlock: Option<u32>, // memory clock lock this run sets (--lock-mclock)
     probe: Mutex<Option<ProbeSt>>,     // the clock under mining load picks the profile (lock unknown, 1.7.2)
     run_clk: Mutex<RunClk>,            // load clock while mining at a verified offset, to see a lock change mid-run
@@ -550,6 +586,8 @@ impl Card {
     fn start(&self) -> (i32, &'static str) {
         if let Some(m) = self.min {
             (m, "--uv-min")
+        } else if let Some((v, src)) = arch_start(&self.name, Coin::Pearl, self.lock_hint).filter(|&(v, _)| v < self.max) {
+            (v, src)
         } else if let Some(f) = self.max_default.start_floor.filter(|&f| f < self.max) {
             // (a default floor at or above a lower --uv-max is dropped: the search then starts as on other cards)
             (self.orig.max(f), self.max_default.start_src)
@@ -904,7 +942,11 @@ fn map_card(nv: &Nvml, dev: i32, pos: usize, o: &Opts) -> Result<Card> {
     // on HiveOS the owner's offset is the OC profile's Core Clock value: what the card has now may be left by another program
     // (Rig01: +325 from another miner whose exit restore was cut short instead of the profile's +275)
     let orig = hive_offset(nv, h).filter(|v| (lo..=hi).contains(v)).unwrap_or(cur);
-    Ok(new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, orig, lo, hi, cc, pci_id, m }, pos, o))
+    let mut card = new_card(CardHw { dev, name, bus, uuid, nv: h, mode, cur, orig, lo, hi, cc, pci_id, m }, pos, o);
+    if card.lock_hint.is_none() {
+        card.lock_hint = crate::hiveoc::load().and_then(|p| nv.index(h).and_then(|i| p.core_lock(i as usize)));
+    }
+    Ok(card)
 }
 
 /// Core Clock offset of the HiveOS OC profile for this GPU (None: not HiveOS).
@@ -963,6 +1005,7 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
         oc_resets: Mutex::new(Vec::new()),
         fault: AtomicBool::new(false),
         lock: o.locks.get(pos).copied().flatten(),
+        lock_hint: o.locks.get(pos).copied().flatten(),
         mlock: o.mlocks.get(pos).copied().flatten(),
         probe: Mutex::new(None),
         run_clk: Mutex::new(RunClk::default()),
@@ -1713,8 +1756,8 @@ impl Manager {
         if !base.ok {
             // the start itself fails at these clocks: never keep it (or the owner's offset) unchecked; down in 60 MHz steps to the
             // first one that passes, which becomes the profile of these clocks (below the owner's offset: used instead of it)
-            lg(format!("{} the start offset {} FAILS the check at these clocks ({}): looking for a lower one that passes (60 MHz steps)", c.label(), signed(start), base.reason));
-            let mut v = if start > c.orig { c.orig } else { start - 60 };
+            lg(format!("{} the start offset {} FAILS the check at these clocks ({}): looking for a lower one that passes (30 MHz steps)", c.label(), signed(start), base.reason));
+            let mut v = if start > c.orig { c.orig } else { start - 30 };
             loop {
                 if v < c.lo || self.stopped() {
                     break;
@@ -1748,7 +1791,7 @@ impl Manager {
                 if v <= 0 {
                     break;
                 }
-                v = (v - 60).max(0);
+                v = (v - 30).max(0);
             }
             lg(format!("{} no offset down to {} passes the check at these clocks: check the clocks / memory / power of this GPU (left at {})", c.label(), signed(v.max(c.lo)), signed(c.cur.load(Ordering::Relaxed))));
             return Ok(());
@@ -1760,6 +1803,7 @@ impl Manager {
         let mut good_w = base_w;
         let mut failed: Option<(i32, String)> = None;
         let mut clks: Vec<u32> = base.clk.into_iter().collect();
+        let (mut flat, mut plateau, mut plateau_hist): (u32, bool, Vec<(i32, Option<f64>)>) = (0, false, Vec::new());
         // after a crash: the steps up to the last good one already passed in the previous run, so do not climb them again
         // (the result is still confirmed by the long check below)
         if let Some(g) = crashed.and_then(|k| k.good).filter(|&g| g > start && g <= cap) {
@@ -1782,10 +1826,26 @@ impl Manager {
             }
             if r.ok {
                 lg(format!("{} step {}: ok ({} reruns, cpu ok {}), {}, {} MHz, {} C", c.label(), signed(cand), r.reruns, r.cpu_ok, fmt_w(r.watts), r.clk.unwrap_or(0), r.temp.unwrap_or(0)));
+                // the voltage floor: two steps in a row that save less than 0.5 W each -> stop below them (no edge searched:
+                // the margin to the edge stays, and the tuning is shorter)
+                let saved = match (good_w, r.watts) {
+                    (Some(a), Some(b)) => a - b,
+                    _ => f64::MAX,
+                };
+                flat = if saved < 0.5 { flat + 1 } else { 0 };
+                plateau_hist.push((good, good_w));
                 good = cand;
                 good_w = r.watts.or(good_w);
                 clks.extend(r.clk);
                 c.last_good.store(good, Ordering::Relaxed);
+                if flat >= 2 && plateau_hist.len() >= 2 {
+                    let (p, pw) = plateau_hist[plateau_hist.len() - 2];
+                    lg(format!("{} power no longer drops above {} (voltage floor: the next two steps saved < 0.5 W each): stopping there", c.label(), signed(p)));
+                    good = p;
+                    good_w = pw;
+                    plateau = true;
+                    break;
+                }
             } else {
                 lg(format!("{} step {}: FAILED ({})", c.label(), signed(cand), r.reason));
                 failed = Some((cand, r.reason));
@@ -1861,7 +1921,14 @@ impl Manager {
             (Some(b), Some(a)) if b > 0.0 => format!(" ({:+.1} %, the same hashrate)", 100.0 * (a / b - 1.0)),
             _ => String::new(),
         };
-        lg(format!("{} RESULT: offset {} at {} MHz, {} under the check load{saving}; mining at it", c.label(), signed(fin), e.clk_ok, fmt_w(conf_w)));
+        lg(format!(
+            "{} RESULT: offset {} at {} MHz, {} under the check load{saving}{}; mining at it",
+            c.label(),
+            signed(fin),
+            e.clk_ok,
+            fmt_w(conf_w),
+            if plateau { " (the voltage floor: no edge searched above it)" } else { "" }
+        ));
         if e.unlocked {
             lg(format!(
                 "{} the core clock was NOT locked during the tuning: it moved {lo}..{hi} MHz with the offset; this profile holds for the unlocked clock only (a lock - HiveOS Core Clock lock, --lock-cclock - has its own profile)",
@@ -2980,7 +3047,8 @@ mod tests {
         // --uv-min per card
         let o = opts("", "135,-");
         assert_eq!(card(AMP.0, AMP.1, 0, 0, &o).start(), (135, "--uv-min"));
-        assert_eq!(card(AMP.0, AMP.1, 0, 1, &o).start(), (120, "default"));
+        // RTX 3070 (GA104) without --uv-min: its default start (lock unknown: +210)
+        assert_eq!(card(AMP.0, AMP.1, 0, 1, &o).start(), (210, "RTX 3070 default (by the core lock)"));
         // --uv-min for all above a card's default limit: that card is not tuned (logged)
         let c = card(CMP.0, CMP.1, 0, 0, &opts("", "200"));
         assert!(c.range_lines(true).iter().any(|l| l.contains("this GPU is not tuned")));
@@ -2988,7 +3056,7 @@ mod tests {
         let mut c = card(AMP.0, AMP.1, 0, 0, &opts("", ""));
         c.hi = 300;
         c.max = c.max_wanted.min(c.hi);
-        assert!(c.range_lines(true)[0].contains("range +120..+300 (max: default, driver limit +300"), "{:?}", c.range_lines(true));
+        assert!(c.range_lines(true)[0].contains("range +210..+300 (max: default, driver limit +300"), "{:?}", c.range_lines(true));
         // --uv-offset list
         let mut o = Opts::default();
         o.fixed = PerGpu::parse("200,-", "--uv-offset").unwrap();
@@ -3094,6 +3162,25 @@ mod tests {
         assert_eq!(start_choice(&e(315, 5000), 275, 1000), Choice::Paused);
         // the result is the start itself (it passed the baseline check)
         assert_eq!(start_choice(&e(275, 0), 275, 1000), Choice::Keep);
+    }
+
+    #[test]
+    fn default_start_by_card_and_lock() {
+        let n = "NVIDIA GeForce RTX 3070";
+        // Pearl: Rig01 results +255..+330 at 1805, +300..+480 at 1410 -> start a few steps below
+        assert_eq!(arch_start(n, Coin::Pearl, Some(1805)), Some((210, "RTX 3070 default (by the core lock)")));
+        assert_eq!(arch_start(n, Coin::Pearl, Some(1410)).unwrap().0, 270);
+        assert_eq!(arch_start(n, Coin::Pearl, Some(1900)).unwrap().0, 195);
+        assert_eq!(arch_start(n, Coin::Pearl, None).unwrap().0, 210);
+        // NOID: the voltage floor at +120..+195 at 1400, higher with the clock
+        assert_eq!(arch_start(n, Coin::Noid, Some(1400)).unwrap().0, 105);
+        assert_eq!(arch_start(n, Coin::Noid, Some(1560)).unwrap().0, 150);
+        assert_eq!(arch_start("NVIDIA GeForce RTX 3080 Ti", Coin::Noid, Some(1560)).unwrap().0, 180);
+        assert_eq!(arch_start(n, Coin::Cmfd, None).unwrap().0, 150);
+        assert_eq!(arch_start("NVIDIA GeForce RTX 3060 Ti", Coin::Pearl, Some(1805)).unwrap().0, 210);
+        // other cards: the old rules
+        assert_eq!(arch_start("NVIDIA GeForce RTX 4070 Ti", Coin::Pearl, Some(2500)), None);
+        assert_eq!(arch_start("NVIDIA CMP 40HX", Coin::Pearl, None), None);
     }
 
     #[test]

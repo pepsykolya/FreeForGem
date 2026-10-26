@@ -1029,7 +1029,10 @@ impl Tuner<'_> {
         if let Some((at, _)) = crashed {
             cap = cap.min(at - step);
         }
-        let start = c.min.map_or(c.base + step, |m| m.max(c.base + step));
+        // --uv-min, else the card type's default start (RTX 3070: +150, near the edge: no long ladder from the base), else one
+        // step above the base; a start that fails is stepped down in 30 MHz steps
+        let def = uv::arch_start(&c.name, uv::Coin::Cmfd, c.locked.then_some(c.lock)).map(|d| d.0);
+        let start = c.min.or(def).map_or(c.base + step, |m| m.max(c.base + step));
         if start > cap {
             lg(format!("{} no room above the base {} below the limit {} ({}{}): mining at {}", c.label(), signed(c.base), signed(cap), c.max_src, if crashed.is_some() { ", below the crash" } else { "" }, signed(c.base)));
             if crashed.is_some() {
@@ -1098,6 +1101,13 @@ impl Tuner<'_> {
                 cand += step;
             } else {
                 lg(format!("{} step {}: FAILED ({})", c.label(), signed(cand), r.reason));
+                if ladder.len() == 1 && !r.driver_fault && cand - 30 > c.base {
+                    // the start itself fails: 30 MHz lower, and the search stays below the failed start
+                    lg(format!("{} the start {} fails: trying {} (30 MHz lower)", c.label(), signed(cand), signed(cand - 30)));
+                    cap = cap.min(cand - step);
+                    cand -= 30;
+                    continue;
+                }
                 failed = Some(cand);
                 if r.driver_fault {
                     // a hang / Xid may have left the GPU unusable: no further steps; the crash marker stays until a result is saved

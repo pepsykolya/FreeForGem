@@ -39,7 +39,7 @@ const SECTION: &str = "noid";
 const TRYING: &str = "noid_trying";
 const START: i32 = 120; // default first step (RTX 3070: NOID edge +235..+250 at 1400..1650 MHz)
 const STEP_SECS: u32 = 40; // agent M: 40 s of stress per step (first silent errors after ~12 s at the edge)
-const BASE_SECS: u32 = 30;
+const BASE_SECS: u32 = 20; // the base is measured once, for the efficiency comparison of the result
 const QUICK_SECS: u32 = 30;
 
 fn lg(m: impl AsRef<str>) {
@@ -902,7 +902,7 @@ impl Tuner<'_> {
             }
             lg(format!("{} {}: FAILED ({})", c.label(), signed(o), r.reason));
             edge = o;
-            o -= step;
+            o -= step.max(30); // a failing start: 30 MHz lower (1.7.2 beta3)
         }
         let mut plateau = false;
         if last_ok > c.base && edge == 0 {
@@ -1051,7 +1051,10 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         let def = uv::card_defaults(&r.name, nv.compute_capability(d), nv.pci_device_id(d));
         let (max, max_src) = match o.max_offset.get(r.pos) { Some(m) => (m, "--uv-max"), None => (def.max, def.max_src) };
         let max = max.min(HARD_CAP).min(hi);
-        let start = o.min_offset.get(r.pos).unwrap_or(START).max(lo);
+        // --uv-min, else the card type's default start by the core lock (RTX 3070 at 1400: +105, the voltage floor starts at
+        // +120..+195), else +120
+        let lock_hint = r.core_lock.or_else(|| crate::hiveoc::load().and_then(|p| nv.index(d).and_then(|i| p.core_lock(i as usize))));
+        let start = o.min_offset.get(r.pos).or_else(|| uv::arch_start(&r.name, uv::Coin::Noid, lock_hint).map(|x| x.0)).unwrap_or(START).max(lo);
         list.push(Card {
             r: r.clone(),
             nv: d,

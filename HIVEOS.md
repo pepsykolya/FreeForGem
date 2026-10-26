@@ -77,6 +77,8 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
+- On an RTX 3070 the tuning starts near the edge, by the core lock (Pearl +210 at 1805, +270 at 1410; NOID +105 at 1400; CMFD +150), and
+  stops at the voltage floor; `--uv-min N` overrides it. The miner screen shows the progress per GPU and colours (`--no-color` to turn off).
 - **Reset:** add `--uv-reset` for one start: it forgets the profile of the current lock only (`--uv-reset-all`: every profile;
   or delete `/hive-config/freeforgem/uv.json`). On exit the offset of the OC profile (*Core Clock*) is put back.
   Other options (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) and a manual-tuning
@@ -197,6 +199,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.
+- На RTX 3070 тюнинг начинается рядом с краем, по локу ядра (Pearl +210 при 1805, +270 при 1410; NOID +105 при 1400; CMFD +150), и
+  останавливается на пороге напряжения; `--uv-min N` задаёт старт. Экран майнера показывает прогресс по картам и цвета (`--no-color` — без цвета).
 - **Сброс:** добавьте `--uv-reset` на один запуск: он забывает только профиль текущего лока (`--uv-reset-all` — все профили; или
   удалите `/hive-config/freeforgem/uv.json`). При выходе возвращается offset профиля разгона (*Core Clock*).
   Остальные параметры (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) и порядок ручной настройки —

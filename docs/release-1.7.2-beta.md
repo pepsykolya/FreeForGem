@@ -54,6 +54,12 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
 * A crash while mining steps the offset back 30 MHz (two default steps), not 15: on the soak rig two RTX 3070 whose +315 had
   passed tuning and checks crashed after hours at 1805 MHz.
 
+* **Faster tuning on RTX 3070**: the search starts near the edge by the core lock (Pearl +210 at 1805 / +270 at 1410; NOID +105 at 1400;
+  CMFD +150), steps down 30 MHz when the start fails, and stops at the voltage floor. `--uv-min` overrides it.
+* **Progress and colours**: per-GPU state in the stats line, a summary about every minute, a RESULT line per GPU; coloured log
+  (`--no-color` / `NO_COLOR`); h-stats.sh strips the colour codes.
+* **NOID**: a result less efficient than the base keeps the base ("no gain at this clock"); MH/W is measured only under the GPU load.
+
 ### Checks
 
 Release gate `tests/hiveos_scenarios.sh` (one real GPU, fake HiveOS OC profile): lock switching and `--uv-reset` per lock, a
@@ -113,6 +119,12 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   при длительном тесте 1.7.2: мигрированный +270 после провала применялся при следующем перезапуске).
 * Падение в майнинге понижает offset на 30 МГц (два шага по умолчанию), а не на 15: на тестовом риге две RTX 3070 с +315,
   прошедшим тюнинг и проверки, упали через несколько часов на 1805 МГц.
+
+* **Быстрее тюнинг на RTX 3070**: поиск начинается рядом с краем по локу (Pearl +210 при 1805 / +270 при 1410; NOID +105 при 1400;
+  CMFD +150), при провале старта — шаг вниз 30 МГц, подъём останавливается на пороге напряжения. `--uv-min` задаёт старт.
+* **Прогресс и цвета**: состояние карты в строке статистики, сводка раз в минуту, строка RESULT по каждой карте; цветной лог
+  (`--no-color` / `NO_COLOR`); h-stats.sh убирает коды цвета.
+* **NOID**: результат менее эффективный, чем база, не применяется ("no gain at this clock"); MH/W меряется только под нагрузкой GPU.
 
 ### Проверки
 

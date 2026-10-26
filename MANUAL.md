@@ -865,6 +865,18 @@ is replaced by the profile value. A result verified below your offset at these c
 past the edge there); it is never kept unchecked. A tuning whose start offset itself fails looks for a lower one that passes
 (60 MHz steps) and keeps it as the profile. `WARNING`: a single `--lock-cclock` value for all GPUs replaces per-GPU HiveOS locks.
 
+**Where a tuning starts (1.7.2).** On an RTX 3070 / 3070 Ti / 3060 Ti the search starts near the edge instead of +0 / +120, by the
+core lock (`--lock-cclock`, else the HiveOS profile's lock): Pearl +210 at 1805 MHz, +270 at 1410 (210 + 0.15 x (1805 - lock),
++150..+300; +210 without a known lock); NOID +105 at 1400, +150 at 1560 (the voltage floor; RTX 3080/3090: +180 at 1560); CMFD +150. The start is checked first and stepped down in 30 MHz steps
+when it fails; the climb stops at the voltage floor (two steps in a row that save < 0.5 W) or at the first failing step.
+`--uv-min N` overrides the start. Other cards keep the old start (current offset or +120, RTX 40 +200, RTX 50 +300).
+
+**Progress and colours.** While a GPU tunes, the stats line shows it after its number (`GPU3 0.000 [tuning +240 (step 3/10)]`) and a
+summary line comes at once and about every minute (`auto-uv: tuning 8 GPU(s) (...), ~6 min left; their hashrate shows once they
+finish`); every tuning ends with a `RESULT` line. The log is coloured by kind: progress cyan, passed / results / accepted shares
+green, step-downs / pauses / warnings yellow, failures / Xid / faults red, pool pauses / reconnects magenta; the stats line never.
+On in a terminal and on HiveOS (`FFG_COLOR=1` from h-run.sh); `--no-color` or `NO_COLOR=1` turns it off.
+
 **Which GPU failed.** A CUDA fault on one GPU (Xid 13 "Out Of Range Address", Xid 43, "an illegal memory access") ends CUDA for
 the **whole miner process**: every worker stops with the same error, also on GPUs without any Xid. The miner now:
 
@@ -1744,6 +1756,18 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 там за краем); вслепую он никогда не оставляется. Если не проходит сам стартовый offset тюнинга, ищется меньший (шагами 60 МГц),
 и он сохраняется как профиль. `WARNING`: одно значение `--lock-cclock` на все карты заменяет поканальные локи HiveOS.
 
+**С чего начинается тюнинг (1.7.2).** На RTX 3070 / 3070 Ti / 3060 Ti поиск начинается рядом с краем, а не с +0 / +120, по локу ядра
+(`--lock-cclock`, иначе лок профиля HiveOS): Pearl +210 при 1805 МГц, +270 при 1410 (210 + 0,15 x (1805 - лок), +150..+300; +210, если
+лок неизвестен); NOID +105 при 1400, +150 при 1560 (порог напряжения; RTX 3080/3090: +180 при 1560); CMFD +150. Старт сначала проверяется, при провале — шагами вниз по 30 МГц; подъём
+останавливается на пороге напряжения (два шага подряд экономят < 0,5 Вт) или на первом провале. `--uv-min N` задаёт старт
+вручную. Остальные карты — как раньше (текущий offset или +120, RTX 40 +200, RTX 50 +300).
+
+**Прогресс и цвета.** Пока карта тюнится, строка статистики показывает это после её числа (`GPU3 0.000 [tuning +240 (step 3/10)]`),
+сразу и примерно раз в минуту выводится сводка (`auto-uv: tuning 8 GPU(s) (...), ~6 min left; ...`); каждый тюнинг заканчивается
+строкой `RESULT`. Лог раскрашен по типу: процесс — голубой, успех / результат / принятые шары — зелёный, понижение / пауза /
+предупреждение — жёлтый, сбой / Xid / падение — красный, пауза пула / переподключение — пурпурный; строка статистики — без цвета.
+Включено в терминале и на HiveOS (`FFG_COLOR=1` из h-run.sh); `--no-color` или `NO_COLOR=1` выключает.
+
 **Какая карта упала.** Сбой CUDA на одной карте (Xid 13 «Out Of Range Address», Xid 43, «an illegal memory access») завершает CUDA
 **всего процесса майнера**: все воркеры останавливаются с той же ошибкой, в том числе на картах без Xid. Теперь майнер:
 
@@ -2508,6 +2532,13 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 **您的偏移。** 在 HiveOS 上，退出时恢复的是该卡 OC 配置的 *Core Clock* 值（`/hive-config/nvidia-oc.conf`），而不是启动时卡上残留
 的值。在当前频率下验证过且低于您的偏移的结果会**代替您的偏移使用**，绝不在未检查的情况下保留。若调优的起始偏移本身失败，会以
 60 MHz 步进寻找能通过的更低偏移并保存为配置。
+
+**调优起点（1.7.2）。** RTX 3070 / 3070 Ti / 3060 Ti 按核心锁频从边缘附近开始搜索，而不是 +0 / +120：Pearl 在 1805 MHz 为 +210，1410 为
++270（210 + 0.15 × (1805 − 锁频)，+150..+300；锁频未知时 +210）；NOID 在 1400 为 +105，1560 为 +150；CMFD +150。起点先检查，失败则以 30 MHz
+步进下降；功耗不再下降（连续两步节省 < 0.5 W）或首次失败时停止上升。`--uv-min N` 覆盖起点。
+
+**进度与颜色。** 调优中的卡在统计行数字后显示状态（`GPU3 0.000 [tuning +240 (step 3/10)]`），并立即及约每分钟输出汇总行；每次调优以
+`RESULT` 行结束。日志按类型着色（统计行除外）；`--no-color` 或 `NO_COLOR=1` 关闭。
 
 **哪张卡出错。** 一张卡上的 CUDA 故障会结束**整个矿工进程**的 CUDA。矿工现在：通过驱动 Xid 事件确定出错的卡并记录在
 `gpu-faults.json`；自行重启（Linux / HiveOS 同一进程内，每小时最多 12 次）；使用 `--auto-uv` 时崩溃的降压偏移视为失败，该卡在快速检查后回到其锁频的已验证偏移（或崩溃值下方 30 MHz），
