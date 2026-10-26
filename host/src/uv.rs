@@ -974,11 +974,18 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
 
 impl Manager {
     fn set_checked(&self, c: &Card, v: i32) -> Result<()> {
-        ensure!(v == c.orig || !self.stopped(), "stopping: no new offset");
+        // after the stop / the restore of this card nothing but the owner's offset is set again (a tuning or check thread that
+        // was still running must not leave an undervolt behind)
+        ensure!(v == c.orig || (!self.stopped() && c.owned.load(Ordering::SeqCst)), "stopping: no new offset");
         ensure!(v >= c.lo && v <= c.hi, "offset {v} outside the driver's range {}..{}", c.lo, c.hi);
         ensure!(self.nv_target_ok(c), "internal: handle check failed");
         self.nv.set_offset(c.nv, c.mode, v)?;
         std::thread::sleep(Duration::from_millis(150));
+        if v != c.orig && (self.stopped() || !c.owned.load(Ordering::SeqCst)) {
+            // the restore ran meanwhile: put the owner's offset back over this late set
+            let _ = self.nv.set_offset(c.nv, c.mode, c.orig);
+            anyhow::bail!("stopping: no new offset");
+        }
         let rb = self.nv.get_offset(c.nv, c.mode)?;
         ensure!(rb == v, "read-back {rb} differs from the value just set ({v})");
         c.cur.store(v, Ordering::Relaxed);

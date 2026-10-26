@@ -14,6 +14,7 @@
 #   s1               (1) a foreign miner left lock 1400 and an offset above the edge (ffgs), then FreeForGem starts
 #   s2a s2b          (2) HiveOS OC apply at start / during mining (offset and lock writes)
 #   s3a s3b          (3) SIGINT then SIGKILL during the start check / during the exit restore
+#   s3c              Ctrl+C to the whole group with a plain `tee` (dies first): the restore must still complete (no SIGPIPE death)
 #   s4               (4) the current offset is above the verified edge (Rig01 1.7.1 restart loop)
 #   s5a s5b s5c s5d  (5) GPU fault: attribution + own restart + exclusion; lowered kept offset; crashed tuned offset; one of two workers
 #   s5e              no restart loop: a GPU that crashes at every offset ends lowered step by step, then waits left out (no exit)
@@ -99,7 +100,7 @@ print('   old sections left:', [k for k in ('gpus','cmfd') if d.get(k)], '; tryi
 " 2>/dev/null; }
 faults() { echo "   gpu-faults.json: $(sudo cat $1/gpu-faults.json 2>/dev/null | tr -d '\n ' | cut -c1-300)"; }
 P7=$T/p   # the profiles of s7 (1400 and 1900)
-steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s2c s3a s3b s4 s4b s5a s5b s5c s5d s5e s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
+steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s2c s3a s3b s3c s4 s4b s5a s5b s5c s5d s5e s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
 [ "$BIN" = freeforgem ] || steps=$(echo " $steps " | sed "s/ n[1-4]//g")
 for step in $steps; do
   echo "=== $step $(date +%T)"
@@ -152,6 +153,15 @@ for step in $steps; do
       echo "   after the kill: offset $(off)"; ent $T/s3/uv.json
       run s3a2 120 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s3 --auto-uv $SHORT --minutes 0.5
       show s3a2 "auto-uv|clocks:" | head -12 ;;
+    s3c) # HiveOS `miner stop` = Ctrl+C to the screen group; a plain `tee` (not -i) dies first and the miner's stdout is a dead pipe.
+         # expect: the offset back at ORIG, the core lock back to the HiveOS profile (1400 here: clocks near 1410 under load is not
+         # measurable idle, so the marker file must be gone), exit code not 141
+      sudo rm -rf $T/s3c; sudo mkdir -p $T/s3c; sudo cp $P7/uv.json $T/s3c/
+      ( cd $P && exec setsid sudo env $E NVIDIA_OC_CONF=$HC14 bash -c "./$BIN $PEARL --lock-cclock 1900 --lock-mclock 810 --uv-dir $T/s3c --auto-uv $SHORT --minutes 3 2>&1 | tee $L/s3c.log; echo \"pipe status \${PIPESTATUS[*]}\" > $T/s3c/rc" ) > /dev/null 2>&1 &
+      BGPID=$!
+      waitlog s3c "^\[ *[0-9]+s\]" 120; echo "   mining at $(off): Ctrl+C to the group (tee dies with it)"; grp INT; sleep 1; grp HUP; wait; sleep 3
+      echo "   after: offset $(off) (owner $ORIG); clocks-restore marker: $(sudo ls $T/s3c/clocks-restore.json 2>/dev/null || echo gone); uv-restore: $(sudo ls $T/s3c/uv-restore.json 2>/dev/null || echo gone); $(sudo cat $T/s3c/rc 2>/dev/null)"
+      pgrep -af "worker gate" | grep -v pgrep | head -2 ;;
     s3b) # SIGINT then SIGKILL during the exit restore.  expect: the next start puts ORIG and the locks back
       bg s3b NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s3 --auto-uv $SHORT --minutes 2
       waitlog s3b "^\[ *[0-9]+s\]" 120; echo "   mining at $(off): SIGINT, SIGKILL 0.05 s later"; grp INT; sleep 0.05; grp KILL; wait; sleep 2
