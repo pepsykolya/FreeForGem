@@ -29,7 +29,7 @@ stops every GPU from mining.
   replaced by the profile value at start. Pearl, NOID, CMFD, and the crash recovery.
 * **Which GPU failed.** A CUDA fault on one GPU ends CUDA for the whole process (all workers report "an illegal memory access").
   The miner now names the failing GPU from the driver's Xid events, remembers it in `gpu-faults.json`, restarts itself (Linux /
-  HiveOS: in the same process, at most 10 times an hour) and acts on it: a crashed undervolt offset counts as failed (tuned below);
+  HiveOS: in the same process, at most 12 times an hour) and acts on it: a crashed undervolt offset counts as failed (tuned below);
   a crash at the owner's offset 2 starts in a row lowers it (HiveOS profile value, then 60 MHz steps); a GPU with nothing left to
   lower is left out of mining for an hour while the other GPUs mine. A worker that stops alone no longer stops the others.
 * **Mining during tuning.** Before, no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now mining starts at once;
@@ -73,7 +73,7 @@ files; NOID and CMFD profiles. Unit tests: profile choice, migration, the Rig01 
   заменяется значением профиля. Pearl, NOID, CMFD и восстановление после аварийного выхода.
 * **Какая карта упала.** Сбой CUDA на одной карте завершает CUDA всего процесса (все воркеры: «an illegal memory access»). Майнер
   определяет упавшую карту по событиям Xid драйвера, запоминает в `gpu-faults.json`, перезапускает себя (Linux / HiveOS — в том же
-  процессе, до 10 раз в час) и действует: упавший андервольт-offset — провальный (тюнинг ниже); падение на offset владельца
+  процессе, до 12 раз в час) и действует: упавший андервольт-offset — провальный (тюнинг ниже); падение на offset владельца
   2 старта подряд понижает его (значение профиля HiveOS, затем шаги по 60 МГц); карта, которую некуда понижать, исключается из
   майнинга на час, остальные майнят. Воркер, остановившийся один, больше не останавливает остальные.
 * **Майнинг во время тюнинга.** Раньше ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт). Теперь майнинг

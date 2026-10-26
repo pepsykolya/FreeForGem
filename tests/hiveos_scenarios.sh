@@ -16,6 +16,9 @@
 #   s3a s3b          (3) SIGINT then SIGKILL during the start check / during the exit restore
 #   s4               (4) the current offset is above the verified edge (Rig01 1.7.1 restart loop)
 #   s5a s5b s5c s5d  (5) GPU fault: attribution + own restart + exclusion; lowered kept offset; crashed tuned offset; one of two workers
+#   s5e              no restart loop: a GPU that crashes at every offset ends lowered step by step, then waits left out (no exit)
+#   s2c              a changed starting offset with a verified profile: quick check + apply, no tuning
+#   s4b              a verified offset that fails its quick check: steps down from it, no tuning from scratch
 #   s6a s6b          (6) uv.json migration from 1.6.x / 1.7.1 files (entries of another lock)
 #   p5 p6 p7         clock probe without --lock-cclock (profile found / tuning while mining), HiveOS owner offset
 #   n1 n2 n3 n4      NOID: fault, profiles 1400 / 1900 / 1400            c1 c2   CMFD: migration + clock probe, --lock-cclock 1500
@@ -96,7 +99,7 @@ print('   old sections left:', [k for k in ('gpus','cmfd') if d.get(k)], '; tryi
 " 2>/dev/null; }
 faults() { echo "   gpu-faults.json: $(sudo cat $1/gpu-faults.json 2>/dev/null | tr -d '\n ' | cut -c1-300)"; }
 P7=$T/p   # the profiles of s7 (1400 and 1900)
-steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s3a s3b s4 s5a s5b s5c s5d s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
+steps="$*"; [ "$steps" = all ] && steps="s7a s7b s7c s7d s1 s2a s2b s2c s3a s3b s4 s4b s5a s5b s5c s5d s5e s6a s6b p5 p6 p7 n1 n2 n3 n4 c1 c2"
 [ "$BIN" = freeforgem ] || steps=$(echo " $steps " | sed "s/ n[1-4]//g")
 for step in $steps; do
   echo "=== $step $(date +%T)"
@@ -135,6 +138,11 @@ for step in $steps; do
       sleep 57; echo "   t=60 offset $(off) -> $ORIG (OC apply)"; setoff $ORIG
       sleep 90; echo "   t=150 offset $(off) -> lock 1900 (OC apply)"; lock 1900
       wait; show s2b "auto-uv: GPU"; stats s2b 30 | tail -4 ;;
+    s2c) # the starting offset changed (HiveOS profile now ORIG-75) while the 1400 profile exists.  expect: "quick check passed"
+         # for the profile, no "tuning:" line
+      sudo rm -rf $T/s2c; sudo mkdir -p $T/s2c; sudo cp $P7/uv.json $T/s2c/; HCm=$T/oc-minus.conf; hc $HCm $((ORIG - 75)) 0
+      run s2c 300 NVIDIA_OC_CONF=$HCm -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s2c --auto-uv $SHORT --minutes 1
+      show s2c "auto-uv: GPU"; stats s2c 2 ;;
     s3a) # SIGINT then SIGKILL during the start quick check (profile older than --uv-reval-hours).
          # expect: the next start puts ORIG back ("did not exit cleanly"), the interrupted offset is not a crash point after SIGINT
       sudo rm -rf $T/s3; sudo mkdir -p $T/s3; sudo cp $P7/uv.json $T/s3/
@@ -156,6 +164,17 @@ for step in $steps; do
       setoff $((ORIG + 150))
       bg s4 -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s4 --auto-uv $SHORT --minutes 1
       waitlog s4 "^\[ *[0-9]+s\]" 120; echo "   offset while mining: $(off)"; stopbg; show s4 "auto-uv: GPU" ;;
+    s4b) # the 1900 profile says +330 (never verified at it): its quick check fails.  expect: "one step down" lines from +330
+         # until one passes (saved), no "tuning:" line
+      sudo rm -rf $T/s4b; sudo mkdir -p $T/s4b
+      sudo python3 -c "
+import json;d=json.load(open('$P7/uv.json'))
+for u,ps in d['profiles'].items():
+  for k,e in ps.items():
+    if e.get('core_lock')==1900: e['offset']=330; e['verified_at']=0
+json.dump(d,open('$T/s4b/uv.json','w'),indent=1)"
+      run s4b 900 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1900 --lock-mclock 810 --uv-dir $T/s4b --auto-uv $SHORT --minutes 4
+      show s4b "auto-uv: GPU"; ent $T/s4b/uv.json ;;
     s5a) # no auto-uv: injected fault (fake Xid 13) twice.  expect: "FAILED: Xid 13", own restart, then "LEFT OUT", exit
       sudo rm -rf $T/s5a; sudo mkdir -p $T/s5a
       run s5a 300 NVIDIA_OC_CONF=$HC FFGP_STATE_DIR=$T/s5a FFG_TEST_FAULT=0:15 -- $PEARL --minutes 2
@@ -169,7 +188,8 @@ for u,ps in d['profiles'].items():
 json.dump(d,open('$T/s5b/uv.json','w'),indent=1)"
       run s5b 400 NVIDIA_OC_CONF=$HC FFG_TEST_FAULT=0:15 FFG_TEST_FAULT_UNTIL=2 -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s5b --auto-uv $SHORT --minutes 0.8
       show s5b "faults:|auto-uv: GPU|worker stopped|restarting|Error|FreeForGem 1"; faults $T/s5b; stats s5b 2 ;;
-    s5c) # a fault at the tuned offset.  expect: "crashed while mining at ... counts as failed", tuning below it
+    s5c) # a fault at the tuned (reused) offset.  expect: "crashed while mining at ...: one step below it ... quick check (no tuning
+         # from scratch)", no "tuning:" line
       sudo rm -rf $T/s5c; sudo mkdir -p $T/s5c; sudo cp $P7/uv.json $T/s5c/
       run s5c 900 NVIDIA_OC_CONF=$HC FFG_TEST_FAULT=0:15 FFG_TEST_FAULT_UNTIL=1 -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s5c --auto-uv $SHORT --minutes 2.5
       show s5c "faults:|auto-uv: GPU|worker stopped|restarting|Error|FreeForGem 1"; faults $T/s5c; ent $T/s5c/uv.json ;;
@@ -178,6 +198,18 @@ json.dump(d,open('$T/s5b/uv.json','w'),indent=1)"
       sudo rm -rf $T/s5d; sudo mkdir -p $T/s5d
       run s5d 200 NVIDIA_OC_CONF=$HC FFGP_STATE_DIR=$T/s5d FFG_TEST_FAULT=0:20 -- $PEARL --devices 0,0 --minutes 1.2
       show s5d "faults:|worker stopped|restarting|Error"; stats s5d 12 | tail -4 ;;
+    s5e) # a GPU that faults at every offset (auto-uv, kept offset): lowered 2 crash starts at a time down to 0, then left out;
+         # the single-GPU miner waits instead of exiting (no restart loop).  expect: "CRASHED ... running it at" several times,
+         # "LEFT OUT", "waiting"
+      sudo rm -rf $T/s5e; sudo mkdir -p $T/s5e
+      sudo python3 -c "
+import json,time;d=json.load(open('$P7/uv.json'))
+for u,ps in d['profiles'].items():
+  for k,e in ps.items(): e['disabled_until']=int(time.time())+20*3600
+json.dump(d,open('$T/s5e/uv.json','w'),indent=1)"
+      bg s5e NVIDIA_OC_CONF=$HC FFG_TEST_FAULT=0:10 -- $PEARL --lock-cclock 1400 --lock-mclock 810 --uv-dir $T/s5e --auto-uv $SHORT --minutes 5
+      waitlog s5e "waiting [0-9]+ min" 600; sleep 3; echo "   offset while waiting: $(off)"; stopbg
+      show s5e "faults:|CRASHED|LEFT OUT|runs at the lowered|restarting" | cut -c1-200; faults $T/s5e ;;
     s6a) # a 1.6.x uv.json (one entry, no lock, no cap; clk 1410) and --lock-cclock 1900.  expect: migrated as ~1410, not used
          # for 1900 ("none for the core clock lock 1900": tuning)
       sudo rm -rf $T/s6; sudo mkdir -p $T/s6

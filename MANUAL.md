@@ -871,7 +871,7 @@ the **whole miner process**: every worker stops with the same error, also on GPU
 1. tells the failing GPU from the driver's Xid events (NVML): `faults: GPU3 (bus 04, RTX 3070) FAILED: Xid 13 ...; the workers of
    GPU0, GPU1, ... stopped with it: ... they are not at fault`;
 2. remembers it in `gpu-faults.json` next to `uv.json` (crashes in a row, Xid, the offset it had);
-3. restarts itself (Linux / HiveOS: in the same process, HiveOS does not count a restart; at most 10 times an hour, then it exits
+3. restarts itself (Linux / HiveOS: in the same process, HiveOS does not count a restart; at most 12 times an hour, then it exits
    as before; Windows: start.ps1 restarts it);
 4. with `--auto-uv`: a crashed undervolt offset counts as failed and the GPU is tuned below it; a crash at your own / kept offset
    **2 starts in a row** lowers it (`CRASHED while mining at +325 2 starts in a row ...: running it at +275`): the HiveOS profile
@@ -1748,7 +1748,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 1. определяет упавшую карту по событиям Xid драйвера (NVML): `faults: GPU3 (bus 04, RTX 3070) FAILED: Xid 13 ...; the workers of
    GPU0, GPU1, ... stopped with it: ... they are not at fault`;
 2. запоминает её в `gpu-faults.json` рядом с `uv.json` (падений подряд, Xid, offset в момент падения);
-3. перезапускает себя (Linux / HiveOS — в том же процессе, HiveOS не считает перезапуск; не больше 10 раз в час, дальше выходит,
+3. перезапускает себя (Linux / HiveOS — в том же процессе, HiveOS не считает перезапуск; не больше 12 раз в час, дальше выходит,
    как раньше; Windows — перезапускает start.ps1);
 4. с `--auto-uv`: упавший андервольт-offset считается провальным, карта тюнится ниже; падение на вашем / оставленном offset
    **2 старта подряд** понижает его (`CRASHED while mining at +325 2 starts in a row ...: running it at +275`): сначала до Core Clock
@@ -2506,6 +2506,6 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 60 MHz 步进寻找能通过的更低偏移并保存为配置。
 
 **哪张卡出错。** 一张卡上的 CUDA 故障会结束**整个矿工进程**的 CUDA。矿工现在：通过驱动 Xid 事件确定出错的卡并记录在
-`gpu-faults.json`；自行重启（Linux / HiveOS 同一进程内，每小时最多 10 次）；使用 `--auto-uv` 时崩溃的降压偏移视为失败并在其下方
+`gpu-faults.json`；自行重启（Linux / HiveOS 同一进程内，每小时最多 12 次）；使用 `--auto-uv` 时崩溃的降压偏移视为失败并在其下方
 重新调优，在您自己的偏移上连续 2 次启动崩溃则降低它（先降到 HiveOS 配置的 Core Clock 值，再以 60 MHz 步进降到 0）；无可再降仍
 崩溃的卡暂停挖矿一小时，其他卡继续。无故障 30 分钟清零计数；`--uv-reset` 不清除 `gpu-faults.json`（删除该文件即可）。

@@ -941,14 +941,27 @@ impl Tuner<'_> {
             lg(format!("{} CMFD check at the base offset {} cannot run ({}); mining at {} (no undervolt)", c.label(), signed(c.base), r0.reason, signed(c.base)));
             return Ok(());
         }
-        self.set(c, target)?;
-        std::thread::sleep(Duration::from_secs(3));
-        let r = self.check(c, &mut w, &Spec { secs: 20, measure: 8, tv: true }, &e.refs);
+        // a failing quick check steps down from the saved offset (at most 3 steps, the model stays loaded) instead of a pause /
+        // a tuning from scratch (1.7.2)
+        let mut target = target;
+        let mut r;
+        let mut tries = 0;
+        loop {
+            self.set(c, target)?;
+            std::thread::sleep(Duration::from_secs(3));
+            r = self.check(c, &mut w, &Spec { secs: 20, measure: 8, tv: true }, &e.refs);
+            if self.stopped() || r.ok || r.driver_fault || tries >= 3 || target - self.o.step <= c.base {
+                break;
+            }
+            lg(format!("{} CMFD offset {} FAILED the quick check ({}): one step down to {} (no tuning from scratch)", c.label(), signed(target), r.reason, signed(target - self.o.step)));
+            target -= self.o.step;
+            tries += 1;
+        }
         drop(w);
         if self.stopped() {
             return Ok(());
         }
-        if let (true, true, Some(k)) = (r.ok, e.clk_after != 0, r.clk) {
+        if let (true, true, Some(k), 0) = (r.ok, e.clk_after != 0, r.clk, tries) {
             if let uv::Regime::Differs(d) = uv::regime_probe(e.clk_after, target, k, target) {
                 lg(format!("{} CMFD quick check at {} passed, but at {k} MHz under load, {} MHz when verified ({d}: the clock lock changed): tuning again", c.label(), signed(target), e.clk_after));
                 self.set(c, c.base)?;
@@ -961,13 +974,16 @@ impl Tuner<'_> {
                 c.label(),
                 signed(c.base),
                 signed(target),
-                if clamped { format!(" (the saved {} is above the limit {}, {})", signed(e.offset), signed(c.max), c.max_src) } else { String::new() },
+                if clamped { format!(" (the saved {} is above the limit {}, {})", signed(e.offset), signed(c.max), c.max_src) } else if tries > 0 { format!(" (stepped down from {})", signed(e.offset)) } else { String::new() },
                 fmt_age(now().saturating_sub(e.tested_at)),
                 r.brief()
             ));
             if !clamped {
                 let mut e2 = e.clone();
                 e2.verified_at = now();
+                if tries > 0 {
+                    e2.offset = target;
+                }
                 if e2.migrated {
                     e2.migrated = false;
                     e2.lock = c.lock;
@@ -976,7 +992,7 @@ impl Tuner<'_> {
             }
             self.go_live(c);
         } else {
-            lg(format!("{} CMFD offset {} FAILED the quick check ({}); back to {}, auto-uv for CMFD paused for 24 h on this GPU", c.label(), signed(target), r.reason, signed(c.base)));
+            lg(format!("{} CMFD offset {} FAILED the quick check ({}); back to {}, auto-uv for CMFD paused for 24 h on this GPU at these clocks", c.label(), signed(target), r.reason, signed(c.base)));
             self.set(c, c.base)?;
             let mut e2 = e.clone();
             e2.disabled_until = now() + DISABLE_SECS;

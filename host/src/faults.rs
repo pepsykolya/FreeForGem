@@ -27,7 +27,7 @@ const STREAK_SECS: u64 = 3600;
 /// Mining this long without a fault clears the count.
 pub const OK_SECS: u64 = 30 * 60;
 /// Restarts of the miner by itself within an hour before it leaves the restart to HiveOS / start.ps1.
-const SELF_RESTARTS_MAX: usize = 10;
+const SELF_RESTARTS_MAX: usize = 12;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -132,6 +132,19 @@ pub fn mined_ok(dir: &Path, uuids: &[String]) {
             }
         }
     }
+}
+
+/// A process-wide fault that no GPU could be blamed for (no Xid): counted; returns how many in a row (within STREAK_SECS).  After
+/// 3 the caller records a crash for every GPU (each one steps back from its offset at the next start): no endless loop.
+pub fn unknown_crash(dir: &Path) -> u32 {
+    let _g = LOCK.lock().unwrap();
+    let mut v = load(dir);
+    let t = now();
+    let (n, last) = (v["unknown"]["n"].as_u64().unwrap_or(0) as u32, v["unknown"]["last"].as_u64().unwrap_or(0));
+    let n = if n > 0 && t.saturating_sub(last) <= STREAK_SECS { n + 1 } else { 1 };
+    v["unknown"] = json!({"n": n, "last": t});
+    store(dir, &v);
+    n
 }
 
 /// Seconds this GPU is still left out of mining (None: it mines).

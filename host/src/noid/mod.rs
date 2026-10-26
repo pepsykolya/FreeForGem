@@ -679,7 +679,20 @@ pub fn mine(o: Opts) -> Result<()> {
     let mut last_n = vec![0u64; gstats.len()];
     let mut win = Instant::now();
     let mut last_bad = 0u64;
-    ensure!(excluded.iter().any(|&e| !e), "every mining GPU is left out after repeated crashes (see the faults: lines above)");
+    if excluded.iter().all(|&e| e) {
+        // every GPU is left out: wait here (no restart loop for HiveOS) until the first one may mine again, then start over
+        let w = watch.as_ref().expect("excluded GPUs come from the watch");
+        let left = w.cards.iter().filter_map(|c| crate::faults::excluded(&dir, &c.uuid)).min().unwrap_or(60);
+        println!("faults: every mining GPU is left out after repeated crashes (see above); waiting {} min, then the miner starts again", left / 60 + 1);
+        let t = Instant::now();
+        while !stop.load(Ordering::Relaxed) && t.elapsed() < Duration::from_secs(left + 5) {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        if !stop.load(Ordering::Relaxed) {
+            println!("faults: {}", crate::faults::restart_self("a GPU may mine again"));
+        }
+        return Ok(());
+    }
     // mining runs: the NOID checks / tunings start now, each pausing only its own GPU
     tune::start_jobs(&live);
     let mut dead_seen = excluded.clone();
@@ -712,6 +725,18 @@ pub fn mine(o: Opts) -> Result<()> {
                     println!("faults: {}", crate::faults::excluded_line(&c.label(), &r, crate::faults::EXCLUDE_SECS));
                 } else {
                     println!("faults: {} crash {} in a row at offset {} remembered{}", c.label(), r.n, crate::uv::signed(r.offset), if tunable { " (NOID auto-uv tunes below it at the next start)" } else { "" });
+                }
+            }
+            if v.culprits.is_empty() && alive_n == 0 && dead.len() > 1 {
+                // nobody to blame (no Xid): after 3 such crashes in a row every GPU steps back from its offset at the next start
+                if crate::faults::unknown_crash(&dir) >= 3 {
+                    if let Some(w) = &watch {
+                        for k in 0..w.cards.len() {
+                            let c = &w.cards[k];
+                            crate::faults::record_crash(&dir, &c.uuid, &c.bus, &c.name, 0, w.offset(k));
+                        }
+                        println!("faults: 3 crashes in a row without an Xid: every GPU steps back from its offset at the next start");
+                    }
                 }
             }
             for l in &v.lines {

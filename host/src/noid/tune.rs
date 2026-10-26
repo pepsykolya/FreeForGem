@@ -630,9 +630,12 @@ impl Tuner<'_> {
     /// Offset to mine at for this card.
     fn run_card(&self, c: &Card) -> i32 {
         let mode = super::mode_name(self.mode);
+        // a crash at an offset (during a check, or while mining: faults.rs): with a profile of these clocks the card steps back from
+        // it (to the verified offset, or one step below the crash) after a quick check; without one it is tuned below it (1.7.2)
+        let mut crash_at: Option<i32> = None;
         if let Some(at) = self.db.take_trying(&c.uuid) {
-            lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): tuning again below it", c.label(), signed(at)));
-            return self.tune(c, Some(at));
+            lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): that offset counts as failed", c.label(), signed(at)));
+            crash_at = Some(at);
         }
         // a crash while mining at a tuned NOID offset (faults.rs, 1.7.2): that offset counts as failed
         if let Some(mut r) = crate::faults::get(&self.db.dir, &c.uuid) {
@@ -641,10 +644,10 @@ impl Tuner<'_> {
                 return c.base; // left out of mining (logged by the miner)
             }
             if r.n >= 1 && r.offset > c.base {
-                lg(format!("{} crashed while mining at NOID offset {} in the previous run (Xid {}): tuning again below it", c.label(), signed(r.offset), r.xid));
+                lg(format!("{} crashed while mining at NOID offset {} in the previous run (Xid {}): that offset counts as failed", c.label(), signed(r.offset), r.xid));
                 r.n = 0;
                 crate::faults::put(&self.db.dir, &c.uuid, &r);
-                return self.tune(c, Some(r.offset));
+                crash_at = Some(crash_at.map_or(r.offset, |a| a.min(r.offset)));
             }
         }
         // 1.7.2: one profile per mode and core clock lock.  The lock is known when this run sets it (--lock-cclock); else a short
@@ -674,9 +677,14 @@ impl Tuner<'_> {
             lg(format!("{} --uv-reset: {} forgotten; the other NOID profiles are kept (--uv-reset-all forgets all)", c.label(), sel.as_deref().unwrap_or("no profile")));
             return self.tune(c, None);
         }
-        let Some(key) = sel else { return self.tune(c, None) };
+        let Some(key) = sel else { return self.tune(c, crash_at) };
         self.db.use_key(&c.uuid, &key);
-        let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, None) };
+        let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash_at) };
+        if let Some(at) = crash_at {
+            let want = if e.offset < at { e.offset } else { at - self.o.step.max(1) };
+            lg(format!("{} NOID profile {key}: {} {} after a quick check (no tuning from scratch)", c.label(), if e.offset < at { "back to the verified" } else { "one step below the crash:" }, signed(want)));
+            return self.step_down(c, &e, want);
+        }
         let why = if e.driver != self.driver {
             Some(format!("driver {} when tuned, {} now", e.driver, self.driver))
         } else if e.kernel != c.kernel {
@@ -740,8 +748,52 @@ impl Tuner<'_> {
             self.db.save(&c.uuid, mode, &e2);
             return at;
         }
-        lg(format!("{} {}: FAILED ({}): tuning again", c.label(), signed(at), r.reason));
-        self.tune(c, Some(at))
+        lg(format!("{} {}: FAILED ({}): one step down from it (no tuning from scratch)", c.label(), signed(at), r.reason));
+        self.step_down(c, &e, at - self.o.step.max(1))
+    }
+
+    /// From a verified NOID offset that failed (or crashed) downwards: a quick check per step (at most 5); the first one that passes
+    /// becomes the profile's offset; nothing above the base passes: the base, NOID auto-uv paused at these clocks for 24 h.
+    fn step_down(&self, c: &Card, e: &Entry, want: i32) -> i32 {
+        let mode = super::mode_name(self.mode);
+        let step = self.o.step.max(1);
+        let mut at = want;
+        for _ in 0..5 {
+            if at <= c.base || self.stopped() {
+                break;
+            }
+            let r = self.check(c, at, QUICK_SECS);
+            if r.infra {
+                return self.abort(c, &r);
+            }
+            if self.stopped() {
+                return c.base;
+            }
+            if r.ok {
+                lg(format!("{} {}: ok ({}); mining at it (stepped down from {})", c.label(), signed(at), r.brief(), signed(e.offset)));
+                let mut e2 = e.clone();
+                e2.offset = at;
+                e2.edge = at + step;
+                e2.verified_at = now();
+                e2.clk_ok = r.clk.unwrap_or(e2.clk_ok);
+                e2.stepped_back += 1;
+                self.db.save(&c.uuid, mode, &e2);
+                let _ = offset::set(&c.r.bus, at);
+                return at;
+            }
+            lg(format!("{} {}: FAILED ({}): one step down", c.label(), signed(at), r.reason));
+            at -= step;
+        }
+        if self.stopped() {
+            return c.base;
+        }
+        lg(format!("{} no NOID offset above the base {} passes at these clocks: mining at the base, NOID auto-uv paused on this GPU at these clocks for 24 h", c.label(), signed(c.base)));
+        let mut e2 = e.clone();
+        e2.offset = c.base;
+        e2.disabled_until = now() + DISABLE_SECS;
+        self.db.save(&c.uuid, mode, &e2);
+        let _ = offset::set(&c.r.bus, c.base);
+        c.base
     }
 
     /// The check itself could not run (not a GPU failure): nothing is saved, the card mines at its base offset.

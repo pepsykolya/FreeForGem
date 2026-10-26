@@ -476,7 +476,20 @@ fn mine(a: Args) -> Result<()> {
         println!("GPU {dev}: {} ({} backend, kernel {})", gs.name, gpu::backend().name(), gpu::kernel_label_for(dev));
         gstats.push(gs);
     }
-    ensure!(excluded.iter().any(|&e| !e), "every mining GPU is left out after repeated crashes (see the faults: lines above)");
+    if excluded.iter().all(|&e| e) {
+        // every GPU is left out: wait here (no restart loop for HiveOS) until the first one may mine again, then start over
+        let w = watch.as_ref().expect("excluded GPUs come from the watch");
+        let left = w.cards.iter().filter_map(|c| faults::excluded(&fault_dir, &c.uuid)).min().unwrap_or(60);
+        println!("faults: every mining GPU is left out after repeated crashes (see above); waiting {} min, then the miner starts again", left / 60 + 1);
+        let t = Instant::now();
+        while !stop.load(Ordering::Relaxed) && t.elapsed() < Duration::from_secs(left + 5) {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        if !stop.load(Ordering::Relaxed) {
+            println!("faults: {}", faults::restart_self("a GPU may mine again"));
+        }
+        return Ok(());
+    }
     // mining runs now: the start checks / tunings begin, each pausing only its own GPU for the check itself
     if let Some((m, _)) = &uv_state {
         m.attach(&gstats);
@@ -540,6 +553,18 @@ fn mine(a: Args) -> Result<()> {
                         fault_dir.join("gpu-faults.json").display(),
                         if managed { " (auto-uv acts on it at the next start)" } else { " (without --auto-uv / --uv-offset the miner does not change offsets: a GPU that keeps crashing is left out of mining for an hour)" }
                     );
+                }
+            }
+            if v.culprits.is_empty() && alive_n == 0 && dead.len() > 1 {
+                // nobody to blame (no Xid): after 3 such crashes in a row every GPU steps back from its offset at the next start
+                if faults::unknown_crash(&fault_dir) >= 3 {
+                    if let Some(w) = &watch {
+                        for k in 0..w.cards.len() {
+                            let c = &w.cards[k];
+                            faults::record_crash(&fault_dir, &c.uuid, &c.bus, &c.name, 0, w.offset(k));
+                        }
+                        println!("faults: 3 crashes in a row without an Xid: every GPU steps back from its offset at the next start");
+                    }
                 }
             }
             for l in &v.lines {

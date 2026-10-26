@@ -494,6 +494,7 @@ pub struct Card {
     profile: Mutex<Option<String>>,    // key of the profile this run uses (uv.json "profiles")
     plan: Mutex<Option<Plan>>,         // what runs once mining has started (attach)
     gs: Mutex<Option<Arc<GpuStat>>>,   // the mining thread of this GPU (pause handshake for its checks)
+    crashed_at: Mutex<Option<i32>>,    // it crashed while mining at this offset (faults.rs): decide() steps back from it
 }
 
 /// The clock probe of a card whose lock the miner does not know.
@@ -515,7 +516,7 @@ enum Plan {
     None,
     Apply { e: Entry, want: i32 },
     Check { e: Entry, want: i32 },
-    Tune { prev: Option<Entry>, crashed: Option<Crash> },
+    Tune { prev: Option<Entry>, crashed: Option<Crash>, resume: Option<i32> },
     Fixed(i32),
 }
 
@@ -967,6 +968,7 @@ fn new_card(hw: CardHw, pos: usize, o: &Opts) -> Card {
         profile: Mutex::new(None),
         plan: Mutex::new(None),
         gs: Mutex::new(None),
+        crashed_at: Mutex::new(None),
     }
 }
 
@@ -1186,10 +1188,22 @@ impl Manager {
             FaultPlan::Go => {}
             FaultPlan::Done => return Ok(Plan::None),
             FaultPlan::Crashed(at) => {
-                if crashed.is_none() {
-                    crashed = Some(Crash { at, good: None });
+                if let Some(f) = c.fixed {
+                    if f.min(HARD_CAP) == at {
+                        crashed = Some(Crash { at, good: None });
+                    }
+                } else if crashed.is_none() {
+                    // with a profile of these clocks: back to it / one step below the crash (decide), no tuning from scratch;
+                    // without one: tuned below the crash
+                    *c.crashed_at.lock().unwrap() = Some(at);
                 }
             }
+        }
+        // died during a quick check of a saved profile (not during a tuning: that has steps that passed): the same as a crash
+        // while mining at that offset, a step back from the profile instead of a tuning from scratch
+        if let Some(k) = crashed.filter(|k| k.good.is_none() && c.fixed.is_none() && !self.profiles(c).is_empty()) {
+            *c.crashed_at.lock().unwrap() = Some(k.at);
+            crashed = None;
         }
         if let Some(f) = c.fixed {
             if crashed.is_some_and(|k| k.at == f.min(HARD_CAP)) {
@@ -1203,6 +1217,7 @@ impl Manager {
             None => "these clocks".to_string(),
         };
         if c.lock.is_none() && crashed.is_none() && !self.profiles(c).is_empty() {
+            // (a mining crash stays in crashed_at: the profile the clock picks steps back from it)
             // the miner cannot read a lock it did not set (HiveOS / another miner may have changed it): the clock under mining
             // load picks the profile (probe_tick)
             lg(format!(
@@ -1224,6 +1239,11 @@ impl Manager {
             ));
         }
         let pick = best_fit(&self.profiles(c), c.lock, c.mlock, None);
+        if pick.is_none() {
+            if let Some(at) = c.crashed_at.lock().unwrap().take() {
+                crashed = Some(Crash { at, good: None }); // no profile of these clocks: tuned below the crash
+            }
+        }
         lg(format!(
             "{} profiles: {}; {}",
             c.label(),
@@ -1234,7 +1254,7 @@ impl Manager {
             if let Some(e) = &pick {
                 *c.profile.lock().unwrap() = Some(profile_key(e));
             }
-            return Ok(Plan::Tune { prev: pick, crashed });
+            return Ok(Plan::Tune { prev: pick, crashed, resume: None });
         }
         Ok(self.decide(c, pick, false))
     }
@@ -1243,13 +1263,29 @@ impl Manager {
     fn decide(&self, c: &Card, pick: Option<Entry>, oc: bool) -> Plan {
         let Some(e) = pick else {
             lg(format!("{} no saved result for these clocks: tuning (the other GPUs mine meanwhile)", c.label()));
-            return Plan::Tune { prev: None, crashed: None };
+            return Plan::Tune { prev: None, crashed: None, resume: None };
         };
         *c.profile.lock().unwrap() = Some(profile_key(&e));
         let key = profile_key(&e);
+        if let Some(at) = c.crashed_at.lock().unwrap().take() {
+            // it crashed while mining at `at` (faults.rs): back to the verified offset of this lock when that is lower, else one
+            // step below the crash; a quick check either way, no tuning from scratch
+            let mut e = e;
+            if e.offset < at {
+                lg(format!("{} crashed while mining at {}: back to the verified {} of profile {key} after a quick check (no tuning from scratch)", c.label(), signed(at), signed(e.offset)));
+                return Plan::Check { want: e.offset, e };
+            }
+            let want = at - self.opts.step;
+            lg(format!("{} crashed while mining at {} (the offset of profile {key}): one step below it, {}, after a quick check (no tuning from scratch)", c.label(), signed(at), signed(want)));
+            e.offset = want;
+            e.edge = at;
+            e.verified_at = 0;
+            self.save_entry(c, &e);
+            return Plan::Check { want, e };
+        }
         if e.driver != self.driver || e.kernel != self.kernel_of(c) {
             lg(format!("{} profile {key} is for driver {} / kernel {}, now driver {} / kernel {}: tuning again", c.label(), e.driver, e.kernel, self.driver, self.kernel_of(c)));
-            return Plan::Tune { prev: Some(e), crashed: None };
+            return Plan::Tune { prev: Some(e), crashed: None, resume: None };
         }
         if e.m != 0 && e.m != c.m {
             // the saved reference digests were taken at another m (rows per attempt, changed by the miner version): re-check
@@ -1285,8 +1321,8 @@ impl Manager {
         }
         match saved_vs_limit(e.offset, e.cap, c.max) {
             Saved::Retune => {
-                lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning again", c.label(), signed(e.cap), signed(c.max), signed(e.offset)));
-                Plan::Tune { prev: Some(e), crashed: None }
+                lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning on from it", c.label(), signed(e.cap), signed(c.max), signed(e.offset)));
+                Plan::Tune { resume: Some(e.offset), prev: Some(e), crashed: None }
             }
             Saved::Clamp if c.max <= c.orig => {
                 lg(format!("{} saved offset {} is above the limit {} ({}), which is not above your offset {}: keeping {}", c.label(), signed(e.offset), signed(c.max), c.max_src, signed(c.orig), signed(c.orig)));
@@ -1299,7 +1335,7 @@ impl Manager {
             Saved::Apply => {
                 // verified recently at these clocks: applied right away (a restart costs no mining); the periodic re-validation and
                 // the rejected-share guard still cover it.  A result from before 1.7.2 (no lock recorded) always gets the check.
-                let fresh = !oc && !e.migrated && self.opts.reval_hours > 0.0 && now().saturating_sub(e.verified_at) < (self.opts.reval_hours * 3600.0) as u64;
+                let fresh = !oc && !e.migrated && e.orig == c.orig && self.opts.reval_hours > 0.0 && now().saturating_sub(e.verified_at) < (self.opts.reval_hours * 3600.0) as u64;
                 if fresh { Plan::Apply { want: e.offset, e } } else { Plan::Check { want: e.offset, e } }
             }
         }
@@ -1320,7 +1356,7 @@ impl Manager {
                 let (m, c2) = (self.clone(), c.clone());
                 std::thread::spawn(move || {
                     let r = match p {
-                        Plan::Tune { prev, crashed } => m.tune(&c2, prev, crashed),
+                        Plan::Tune { prev, crashed, resume } => m.tune(&c2, prev, crashed, resume),
                         Plan::Check { e, want } => m.check_saved(&c2, &e, want),
                         Plan::Fixed(f) => m.apply_fixed(&c2, f),
                         _ => Ok(()),
@@ -1405,57 +1441,69 @@ impl Manager {
     }
 
     /// A saved profile gets a quick check before it is used (not verified recently, from before 1.7.2, after an OC apply).
+    /// A saved profile gets a quick check before it is used (not verified recently, from before 1.7.2, after an OC apply, after a
+    /// crash).  A failure steps down from it (one step per quick check, at most 4) instead of tuning from scratch; nothing passes
+    /// above the floor (the owner's offset, or the profile's own start when lower): back there, auto-uv paused at these clocks.
     fn check_saved(&self, c: &Card, e: &Entry, want: i32) -> Result<()> {
         let before = c.cur.load(Ordering::Relaxed);
         let m_changed = e.m != c.m;
-        // the reference digests depend on the test job and m, not on the offset
-        let r = self.step_check(c, want, c.orig, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
-        if self.stopped() {
-            return Ok(());
+        let step = self.opts.step;
+        let floor = c.orig.min(e.start.unwrap_or(c.orig));
+        let mut want = want;
+        let mut e2 = e.clone();
+        if e2.migrated {
+            // checked at these clocks now: it becomes the profile of this run's lock either way
+            e2.migrated = false;
+            e2.lock = c.lock.unwrap_or(0);
+            e2.mlock = c.mlock.unwrap_or(0);
         }
-        if r.ok {
-            lg(format!(
-                "{} offset {} -> {} (profile {}{}), quick check passed ({} reruns, cpu ok {}), {}, {} MHz",
-                c.label(),
-                signed(before),
-                signed(want),
-                profile_key(e),
-                if want != e.offset { format!(", limited from {}", signed(e.offset)) } else { String::new() },
-                r.reruns,
-                r.cpu_ok,
-                fmt_w(r.watts),
-                r.clk.unwrap_or(0)
-            ));
-            if want == e.offset {
-                let mut e2 = e.clone();
-                e2.verified_at = now();
-                if e2.migrated {
-                    // checked at these clocks now: it becomes the profile of this run's lock
-                    e2.migrated = false;
-                    e2.lock = c.lock.unwrap_or(0);
-                    e2.mlock = c.mlock.unwrap_or(0);
-                }
-                if e2.clk_ok == 0 {
-                    e2.clk_ok = r.clk.unwrap_or(0);
-                }
-                if m_changed && !r.refs.is_empty() {
-                    e2.refs = r.refs.clone();
-                    e2.m = c.m;
-                    e2.disabled_until = 0;
-                }
-                self.save_entry(c, &e2);
+        for attempt in 0..5 {
+            // the reference digests depend on the test job and m, not on the offset
+            let back = if want - step >= floor { want - step } else { c.orig };
+            let r = self.step_check(c, want, back, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
+            if self.stopped() {
+                return Ok(());
             }
-        } else {
-            lg(format!("{} saved offset {} (profile {}) FAILED the quick check ({}); back to {}, auto-uv paused at these clocks for 24 h", c.label(), signed(want), profile_key(e), r.reason, signed(c.orig)));
-            let mut e2 = e.clone();
+            if r.ok {
+                lg(format!(
+                    "{} offset {} -> {} (profile {}{}), quick check passed ({} reruns, cpu ok {}), {}, {} MHz",
+                    c.label(),
+                    signed(before),
+                    signed(want),
+                    profile_key(e),
+                    if want != e.offset { format!(", stepped down from {}", signed(e.offset)) } else { String::new() },
+                    r.reruns,
+                    r.cpu_ok,
+                    fmt_w(r.watts),
+                    r.clk.unwrap_or(0)
+                ));
+                if want <= e.offset {
+                    e2.offset = want;
+                    e2.verified_at = now();
+                    e2.orig = c.orig;
+                    if e2.clk_ok == 0 || want != e.offset {
+                        e2.clk_ok = r.clk.unwrap_or(e2.clk_ok);
+                    }
+                    if m_changed && !r.refs.is_empty() {
+                        e2.refs = r.refs.clone();
+                        e2.m = c.m;
+                        e2.disabled_until = 0;
+                    }
+                    self.save_entry(c, &e2);
+                }
+                return Ok(());
+            }
             e2.m = c.m; // the failure is a real one at the current m (refs were valid or not used)
-            e2.disabled_until = now() + DISABLE_SECS;
-            if e2.migrated {
-                e2.migrated = false;
-                e2.lock = c.lock.unwrap_or(0);
-                e2.mlock = c.mlock.unwrap_or(0);
+            e2.edge = want;
+            if want - step < floor || attempt == 4 {
+                lg(format!("{} offset {} (profile {}) FAILED the quick check ({}); nothing passes down to {}: back to {}, auto-uv paused at these clocks for 24 h", c.label(), signed(want), profile_key(e), r.reason, signed(floor), signed(c.orig)));
+                e2.offset = c.orig.min(e2.offset);
+                e2.disabled_until = now() + DISABLE_SECS;
+                self.save_entry(c, &e2);
+                return Ok(());
             }
-            self.save_entry(c, &e2);
+            lg(format!("{} offset {} (profile {}) FAILED the quick check ({}): one step down to {} and checking it (no tuning from scratch)", c.label(), signed(want), profile_key(e), r.reason, signed(want - step)));
+            want -= step;
         }
         Ok(())
     }
@@ -1598,7 +1646,7 @@ impl Manager {
 
     /// Full tuning of the card at the clocks it has now, while the other GPUs mine (this GPU's mining pauses for each check; the
     /// checks follow each other, so it mines again when the tuning is over).
-    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<Crash>) -> Result<()> {
+    fn tune(&self, c: &Arc<Card>, prev: Option<Entry>, crashed: Option<Crash>, resume: Option<i32>) -> Result<()> {
         let step = self.opts.step;
         let mut cap = c.max;
         if let Some(x) = crashed.map(|k| k.at) {
@@ -1692,6 +1740,11 @@ impl Manager {
         // (the result is still confirmed by the long check below)
         if let Some(g) = crashed.and_then(|k| k.good).filter(|&g| g > start && g <= cap) {
             lg(format!("{} steps up to {} passed before the crash: not climbing them again", c.label(), signed(g)));
+            good = g;
+        }
+        // a verified result of these clocks (the limit was raised): the search goes on from it, not from the start
+        if let Some(g) = resume.filter(|&g| g > good && g <= cap) {
+            lg(format!("{} {} was verified at these clocks: going on from it", c.label(), signed(g)));
             good = g;
         }
         c.last_good.store(good, Ordering::Relaxed);
