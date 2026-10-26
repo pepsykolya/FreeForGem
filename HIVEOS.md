@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.2-beta):**
+**Installation URL (1.7.2-beta3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
 ```
 
 ### Flight sheet
@@ -131,10 +131,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.2-beta):**
+**Ссылка для установки (1.7.2-beta3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
 ```
 
 ### Полётный лист
