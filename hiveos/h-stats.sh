@@ -37,13 +37,16 @@ else
     _t+=("${_temp[$d]:-0}")
     f=${_fan[$d]:-0}; [[ $f =~ ^[0-9]+$ ]] || f=0; _f+=("$f")
   done
+  # rig efficiency (Pearl "1157 W, 0.560 TH/W", NOID "0.460 MH/W"): HiveOS shows it next to the miner version
+  _eff=$(grep -oP 'total .*?\K[0-9.]+ (TH|MH)/W' <<< "$_line" | head -n 1)
+  _ver=$CUSTOM_VERSION; [[ -n $_eff ]] && _ver="$CUSTOM_VERSION $_eff"
   khs=$(awk -v x="${_total:-0}" -v m="$_kmul" -v f="$_fmt" 'BEGIN{printf (m < 1 ? "%.5f" : f), x*m}')
   stats=$(jq -nc \
     --argjson hs "$(printf '%s\n' "${_hs[@]}" | jq -sc .)" \
     --argjson temp "$(printf '%s\n' "${_t[@]}" | jq -sc .)" \
     --argjson fan "$(printf '%s\n' "${_f[@]}" | jq -sc .)" \
     --argjson bus "$(printf '%s\n' "${_b[@]}" | jq -sc .)" \
-    --arg ver "$CUSTOM_VERSION" --arg algo "$_algo" --arg units "$_units" \
+    --arg ver "$_ver" --arg algo "$_algo" --arg units "$_units" \
     --argjson up "${_up:-0}" --argjson acc "${_acc:-0}" --argjson rej "${_rej:-0}" \
     '{hs: $hs, hs_units: $units, temp: $temp, fan: $fan, uptime: $up, ver: $ver, ar: [$acc, $rej], algo: $algo, bus_numbers: $bus}')
 fi
