@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.2-beta):**
+**Installation URL (1.7.2-beta3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
 ```
 
 ### Flight sheet
@@ -63,7 +63,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 - It needs root, which HiveOS miners have. Without NVML or permission it logs the reason and mines normally.
 - **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps). Since 1.7.2 the rig mines meanwhile:
-  only the GPU being tuned pauses. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner updates and reboots), **one
+  one GPU tunes at a time, the others mine (8 GPUs: ~1.5-2 h in all; `--uv-parallel N` for N at once, `all` for every GPU). The result is kept in `/hive-config/freeforgem/uv.json` (survives miner updates and reboots), **one
   profile per core clock lock** (since 1.7.2): switching the lock in the OC profile reuses that lock's verified result, a new lock is
   tuned once; it is tuned again when the driver or the kernel build changes. A GPU that crashes while mining is named in the log and
   stepped back by the miner itself (`gpu-faults.json`), see [MANUAL.md](MANUAL.md#17-profiles-per-clock-lock-mining-during-tuning-crashes-while-mining-new-in-172).
@@ -131,10 +131,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.2-beta):**
+**Ссылка для установки (1.7.2-beta3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforgem-1.7.2beta.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
 ```
 
 ### Полётный лист
@@ -182,8 +182,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta/freeforge
 майнинге и вернёт ваши настройки при остановке. Тот же хешрейт, меньше ватт (RTX 3070 на 1560 МГц: примерно на 5-10 Вт меньше на карту).
 
 - Нужен root, а у майнеров в HiveOS он есть. Без NVML или прав майнер пишет причину в лог и майнит как обычно.
-- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов). С 1.7.2 риг при этом майнит: на паузе
-  только подбираемая карта. Результат хранится в `/hive-config/freeforgem/uv.json` (переживает обновления майнера и перезагрузки),
+- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов). С 1.7.2 риг при этом майнит: подбирается
+  одна карта за раз, остальные майнят (8 карт: ~1,5-2 ч всего; `--uv-parallel N` — N сразу, `all` — все). Результат хранится в `/hive-config/freeforgem/uv.json` (переживает обновления майнера и перезагрузки),
   **отдельный профиль на каждый лок ядра** (с 1.7.2): смена лока в профиле разгона берёт проверенный результат этого лока, новый лок
   подбирается один раз; при смене драйвера или сборки ядра подбор повторяется. Карту, падающую в майнинге, майнер называет в логе и
   сам понижает (`gpu-faults.json`), см. [MANUAL.md](MANUAL.md).

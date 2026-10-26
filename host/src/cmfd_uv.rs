@@ -847,6 +847,32 @@ impl Tuner<'_> {
         drop(w);
     }
 
+    /// What needs no GPU (1.7.2 beta3): a known lock and its profile paused / at the base / verified recently.  Some(()) =
+    /// done (the engine keeps mining, no slot of the tuning queue taken); None = a check / probe / tuning (queued).
+    fn quick(&self, c: &Card) -> Option<()> {
+        if !c.locked || self.o.reset || self.sh.db.v.lock().unwrap()[TRYING].get(&c.uuid).is_some() {
+            return None;
+        }
+        let (key, e) = self.sh.db.profiles(&c.uuid).into_iter().filter(|(_, e)| fits(e, Some(c.lock), None)).min_by_key(|(_, e)| (e.migrated, u64::MAX - e.verified_at))?;
+        if e.driver != self.driver || e.kernel != c.kernel || (e.pl > 0.0 && c.pl > 0.0 && (c.pl - e.pl).abs() > 0.03 * e.pl) || e.base != c.base {
+            return None;
+        }
+        self.sh.db.use_key(&c.uuid, &key);
+        if e.disabled_until > now() {
+            lg(format!("{} CMFD profile {key}: paused after a failure ({} h left); mining at {}", c.label(), (e.disabled_until - now()) / 3600 + 1, signed(c.base)));
+            return Some(());
+        }
+        if e.offset <= c.base {
+            lg(format!("{} CMFD profile {key}: no safe offset above {}; mining at it", c.label(), signed(c.base)));
+            return Some(());
+        }
+        let fresh = !e.migrated && e.verified_at > 0 && self.o.reval_hours > 0.0 && now().saturating_sub(e.verified_at) < (self.o.reval_hours * 3600.0) as u64;
+        if fresh && saved_vs_limit(e.offset, e.cap, c.max) == Saved::Apply {
+            return self.apply_saved(c, &e, e.offset).ok();
+        }
+        None
+    }
+
     fn run_card(&self, c: &Card) -> Result<()> {
         let crashed = self.sh.db.take_trying(&c.uuid);
         if let Some((at, _)) = crashed {
@@ -1257,7 +1283,7 @@ pub fn start(o: &uv::Opts, devices: &[i32], bases: &[Option<i32>], ctx: &Ctx, st
     }
     // 1.7.2: the start checks / tunings run in the background; only the engine of the GPU being checked waits (busy), the
     // engines of the other GPUs start mining at once (before, every GPU waited for the slowest tuning)
-    starting().lock().unwrap().extend(cards.iter().map(|c| c.dev));
+    // beta3: one GPU at a time (--uv-parallel): the others' engines mine; a GPU's engine is stopped only when its turn comes
     let (ctx, o, stop) = (ctx.clone(), o.clone(), stop.clone());
     std::thread::spawn(move || {
         let t = Tuner { nv: &nv, ctx: &ctx, o: &o, sh, driver: nv.driver_version(), stop: &stop };
@@ -1265,15 +1291,46 @@ pub fn start(o: &uv::Opts, devices: &[i32], bases: &[Option<i32>], ctx: &Ctx, st
             for c in &cards {
                 let t = &t;
                 s.spawn(move || {
-                    if let Err(e) = t.run_card(c) {
-                        lg(format!("{} error: {e:#}; back to the base offset {}", c.label(), signed(c.base)));
-                        let _ = t.set(c, c.base);
+                    if t.quick(c).is_some() {
+                        return;
+                    }
+                    let Some(_slot) = crate::tunesched::acquire(c.dev, "CMFD check / tuning", t.stop, |m| lg(m)) else { return };
+                    // the engine of this GPU stops for it (the check needs the GPU memory) and restarts after
+                    starting().lock().unwrap().push(c.dev);
+                    stop_req().lock().unwrap().push(c.dev);
+                    let t0 = Instant::now();
+                    while !down().lock().unwrap().contains(&c.dev) && t0.elapsed() < Duration::from_secs(30) && !t.stopped() {
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    down().lock().unwrap().retain(|&d| d != c.dev);
+                    std::thread::sleep(Duration::from_secs(4)); // the driver frees the GPU memory of the stopped engine
+                    if !t.stopped() {
+                        if let Err(e) = t.run_card(c) {
+                            lg(format!("{} error: {e:#}; back to the base offset {}", c.label(), signed(c.base)));
+                            let _ = t.set(c, c.base);
+                        }
                     }
                     starting().lock().unwrap().retain(|&d| d != c.dev);
                 });
             }
         });
     });
+}
+
+/// Engines to stop for a start check / tuning (cmfd.rs takes them every loop) and engines reported stopped.
+fn stop_req() -> &'static Mutex<Vec<i32>> {
+    static S: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    &S
+}
+fn down() -> &'static Mutex<Vec<i32>> {
+    static S: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    &S
+}
+pub fn stop_requests() -> Vec<i32> {
+    std::mem::take(&mut *stop_req().lock().unwrap())
+}
+pub fn engine_down(dev: i32) {
+    down().lock().unwrap().push(dev);
 }
 
 /// GPUs whose start check / tuning still runs (their engine waits).

@@ -35,8 +35,10 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   HiveOS: in the same process, at most 12 times an hour) and acts on it: a crashed undervolt offset counts as failed (tuned below);
   a crash at the owner's offset 2 starts in a row lowers it (HiveOS profile value, then 60 MHz steps); a GPU with nothing left to
   lower is left out of mining for an hour while the other GPUs mine. A worker that stops alone no longer stops the others.
-* **Mining during tuning.** Before, no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now mining starts at once;
-  each GPU's checks / tuning run in the background and pause only that GPU (Pearl, NOID, CMFD).
+* **Mining during tuning, one GPU at a time.** Before, no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now
+  mining starts at once and one GPU tunes at a time (NOID / CMFD: also their checks), the others mine; a first tuning of n GPUs takes
+  about n x the per-card time (RTX 3070 Pearl: 10-15 min each). `--uv-parallel N` (or `all`) tunes N GPUs at once. Each GPU's checks /
+  tuning run in the background and pause only that GPU (Pearl, NOID, CMFD).
 * **Lock changes while mining** (lock raised under the miner, OC apply without `--lock-cclock`): the clock under mining load picks
   the profile again before the undervolt goes back.
 * A single `--lock-cclock` value for all GPUs that replaces different per-GPU HiveOS locks is now warned about.
@@ -95,8 +97,10 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   процессе, до 12 раз в час) и действует: упавший андервольт-offset — провальный (тюнинг ниже); падение на offset владельца
   2 старта подряд понижает его (значение профиля HiveOS, затем шаги по 60 МГц); карта, которую некуда понижать, исключается из
   майнинга на час, остальные майнят. Воркер, остановившийся один, больше не останавливает остальные.
-* **Майнинг во время тюнинга.** Раньше ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт). Теперь майнинг
-  стартует сразу; проверки / тюнинг каждой карты идут в фоне и ставят на паузу только её (Pearl, NOID, CMFD).
+* **Майнинг во время тюнинга, по одной карте.** Раньше ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт).
+  Теперь майнинг стартует сразу и тюнится одна карта за раз (NOID / CMFD — и проверки), остальные майнят; первый тюнинг n карт занимает
+  примерно n x время одной карты (RTX 3070 Pearl: 10-15 мин каждая). `--uv-parallel N` (или `all`) — N карт сразу. Проверки / тюнинг
+  каждой карты идут в фоне и ставят на паузу только её (Pearl, NOID, CMFD).
 * **Смена лока в майнинге** (лок подняли, OC-apply без `--lock-cclock`): профиль заново выбирает частота под нагрузкой, и только
   потом возвращается андервольт.
 * Предупреждение, если одно значение `--lock-cclock` на все карты заменяет разные поканальные локи HiveOS.

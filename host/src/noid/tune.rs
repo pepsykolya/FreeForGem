@@ -1057,7 +1057,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
                     }
                     set_to[i] = (Some(c.base), false);
                     pending.push(c.r.pos);
-                    lg(format!("{} NOID check / tuning starts once mining runs (this GPU mines at {} until then and pauses for it; the other GPUs mine)", c.label(), signed(c.base)));
+                    lg(format!("{} NOID check / tuning: queued once mining runs (this GPU mines at {} until its turn; one GPU at a time, --uv-parallel N for more)", c.label(), signed(c.base)));
                 }
             }
         }
@@ -1141,6 +1141,13 @@ pub fn start_jobs(live: &Arc<Live>) {
         std::thread::spawn(move || {
             let (Some(nv), Some(db)) = (l2.nv, l2.db.as_ref()) else { return };
             let t = Tuner { nv, o: &l2.o, mode: l2.mode_id, db, driver: l2.driver.clone(), stop: &l2.stop };
+            // one GPU checks / tunes at a time (--uv-parallel): this one mines at its base meanwhile
+            let Some(_slot) = crate::tunesched::acquire(card.r.dev, "NOID check / tuning", &l2.stop, |m| lg(m)) else {
+                if let Some(c) = l2.cards.lock().unwrap().iter_mut().find(|c| c.pos == pos) {
+                    c.busy.store(false, Ordering::SeqCst);
+                }
+                return;
+            };
             if let Some((p, _)) = &pause {
                 p.store(true, Ordering::SeqCst);
             }
