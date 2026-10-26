@@ -1368,13 +1368,7 @@ impl Manager {
                 let (m, c2) = (self.clone(), c.clone());
                 std::thread::spawn(move || {
                     let r = match p {
-                        Plan::Tune { prev, crashed, resume } => {
-                            // one GPU tunes at a time (--uv-parallel): this one mines at its offset while it waits
-                            match crate::tunesched::acquire(c2.dev, "tuning", &m.stop, |l| lg(l)) {
-                                Some(_slot) => m.tune(&c2, prev, crashed, resume),
-                                None => Ok(()),
-                            }
-                        }
+                        Plan::Tune { prev, crashed, resume } => m.tune(&c2, prev, crashed, resume),
                         Plan::Check { e, want } => m.check_saved(&c2, &e, want),
                         Plan::Fixed(f) => m.apply_fixed(&c2, f),
                         _ => Ok(()),

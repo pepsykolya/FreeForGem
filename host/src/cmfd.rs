@@ -957,20 +957,6 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         }
         // --auto-uv: an OC apply (HiveOS) reset a tuned card's CMFD offset: its engine stops, the saved offset gets a quick check
         // (cmfd_uv), then the engine restarts at it
-        // a start check / tuning got its turn (cmfd_uv, one GPU at a time): stop that engine and its GPU worker
-        for dev in crate::cmfd_uv::stop_requests() {
-            if let Some(s) = slots.iter_mut().find(|s| s.dev == dev) {
-                if let Some(c) = s.child.as_ref() {
-                    s.uv_restart = true;
-                    let workers = worker_children(c.id());
-                    kill_pid(c.id());
-                    for w in workers {
-                        kill_pid(w);
-                    }
-                }
-            }
-            crate::cmfd_uv::engine_down(dev);
-        }
         for dev in crate::cmfd_uv::poll_oc() {
             if let Some(s) = slots.iter_mut().find(|s| s.dev == dev) {
                 if let Some(c) = s.child.as_ref() {

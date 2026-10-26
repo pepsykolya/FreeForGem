@@ -46,7 +46,6 @@ mod cmfd_offset;
 mod cmfd_uv;
 mod devfee;
 mod faults;
-mod tunesched;
 mod gpu;
 mod hiveoc;
 mod mining;
@@ -785,8 +784,6 @@ OPTIONS:
     --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load, and
                          the coin / NOID mode); the profiles of other locks stay (since 1.7.2)
     --uv-reset-all       forget every saved undervolt result (all locks, coins and modes)
-    --uv-parallel N|all  GPUs that tune at once (default 1: one tunes, the others mine; a first tuning of n GPUs takes about
-                         n x 10-15 min on an RTX 3070); all = every GPU at once (faster, the rig does not mine meanwhile)
                          Profiles (1.7.2): auto-uv keeps one result per core clock lock (--lock-cclock N; without it the
                          clock under mining load picks the profile: unlocked or ~1815), per GPU and coin / mode; the start
                          log lists them (profiles: 1410:+450, 1805:+300). Switching locks reuses each lock's verified result.
@@ -1057,7 +1054,6 @@ fn main() -> Result<()> {
             }
             "--uv-reset" => a.uv.reset = true,
             "--uv-reset-all" => a.uv.reset_all = true,
-            "--uv-parallel" => tunesched::set_parallel(tunesched::parse(&val()?)?),
             "--uv-offset" => a.uv.fixed = uv::PerGpu::parse(&val()?, "--uv-offset")?,
             "--uv-max" => a.uv.max_offset = uv::PerGpu::parse(&val()?, "--uv-max")?,
             "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,
