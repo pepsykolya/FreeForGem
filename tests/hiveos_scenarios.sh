@@ -183,7 +183,7 @@ for u,ps in d['profiles'].items():
   for k,e in ps.items():
     if e.get('core_lock')==1900: e['offset']=330; e['verified_at']=0
 json.dump(d,open('$T/s4b/uv.json','w'),indent=1)"
-      run s4b 900 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1900 --lock-mclock 810 --uv-dir $T/s4b --auto-uv $SHORT --minutes 4
+      run s4b 900 NVIDIA_OC_CONF=$HC -- $PEARL --lock-cclock 1900 --lock-mclock 810 --uv-dir $T/s4b --auto-uv $SHORT --uv-max 345 --minutes 4
       show s4b "auto-uv: GPU"; ent $T/s4b/uv.json ;;
     s5a) # no auto-uv: injected fault (fake Xid 13) twice.  expect: "FAILED: Xid 13", own restart, then "LEFT OUT", exit
       sudo rm -rf $T/s5a; sudo mkdir -p $T/s5a

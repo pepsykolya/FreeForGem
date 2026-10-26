@@ -1486,7 +1486,8 @@ impl Manager {
                     fmt_w(r.watts),
                     r.clk.unwrap_or(0)
                 ));
-                if want <= e.offset {
+                // the limit (a lower --uv-max) is checked without changing the saved result; a step down is saved
+                if want == e.offset || attempt > 0 {
                     e2.offset = want;
                     e2.verified_at = now();
                     e2.orig = c.orig;
