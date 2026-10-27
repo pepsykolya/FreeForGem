@@ -215,7 +215,7 @@ fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
     let (lk, cv) = a_slots();
     let mut busy = lk.lock().unwrap_or_else(|e| e.into_inner());
     loop {
-        let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * ((bytes as u64 >> 20) * 11 / 10));
+        let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * ((bytes as u64 >> 20) * 21 / 10));
         if *busy == 0 || (room && *busy < 8) {
             break;
         }

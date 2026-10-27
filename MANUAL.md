@@ -46,10 +46,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.7.2):**
+**Installation URL (1.7.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -80,8 +80,8 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.2-linux-x86_64.tar.gz
-cd freeforgem-1.7.2
+tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
+cd freeforgem-1.7.3
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -102,8 +102,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.2-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2-windows-x64.zip`
+1. Download **`freeforgem-1.7.3-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -154,7 +154,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.2-windows-x64
+cd /d C:\Mining\freeforgem-1.7.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -281,9 +281,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.2-linux-x86_64.tar.gz freeforgem-1.7.2.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.2-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -964,10 +964,10 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.7.2):**
+**Ссылка для установки (1.7.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -998,8 +998,8 @@ HiveOS кэширует скачанный архив по имени файла
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.2-linux-x86_64.tar.gz
-cd freeforgem-1.7.2
+tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
+cd freeforgem-1.7.3
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1020,8 +1020,8 @@ cd freeforgem-1.7.2
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.2-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.3-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1072,7 +1072,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.2-windows-x64
+cd /d C:\Mining\freeforgem-1.7.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1197,9 +1197,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.2-linux-x86_64.tar.gz freeforgem-1.7.2.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.2-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1885,7 +1885,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.7.2)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1916,8 +1916,8 @@ HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同�
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.2-linux-x86_64.tar.gz
-cd freeforgem-1.7.2
+tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
+cd freeforgem-1.7.3
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1938,8 +1938,8 @@ cd freeforgem-1.7.2
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.2-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.3-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1981,7 +1981,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.2-windows-x64
+cd /d C:\Mining\freeforgem-1.7.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2089,9 +2089,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.2-linux-x86_64.tar.gz freeforgem-1.7.2.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.2-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.2-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 

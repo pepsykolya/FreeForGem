@@ -37,9 +37,10 @@ pub(crate) const DISABLE_SECS: u64 = 24 * 3600;
 const OC_RESETS_MAX: usize = 4; // OC applies per hour that get the verified offset back; more: auto-uv stands down on that GPU
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
-/// RAM model (1.7.3, measured on an RTX 3070, m = 94208 / A = 736 MB): a check process = CHECK_BASE_MB + the A matrix of its
-/// proof; the miner grows by MAIN_PER_GPU_MB per mining GPU and by one A matrix (+ its Merkle tree) while it builds a proof.
-const CHECK_BASE_MB: u64 = 450;
+/// RAM model (1.7.3, measured on an RTX 3070: peak RSS of a check process 701 / 1531 / 1666 MB at m = 35328 / 86016 / 94208,
+/// i.e. ~130 MB + 2.1 x A for its proof: A and the Merkle tree over it); the miner grows by MAIN_PER_GPU_MB per mining GPU
+/// and by one proof (2.1 x A) while it proves a hit.
+const CHECK_BASE_MB: u64 = 150;
 const MAIN_PER_GPU_MB: u64 = 200;
 /// share of MemAvailable the miner's checks may plan with (the rest: the OS, HiveOS, page cache, the measurement error)
 const RAM_SHARE_PCT: u64 = 70;
@@ -694,12 +695,12 @@ pub(crate) fn mem_available_mb() -> Option<u64> {
     None
 }
 
-/// MB of the A matrix (m x k bytes) a proof of this m builds, with its Merkle tree (~10 %)
+/// MB a proof of this m needs: the A matrix (m x k bytes) and the Merkle tree over it (measured: 2.1 x A)
 fn a_matrix_mb(m: usize) -> u64 {
     a_matrix_mb_k(m, crate::mining::k())
 }
 fn a_matrix_mb_k(m: usize, k: usize) -> u64 {
-    ((m as u64 * k as u64) >> 20) * 11 / 10
+    ((m as u64 * k as u64) >> 20) * 21 / 10
 }
 
 /// RAM one check process needs at its peak, MB (FFGP_UV_CHECK_MB overrides)
@@ -3024,15 +3025,17 @@ mod tests {
     #[test]
     fn checks_at_once_by_ram() {
         let a_matrix_mb_k8 = |m| a_matrix_mb_k(m, 8192);
-        // Rig05: 4x CMP 50HX (m = 86016: A 704 MB), 3.8 GB, ~2.6 GB available at the start
-        let (need, more) = (CHECK_BASE_MB + a_matrix_mb_k8(86016), 4 * MAIN_PER_GPU_MB + a_matrix_mb_k8(86016));
-        assert_eq!(checks_at_once(Some(2600), need, more, 4), 0); // 1820 - 1574 = 246 < a check
-        assert_eq!(checks_at_once(Some(3800), need, more, 4), 1);
-        assert_eq!(checks_at_once(Some(6000), need, more, 4), 2);
-        assert_eq!(checks_at_once(Some(60000), need, more, 4), 4);
+        // Rig05: 5x CMP 50HX (m = 86016: A 672 MB, a proof ~1.4 GB), 3.8 GB: no check fits (1.7.2 ran two and swapped for minutes)
+        let (need, more) = (CHECK_BASE_MB + a_matrix_mb_k8(86016), 5 * MAIN_PER_GPU_MB + a_matrix_mb_k8(86016));
+        assert_eq!((need, more), (1561, 2411));
+        assert_eq!(checks_at_once(Some(2600), need, more, 5), 0);
+        assert_eq!(checks_at_once(Some(3800), need, more, 5), 0);
+        assert_eq!(checks_at_once(Some(6000), need, more, 5), 1);
+        assert_eq!(checks_at_once(Some(8000), need, more, 5), 2);
+        assert_eq!(checks_at_once(Some(60000), need, more, 5), 5);
         assert_eq!(checks_at_once(None, need, more, 8), 8);
-        // the model: an RTX 3070 (m = 94208) check ~1.2 GB (1.7.2: 2.4 GB)
-        assert!((1100..=1400).contains(&(CHECK_BASE_MB + a_matrix_mb_k8(94208))));
+        // the model against the measurement: RTX 3070 (m = 94208) check 1666 MB (1.7.2: 2378 MB)
+        assert!((1600..=1750).contains(&(CHECK_BASE_MB + a_matrix_mb_k8(94208))));
     }
 
     #[test]

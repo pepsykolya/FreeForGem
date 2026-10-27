@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.2):**
+**Installation URL (1.7.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -98,6 +98,13 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - HiveOS with NVIDIA driver 525 or newer.
 - Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too (CMP 50HX: only ~2.6 TH/s, not recommended for Pearl).
 - Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
+- **RAM:** mining needs about 0.2 GB plus 0.1-0.2 GB per GPU, and up to ~1.5 GB more for a moment while it proves a Pearl share
+  (the 0.7-0.8 GB job matrix is built only then; until 1.7.3 every job kept it and every proof copied it). A `--auto-uv` check
+  process needs ~1.6 GB more (RTX 3070 / CMP 50HX). The miner plans its checks with 70 % of the free RAM: it logs "checking N of M
+  GPU(s) at a time", and when even one does not fit (a 4 GB rig) it runs no checks or tunings: a GPU with a verified profile of
+  its clocks uses it, the others mine at your offset. A check process is the first one the Linux OOM killer takes; a check killed
+  for lack of RAM is not counted as a failed offset. Without `--lock-cclock` / `--lock-mclock` the miner sets the OC profile's
+  locks before mining (another program may have left the clocks unlocked), and the GPUs start one by one, 1.5 s apart.
 - **HiveOS reboots the rig at a high load average, even with its watchdog off** (`/hive/bin/wd`, check_la: `sreboot fast` when the
   5-min load average reaches the rig's max_la, 28 on a 4C/8T Xeon rig). Weak CPUs (4 cores) with many GPUs are at risk while
   several GPUs tune at once. Since 1.7.2 the miner keeps its runnable threads low (no busy wait for the GPU, one CPU reference
@@ -145,10 +152,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.2):**
+**Ссылка для установки (1.7.3):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
@@ -232,6 +239,14 @@ HiveOS кэширует скачанный архив по имени файла
 - HiveOS с драйвером NVIDIA 525 или новее.
 - Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: всего ~2,6 TH/s, для Pearl не рекомендуется).
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
+- **ОЗУ:** майнингу нужно около 0,2 ГБ плюс 0,1-0,2 ГБ на карту и до ~1,5 ГБ сверх того на миг, пока он доказывает шару Pearl
+  (матрица задания 0,7-0,8 ГБ строится только тогда; до 1.7.3 каждое задание её хранило, а каждое доказательство копировало).
+  Процессу проверки `--auto-uv` нужно ещё ~1,6 ГБ (RTX 3070 / CMP 50HX). Майнер планирует проверки по 70 % свободной памяти: в
+  логе "checking N of M GPU(s) at a time", а если не помещается даже одна (риг с 4 ГБ) — проверок и тюнинга нет: карта с
+  проверенным профилем своих частот использует его, остальные майнят на вашем offset. Процесс проверки OOM killer Linux убивает
+  первым; проверка, убитая из-за нехватки памяти, не считается провалом offset. Без `--lock-cclock` / `--lock-mclock` майнер
+  ставит локи профиля OC до начала майнинга (другая программа могла оставить частоты без лока), а карты стартуют по очереди,
+  через 1,5 с.
 - **HiveOS перезагружает риг при высоком load average, даже с выключенным вотчдогом** (`/hive/bin/wd`, check_la: `sreboot fast`,
   когда load average за 5 мин доходит до max_la рига, 28 на риге с Xeon 4C/8T). Слабые CPU (4 ядра) с многими картами
   рискуют, пока тюнятся несколько карт сразу. С 1.7.2 майнер держит мало готовых к исполнению потоков (без активного ожидания
