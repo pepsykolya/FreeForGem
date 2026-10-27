@@ -194,15 +194,38 @@ fn const_cv(key: &[u8; 32], start: usize, len: usize, buf_chunks: usize) -> [u8;
 /// The whole A of a job (row 0 = `row0`, every other byte 64), built only while a proof needs it: one at a time in the process
 /// (1.7.3: the job no longer keeps a 0.7-0.8 GB copy, and a proof no longer clones it: Rig05, 4x CMP 50HX, 3.8 GB RAM).
 pub struct AMatrix {
-    _g: std::sync::MutexGuard<'static, ()>,
     pub data: Vec<u8>,
 }
+/// Proofs building their A right now, and the wake-up for the ones waiting.  More than one at a time only while the free RAM
+/// covers another (half of MemAvailable >= one A): a burst of GPUs hitting together (0.6 s per proof on an RTX 3070) does not
+/// queue for seconds on a rig with RAM, and a 4 GB rig still builds one at a time.
+fn a_slots() -> &'static (std::sync::Mutex<usize>, std::sync::Condvar) {
+    static S: std::sync::OnceLock<(std::sync::Mutex<usize>, std::sync::Condvar)> = std::sync::OnceLock::new();
+    S.get_or_init(|| (std::sync::Mutex::new(0), std::sync::Condvar::new()))
+}
+impl Drop for AMatrix {
+    fn drop(&mut self) {
+        let (m, cv) = a_slots();
+        *m.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        cv.notify_all();
+    }
+}
 fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
-    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let g = ONE.lock().unwrap_or_else(|e| e.into_inner());
-    let mut data = vec![64u8; m * k()];
+    let bytes = m * k();
+    let (lk, cv) = a_slots();
+    let mut busy = lk.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * ((bytes as u64 >> 20) * 11 / 10));
+        if *busy == 0 || (room && *busy < 8) {
+            break;
+        }
+        busy = cv.wait_timeout(busy, std::time::Duration::from_millis(50)).unwrap_or_else(|e| e.into_inner()).0;
+    }
+    *busy += 1;
+    drop(busy);
+    let mut data = vec![64u8; bytes];
     data[..row0.len()].copy_from_slice(row0);
-    AMatrix { _g: g, data }
+    AMatrix { data }
 }
 
 pub struct Job {
