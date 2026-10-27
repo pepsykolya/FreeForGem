@@ -31,6 +31,9 @@ Test (RTX 3070, 1 GPU, a memory cap like a 4 GB 5-GPU rig: 2.9 GB): 1.7.2 sat at
 `+NOCK_ADDRESS` after it): the miner keeps the `+` parts on these pools and appends the worker after them. 1.7.2 dropped
 everything after `+` outside LuckyPool, so these pools got PRL only. Other pools: unchanged.
 
+**Fixed: AlphaPool.** The pool closes the connection on `mining.subscribe`; 1.7.3 logs in with `mining.authorize` only
+there (1.7.2 kept reconnecting and got no jobs). Test, RTX 3070, 5 min: 107 of 108 shares accepted.
+
 ## Русский
 
 Файлы: `freeforgem-1.7.3.tar.gz` (ссылка для установки HiveOS
@@ -60,3 +63,6 @@ everything after `+` outside LuckyPool, so these pools got PRL only. Other pools
 **Новое: merge-майнинг NACRE (NACR) на HimPool и AlphaPool.** `--wallet prl1...+nacr1p...` (на HimPool после него можно
 ещё `+АДРЕС_NOCK`): на этих пулах майнер оставляет части `+` и дописывает воркер после них. 1.7.2 вне LuckyPool отбрасывал
 всё после `+`, и эти пулы получали только PRL. Остальные пулы — без изменений.
+
+**Исправлено: AlphaPool.** Пул закрывает соединение на `mining.subscribe`; 1.7.3 входит туда только через
+`mining.authorize` (1.7.2 переподключался и не получал заданий). Тест, RTX 3070, 5 мин: принято 107 из 108 шар.
