@@ -227,7 +227,10 @@ pub fn recover(dir: &Path) {
 /// `None` if nothing was requested, NVML is missing, or no device could be changed (then mining goes on as is).
 /// The lock each clock had before is noted first (HiveOS OC profile / $FFG_RESTORE_* or $FFGP_RESTORE_*) and put back on exit.
 pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
-    if !o.any() {
+    // 1.7.3: on HiveOS a clock without a --lock-* value gets the OC profile's lock (Rig05: another miner left 4x CMP 50HX unlocked
+    // at ~2040 MHz with the profile's +150 offset, LCLOCK 1410; mining started on all four at once and the rig lost power)
+    let hive = crate::hiveoc::load();
+    if !o.any() && hive.is_none() {
         return None;
     }
     let nv = match Nvml::load() {
@@ -242,10 +245,9 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     // one value given for every GPU (not a per-GPU list)
     let single_core = n > 1 && o.core_mhz.len() == n && o.core_mhz.iter().all(|v| v.is_some() && *v == o.core_mhz[0]);
     for (i, &dev) in devices.iter().enumerate() {
-        let core = o.core_mhz.get(i).copied().flatten();
-        let mem = o.mem_mhz.get(i).copied().flatten();
+        let (core_opt, mem_opt) = (o.core_mhz.get(i).copied().flatten(), o.mem_mhz.get(i).copied().flatten());
         let moff = o.mem_off.get(i).copied().flatten();
-        if core.is_none() && mem.is_none() && moff.is_none() {
+        if core_opt.is_none() && mem_opt.is_none() && moff.is_none() && hive.is_none() {
             continue;
         }
         let bus = match gpu::device_pci_bus_id(dev) {
@@ -262,6 +264,21 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 continue;
             }
         };
+        // the HiveOS profile's locks for the clocks without a --lock-* value (the same lock nvidia-oc sets; put back on exit)
+        let idx = nv.index(d).map(|x| x as usize);
+        let core_hive = core_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.core_lock(x))).flatten();
+        let mem_hive = mem_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.mem_lock(x))).flatten();
+        let (core, mem) = (core_opt.or(core_hive), mem_opt.or(mem_hive));
+        if core.is_none() && mem.is_none() && moff.is_none() {
+            continue;
+        }
+        if core_hive.is_some() || mem_hive.is_some() {
+            lg(format!(
+                "GPU{dev} (bus {bus}): the HiveOS OC profile locks{}{} are set before mining (no --lock-cclock / --lock-mclock; another program may have left the clocks unlocked)",
+                core_hive.map_or(String::new(), |m| format!(" core {m} MHz")),
+                mem_hive.map_or(String::new(), |m| format!(" memory {m} MHz"))
+            ));
+        }
         let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
         if let Some(mhz) = core {
             let (prev, src) = prev_lock(&nv, d, Kind::Core, i, n);

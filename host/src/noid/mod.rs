@@ -417,6 +417,7 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
     let wth = thresh(1500.0 / wn as f64);
     let wwant = if wsecs > 0 { cpu_candidates(&wf, wn, wth) } else { Vec::new() };
     let mut wlast = Instant::now();
+    let mut staggered = false;
     // test hook (faults.rs): a fault of this GPU after N s of mining
     let inject = crate::faults::test_fault_for(gs.dev).map(|secs| Instant::now() + Duration::from_secs(secs));
     loop {
@@ -506,6 +507,11 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
             slot ^= 1;
             continue;
         };
+        if !staggered {
+            staggered = true;
+            crate::worker::stagger_start(gs.dev, &sh.stop);
+            continue;
+        }
         if base >= 1u64 << 32 {
             hi_ctr = hi_ctr.wrapping_add(1);
             hi = ((pos as u32 & 0xff) << 24) | (hi_ctr & 0x00ff_ffff);

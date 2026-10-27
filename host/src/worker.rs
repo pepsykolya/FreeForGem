@@ -142,7 +142,29 @@ pub fn spawn(
     })
 }
 
+/// Seconds between the first launches of the mining GPUs (FFG_START_STAGGER_MS overrides; 0 = all at once).
+fn stagger_ms() -> u64 {
+    std::env::var("FFG_START_STAGGER_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1500)
+}
+
+/// Before a GPU's first launch (1.7.3): the GPUs start mining one by one, STAGGER apart, so 4-8 cards do not jump to full
+/// power in the same instant (Rig05: 4x CMP 50HX lost power right at the miner start).  Pearl and NOID workers call it.
+pub fn stagger_start(dev: i32, stop: &std::sync::atomic::AtomicBool) {
+    static ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let k = ORDER.fetch_add(1, Ordering::SeqCst);
+    let d = std::time::Duration::from_millis(k * stagger_ms());
+    if d.is_zero() {
+        return;
+    }
+    println!("GPU {dev}: starts mining in {:.1} s (the GPUs start one by one: no power surge of all cards at once)", d.as_secs_f64());
+    let t = Instant::now();
+    while t.elapsed() < d && !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Result<()> {
+    let mut staggered = false;
     let mut my_gen = 0u64;
     let mut cur: Option<Arc<Assignment>> = None;
     let mut loaded: Option<Arc<Job>> = None; // the Job (for this device's m) whose B side is in this GPU's memory
@@ -200,6 +222,11 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
             std::thread::sleep(std::time::Duration::from_millis(20));
             continue;
         };
+        if !staggered {
+            staggered = true;
+            stagger_start(dev, &sh.stop);
+            continue; // the job may have changed meanwhile
+        }
         let job = loaded.as_ref().expect("job loaded whenever an assignment is current");
         // prepare and enqueue the next attempt, then collect the previous one
         let t_prep = Instant::now();

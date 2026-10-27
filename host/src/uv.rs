@@ -37,8 +37,12 @@ pub(crate) const DISABLE_SECS: u64 = 24 * 3600;
 const OC_RESETS_MAX: usize = 4; // OC applies per hour that get the verified offset back; more: auto-uv stands down on that GPU
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
 // together while the free RAM covers them, otherwise the kernel's OOM killer ends them (12 GB rig, 8 GPUs, 1.5.4-rc2)
-const CHECK_MB: u64 = 2400;
-const CHECK_RESERVE_MB: u64 = 600;
+/// RAM model (1.7.3, measured on an RTX 3070, m = 94208 / A = 736 MB): a check process = CHECK_BASE_MB + the A matrix of its
+/// proof; the miner grows by MAIN_PER_GPU_MB per mining GPU and by one A matrix (+ its Merkle tree) while it builds a proof.
+const CHECK_BASE_MB: u64 = 450;
+const MAIN_PER_GPU_MB: u64 = 200;
+/// share of MemAvailable the miner's checks may plan with (the rest: the OS, HiveOS, page cache, the measurement error)
+const RAM_SHARE_PCT: u64 = 70;
 
 /// A per-GPU option (`--uv-max`, `--uv-min`, `--uv-offset`): not given, one value for every GPU, or a comma list with one
 /// value per mining GPU, in `--devices` order (without `--devices`: GPU0, GPU1, ... as the miner numbers them; on HiveOS
@@ -650,6 +654,10 @@ pub struct Manager {
     /// test hook: FFGP_UV_TEST_INJECT_BAD=<secs> reports one CPU-verification failure after that many seconds of mining
     inject_bad: Option<u64>,
     injected: AtomicBool,
+    /// 1.7.3: check processes allowed at once (from the free RAM at the start; 0 = no checks this run) and the RAM of one
+    at_once: u64,
+    check_need: u64,
+    main_more: u64,
 }
 
 /// RAM the OS can still hand out, MB (Linux: MemAvailable; Windows: available physical memory)
@@ -658,7 +666,16 @@ pub(crate) fn mem_available_mb() -> Option<u64> {
     {
         let t = std::fs::read_to_string("/proc/meminfo").ok()?;
         let l = t.lines().find(|l| l.starts_with("MemAvailable:"))?;
-        return l.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024);
+        let avail = l.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)?;
+        // a memory limit of the miner's cgroup (systemd MemoryMax, a container) caps it too (cgroup v2)
+        let cg = (|| {
+            let rel = std::fs::read_to_string("/proc/self/cgroup").ok()?.lines().find_map(|l| l.strip_prefix("0::").map(str::to_string))?;
+            let d = std::path::Path::new("/sys/fs/cgroup").join(rel.trim_start_matches('/'));
+            let max: u64 = std::fs::read_to_string(d.join("memory.max")).ok()?.trim().parse().ok()?;
+            let cur: u64 = std::fs::read_to_string(d.join("memory.current")).ok()?.trim().parse().ok()?;
+            Some(max.saturating_sub(cur) >> 20)
+        })();
+        return Some(cg.map_or(avail, |c| c.min(avail)));
     }
     #[cfg(windows)]
     {
@@ -675,8 +692,25 @@ pub(crate) fn mem_available_mb() -> Option<u64> {
     None
 }
 
-fn check_mb() -> u64 {
-    std::env::var("FFGP_UV_CHECK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(CHECK_MB)
+/// MB of the A matrix (m x k bytes) a proof of this m builds, with its Merkle tree (~10 %)
+fn a_matrix_mb(m: usize) -> u64 {
+    a_matrix_mb_k(m, crate::mining::k())
+}
+fn a_matrix_mb_k(m: usize, k: usize) -> u64 {
+    ((m as u64 * k as u64) >> 20) * 11 / 10
+}
+
+/// RAM one check process needs at its peak, MB (FFGP_UV_CHECK_MB overrides)
+fn check_need_mb(m: usize) -> u64 {
+    std::env::var("FFGP_UV_CHECK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(CHECK_BASE_MB + a_matrix_mb(m))
+}
+
+/// How many check processes may run at once: (RAM_SHARE_PCT % of `avail` - what the miner still needs: `main_more`) / `need`,
+/// at most `gpus`; 0 = not even one fits (then no checks at all this run).  `avail` None (unknown): every GPU at once.
+pub(crate) fn checks_at_once(avail: Option<u64>, need: u64, main_more: u64, gpus: u64) -> u64 {
+    let Some(a) = avail else { return gpus };
+    let budget = (a * RAM_SHARE_PCT / 100).saturating_sub(main_more);
+    (budget / need.max(1)).min(gpus)
 }
 
 /// running check processes; a new one starts only when the free RAM covers it on top of the ones already running
@@ -702,9 +736,11 @@ impl Drop for CheckSlot {
 }
 
 /// May one more check process start? `running` checks are already running (each counted in full: they may not have
-/// reached their peak yet), each needs `need` MB; `avail` = free RAM in MB (None = unknown: no limit).
-fn check_fits(running: u64, need: u64, avail: Option<u64>) -> bool {
-    running == 0 || avail.is_none_or(|a| a.saturating_sub(running * need) >= need + CHECK_RESERVE_MB)
+/// reached their peak yet), each needs `need` MB; `avail` = free RAM in MB (None = unknown: no limit); `main_more` = what the
+/// miner itself may still take (a proof's A matrix).  1.7.3: the first check is no exception (1.7.2 started it whatever the
+/// free RAM: Rig05, 3.8 GB, no swap, hung at the miner start).
+fn check_fits(running: u64, need: u64, avail: Option<u64>, main_more: u64) -> bool {
+    avail.is_none_or(|a| (a * RAM_SHARE_PCT / 100).saturating_sub(main_more).saturating_sub(running * need) >= need)
 }
 
 static ACTIVE: OnceLock<Mutex<Option<Arc<Manager>>>> = OnceLock::new();
@@ -874,6 +910,25 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
             // best effort only
         }
     }
+    // RAM plan (1.7.3): the miner is about to allocate its per-GPU buffers and builds an A matrix for every proof; a check
+    // process needs its own; the checks that fit run at once, the others wait; none fits: no checks this run
+    let (check_need, main_more, at_once) = {
+        let mmax = cards.iter().map(|c| c.m).max().unwrap_or(0);
+        let need = check_need_mb(mmax);
+        let more = MAIN_PER_GPU_MB * devices.len() as u64 + a_matrix_mb(mmax);
+        let avail = mem_available_mb();
+        let n = checks_at_once(avail, need, more, cards.len() as u64);
+        let gb = |mb: u64| format!("{:.1} GB", mb as f64 / 1024.0);
+        match avail {
+            None => lg(format!("free RAM unknown: checking all {} GPU(s) at once", cards.len())),
+            Some(a) if n == 0 => lg(format!(
+                "NOT ENOUGH RAM for a check: {} available, a check needs ~{} and mining ~{} more ({} % of the free RAM is planned with): no checks or tunings this run; a GPU with a verified profile of these clocks uses it, the others mine at your offset (more RAM, or close other programs, for --auto-uv)",
+                gb(a), gb(need), gb(more), RAM_SHARE_PCT
+            )),
+            Some(a) => lg(format!("checking {n} of {} GPU(s) at a time: {} available (a check needs ~{}, mining ~{} more)", cards.len(), gb(a), gb(need), gb(more))),
+        }
+        (need, more, n)
+    };
     let m = Arc::new(Manager {
         nv,
         opts: o.clone(),
@@ -898,6 +953,9 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         started: Instant::now(),
         inject_bad: std::env::var("FFGP_UV_TEST_INJECT_BAD").ok().and_then(|v| v.parse().ok()),
         injected: AtomicBool::new(false),
+        at_once,
+        check_need,
+        main_more,
     });
     *active().lock().unwrap() = Some(m.clone());
     let guard = Guard;
@@ -1400,8 +1458,26 @@ impl Manager {
         }
     }
 
+    /// Not enough RAM for even one check process (1.7.3): a verified profile of these clocks is applied without its quick check
+    /// (as after a restart within the re-validation time), anything else (a tuning, an unverified result, a fixed offset that
+    /// needs its check) leaves the owner's offset.
+    fn without_checks(&self, c: &Card, p: Plan) -> Plan {
+        match p {
+            Plan::Check { e, want } if verified(&e) && want == e.offset => {
+                lg(format!("{} not enough RAM for its quick check: the verified {} of profile {} is used without it", c.label(), signed(want), profile_key(&e)));
+                Plan::Apply { e, want }
+            }
+            Plan::None | Plan::Apply { .. } => p,
+            _ => {
+                lg(format!("{} not enough RAM for a check: no tuning / unchecked offset, mining at your {}", c.label(), signed(c.orig)));
+                Plan::None
+            }
+        }
+    }
+
     /// Runs a plan: Apply at once (an NVML set); the others in a thread of their own while the miner mines.
     fn launch(self: &Arc<Self>, c: &Arc<Card>, p: Plan) {
+        let p = if self.at_once == 0 { self.without_checks(c, p) } else { p };
         match p {
             Plan::None => {}
             Plan::Apply { e, want } if !verified(&e) => self.launch(c, Plan::Check { e, want }),
@@ -2021,12 +2097,14 @@ impl Manager {
             return None;
         }
         let (m, cv) = check_slots();
-        let need = check_mb();
+        let need = self.check_need;
         let mut running = m.lock().unwrap();
         let mut said = false;
         loop {
-            // already-running checks may not have reached their peak yet: count each of them in full
-            if self.stopped() || check_fits(*running, need, mem_available_mb()) {
+            // already-running checks may not have reached their peak yet: count each of them in full; never more at once than
+            // the start plan allows (the miner's own buffers were not there yet when the free RAM was read first)
+            let more = if self.started.elapsed() < Duration::from_secs(60) { self.main_more } else { a_matrix_mb(c.m) };
+            if self.stopped() || (*running < self.at_once.max(1) && check_fits(*running, need, mem_available_mb(), more)) {
                 *running += 1;
                 SLOT_HELD.with(|h| h.set(true));
                 return Some(CheckSlot);
@@ -2440,6 +2518,9 @@ impl Manager {
 
     /// Quick check of the current offset with mining on this GPU paused; on failure one step back and again.
     fn recheck(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, what: &str) {
+        if self.at_once == 0 {
+            return; // not enough RAM for a check process this run (logged at the start)
+        }
         // RAM for the check first: while other GPUs' checks fill the RAM this GPU keeps mining instead of idling paused
         let _slot = self.check_slot(c);
         gs.pause.store(true, Ordering::SeqCst);
@@ -2874,6 +2955,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn checks_at_once_by_ram() {
+        let a_matrix_mb_k8 = |m| a_matrix_mb_k(m, 8192);
+        // Rig05: 4x CMP 50HX (m = 86016: A 704 MB), 3.8 GB, ~2.6 GB available at the start
+        let (need, more) = (CHECK_BASE_MB + a_matrix_mb_k8(86016), 4 * MAIN_PER_GPU_MB + a_matrix_mb_k8(86016));
+        assert_eq!(checks_at_once(Some(2600), need, more, 4), 0); // 1820 - 1574 = 246 < a check
+        assert_eq!(checks_at_once(Some(3800), need, more, 4), 1);
+        assert_eq!(checks_at_once(Some(6000), need, more, 4), 2);
+        assert_eq!(checks_at_once(Some(60000), need, more, 4), 4);
+        assert_eq!(checks_at_once(None, need, more, 8), 8);
+        // the model: an RTX 3070 (m = 94208) check ~1.2 GB (1.7.2: 2.4 GB)
+        assert!((1100..=1400).contains(&(CHECK_BASE_MB + a_matrix_mb_k8(94208))));
+    }
+
+    #[test]
     fn per_gpu_parse() {
         assert_eq!(PerGpu::parse("495", "--uv-max").unwrap(), PerGpu::All(495));
         assert_eq!(PerGpu::parse("+225", "--uv-max").unwrap(), PerGpu::All(225));
@@ -3082,12 +3177,13 @@ mod tests {
     #[test]
     fn ram_gate_for_checks() {
         // the first check always runs; more only while the free RAM covers them (each running one counted in full)
-        assert!(check_fits(0, 2400, Some(100)));
-        assert!(check_fits(1, 2400, None));
-        assert!(check_fits(1, 2400, Some(2400 + 2400 + CHECK_RESERVE_MB)));
-        assert!(!check_fits(1, 2400, Some(2400 + 2400 + CHECK_RESERVE_MB - 1)));
-        assert!(!check_fits(3, 2400, Some(8000)));
-        assert!(check_fits(3, 2400, Some(3 * 2400 + 2400 + CHECK_RESERVE_MB)));
+        // 1.7.3: the first check needs its RAM too (1.7.2 started it on a 3.8 GB rig: Rig05 hung)
+        assert!(!check_fits(0, 2400, Some(100), 0));
+        assert!(check_fits(1, 2400, None, 0));
+        assert!(check_fits(0, 1200, Some(3000), 800)); // 70 % of 3000 = 2100 - 800 = 1300 >= 1200
+        assert!(!check_fits(0, 1200, Some(3000), 1000));
+        assert!(check_fits(1, 1000, Some(4000), 500)); // 2800 - 500 - 1000 = 1300
+        assert!(!check_fits(2, 1000, Some(4000), 500));
     }
 
     #[test]

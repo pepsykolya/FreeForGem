@@ -800,15 +800,21 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     };
 
     let nv = if amd() { None } else { nvml::Nvml::load().ok() };
+    // 1.7.3: the engines start one by one, 1.5 s apart (FFG_START_STAGGER_MS), not all GPUs at full power in the same instant
+    let stagger = std::env::var("FFG_START_STAGGER_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1500u64);
+    if gpus.len() > 1 && stagger > 0 {
+        println!("cmfd: the engines start one by one, {:.1} s apart (no power surge of all cards at once)", stagger as f64 / 1000.0);
+    }
     let mut slots: Vec<Slot> = gpus
         .iter()
-        .map(|(dev, uuid, name)| Slot {
+        .enumerate()
+        .map(|(k, (dev, uuid, name))| Slot {
             dev: *dev,
             uuid: uuid.clone(),
             name: name.clone(),
             child: None,
             started: Instant::now(),
-            restart_at: Some(Instant::now()),
+            restart_at: Some(Instant::now() + Duration::from_millis(k as u64 * stagger)),
             restarts: 0,
             quick_fails: 0,
             disabled: false,
