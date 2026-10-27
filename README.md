@@ -161,16 +161,19 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 | 8x RTX 3070 rig, mem 810, `--auto-uv` (rig totals): mode / core lock | MH/s | W | MH/W |
 |---|---|---|---|
 | eff 1200 | 236.3 | 498 | 0.474 |
-| eff 1300 | **256.9** | 542 | **0.474** |
+| eff 1300 ¹ | **257.0** | 523 | **0.491** |
 | eff 1400 | 277.6 | 606 | 0.458 |
 | eff 1500 | 295.3 | 682 | 0.433 |
-| speed 1500 | **335.9** | 712 | **0.472** |
+| speed 1500 ¹ | **336.0** | 710 | **0.473** |
 | speed 1560 | 349.1 | 756 | 0.462 |
 | speed 1650 | 369.5 | 881 | 0.419 |
 | speed 1750 | 393.0 | 1014 | 0.388 |
 
-Recommended on RTX 30: **eff 1300** for the best MH/W, **speed 1500** (`--noid-mode speed --lock-cclock 1500`) for more MH/s at
-almost the same MH/W.
+¹ 1.7.2 final (27.10.2026); the other rows: eff 1.7.2-beta2 (26.10), speed 1.7.2-beta4 (27.10), same rig and settings. The
+1.7.2 tuning climbs in 30 MHz steps and reaches +150..+240 at eff 1300 (+120..+150 before).
+
+Recommended on RTX 30: **eff 1300** for the best MH/W (0.491), **speed 1500** (`--noid-mode speed --lock-cclock 1500`) for more
+hashrate: +31 % MH/s for +36 % power (0.473 MH/W).
 
 `--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
 positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.

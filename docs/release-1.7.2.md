@@ -92,7 +92,8 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   keeps its start target, so none is requested.
 * **HiveOS dashboard**: the rig efficiency (TH/W for Pearl, MH/W for NOID) is shown next to the miner version.
 * **NOID recommendation on RTX 30** (8x RTX 3070 rig, `--auto-uv`, MANUAL.md section 15): **eff `--lock-cclock 1300`** for the
-  best MH/W (0.474 MH/W), **speed `--lock-cclock 1500`** for ~30 % more MH/s at almost the same MH/W (0.472).
+  best MH/W (257.0 MH/s, 523 W, 0.491 MH/W on 1.7.2), **speed `--lock-cclock 1500`** for more hashrate (336.0 MH/s, 710 W,
+  0.473 MH/W: +31 % MH/s for +36 % power).
 
 ### Checks
 
@@ -193,7 +194,8 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   `mining.suggest_difficulty`, но стартовую цель не меняет, поэтому она не запрашивается.
 * **Панель HiveOS**: эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера.
 * **Рекомендация NOID на RTX 30** (риг 8x RTX 3070, `--auto-uv`, MANUAL.md раздел 15): **eff `--lock-cclock 1300`** — лучшие
-  MH/Вт (0.474), **speed `--lock-cclock 1500`** — примерно на 30 % больше MH/s почти при тех же MH/Вт (0.472).
+  MH/Вт (257,0 MH/s, 523 Вт, 0,491 MH/Вт на 1.7.2), **speed `--lock-cclock 1500`** — больше хешрейта (336,0 MH/s, 710 Вт,
+  0,473 MH/Вт: +31 % MH/s за +36 % мощности).
 
 ### Проверки
 
