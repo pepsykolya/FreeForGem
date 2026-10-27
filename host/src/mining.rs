@@ -211,6 +211,12 @@ pub fn proofs_serialized(m: usize) -> bool {
 /// Proofs building their A right now, and the wake-up for the ones waiting.  More than one at a time only while the free RAM
 /// covers another (half of MemAvailable >= one A): a burst of GPUs hitting together (0.6 s per proof on an RTX 3070) does not
 /// queue for seconds on a rig with RAM, and a 4 GB rig still builds one at a time.
+const MAX_PROOFS: usize = 4;
+static PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// The most proofs that ran at once in this process (benchmark / log)
+pub fn proofs_peak() -> usize {
+    PEAK.load(std::sync::atomic::Ordering::Relaxed)
+}
 fn a_slots() -> &'static (std::sync::Mutex<usize>, std::sync::Condvar) {
     static S: std::sync::OnceLock<(std::sync::Mutex<usize>, std::sync::Condvar)> = std::sync::OnceLock::new();
     S.get_or_init(|| (std::sync::Mutex::new(0), std::sync::Condvar::new()))
@@ -228,12 +234,14 @@ fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
     let mut busy = lk.lock().unwrap_or_else(|e| e.into_inner());
     loop {
         let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * proof_mb(m));
-        if *busy == 0 || (room && *busy < 8) {
+        // at most floor(MemAvailable / 2 / proof) at once, never more than MAX_PROOFS (an 8-GPU burst unbounded peaked at 11.8 GB)
+        if *busy == 0 || (room && *busy < MAX_PROOFS) {
             break;
         }
         busy = cv.wait_timeout(busy, std::time::Duration::from_millis(50)).unwrap_or_else(|e| e.into_inner()).0;
     }
     *busy += 1;
+    PEAK.fetch_max(*busy, std::sync::atomic::Ordering::Relaxed);
     drop(busy);
     let machine = if proofs_serialized(m) {
         std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(std::env::temp_dir().join("freeforgem-proof.lock")).ok().inspect(|f| {

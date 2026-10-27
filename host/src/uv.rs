@@ -2928,7 +2928,7 @@ fn bench_proofs(job: &Job, m: usize, kp: usize) -> Result<(bool, String)> {
     });
     let mut sorted = times.clone();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    Ok((true, format!("UVRESULT ok=1 BENCH m={m} one_proof={:.3}s burst{kp}: first {:.3}s last {:.3}s; VmHWM {} MB", single.as_secs_f64(), sorted[0], sorted[kp - 1], rss())))
+    Ok((true, format!("UVRESULT ok=1 BENCH m={m} one_proof={:.3}s burst{kp}: first {:.3}s last {:.3}s; at most {} proofs at once ({} MB free at the start); VmHWM {} MB", single.as_secs_f64(), sorted[0], sorted[kp - 1], crate::mining::proofs_peak(), mem_available_mb().unwrap_or(0), rss())))
 }
 
 fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
