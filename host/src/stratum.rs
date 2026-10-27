@@ -142,8 +142,17 @@ pub fn is_luckypool(pool: &str) -> bool {
 /// HimPool (`*.himpool.com`) and AlphaPool (`*.alphapool.tech`): merge-mine NACRE (and HimPool also NOCK) from a
 /// `PRL+NACR[+NOCK]` login, with the worker appended after all addresses (`prl1...+nacr1p....rig1`).
 pub fn is_merge_pool(pool: &str) -> bool {
+    host_in(pool, "himpool.com") || is_alphapool(pool)
+}
+
+/// AlphaPool (`*.alphapool.tech`) wants mining.authorize first: a mining.subscribe gets error 24 and the connection is closed.
+pub fn is_alphapool(pool: &str) -> bool {
+    host_in(pool, "alphapool.tech")
+}
+
+fn host_in(pool: &str, domain: &str) -> bool {
     let host = pool.rsplit_once(':').map_or(pool, |(h, _)| h).trim_end_matches('.').to_ascii_lowercase();
-    ["himpool.com", "alphapool.tech"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 /// `--pool` as HOST:PORT. Drops a `stratum+tcp://`-style prefix copied from a pool's page. TLS schemes are refused with a
@@ -215,11 +224,14 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(30)).with_interval(Duration::from_secs(10));
     let _ = socket2::SockRef::from(&sock).set_tcp_keepalive(&ka);
     stats.connected.store(1, Ordering::Relaxed);
-    // subscribe and authorize back-to-back (LuckyPool drops us otherwise)
-    let hello = [
+    // subscribe and authorize back-to-back (LuckyPool drops us otherwise); AlphaPool: authorize only
+    let mut hello = vec![
         json!({"jsonrpc":"2.0","id":1,"method":"mining.subscribe","params":[AGENT]}),
         json!({"jsonrpc":"2.0","id":2,"method":"mining.authorize","params":{"wallet":wallet(l),"worker":l.worker,"pass":l.password,"password":l.password,"agent":AGENT,"type":"v2"}}),
     ];
+    if is_alphapool(&l.addr) {
+        hello.remove(0);
+    }
     for h in &hello {
         sock.write_all(format!("{h}\n").as_bytes())?;
     }
