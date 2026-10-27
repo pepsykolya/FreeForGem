@@ -359,7 +359,9 @@ fn prover_loop(rx: mpsc::Receiver<Work>, sh: Arc<Shared>, sinks: [Sender<Submit>
 
 /// Proves and verifies one hit and builds its mining.submit line.
 fn submit_hit(p: &Work, h: &gpu::Hit, id: u64) -> Result<String> {
+    let t_proof = Instant::now();
     let proof = prove_hit(&p.job, &p.row0, h, &p.a_seed, p.target)?;
+    let proof_ms = t_proof.elapsed().as_millis();
     let raw = bincode::serialize(&proof)?;
     let jackpot = hex(&hit_hash(h));
     let (payload, enc) = if p.pj.gzip {
@@ -380,7 +382,7 @@ fn submit_hit(p: &Work, h: &gpu::Hit, id: u64) -> Result<String> {
     }
     let line = serde_json::json!({"jsonrpc":"2.0","id":id,"method":"mining.submit","params":params}).to_string();
     println!(
-        "SUBMIT [{}] id {id} job {} tile=({}, {}) jackpot={jackpot} proof {} B{}",
+        "SUBMIT [{}] id {id} job {} tile=({}, {}) jackpot={jackpot} proof {} B{} (proved in {proof_ms} ms)",
         src_name(p.src),
         p.pj.job_id,
         h.row,

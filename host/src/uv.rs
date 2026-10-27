@@ -2898,6 +2898,33 @@ fn burst(seed: &[u8; 32], n: u32, target: &[u32; 8], m: usize) -> Result<Vec<usi
     Ok(totals)
 }
 
+fn bench_proofs(job: &Job, m: usize, kp: usize) -> Result<(bool, String)> {
+    let row0 = job.nonce_row(1);
+    let seed = job.a_noise_seed(&row0);
+    let mut target = [0xffff_ffffu32; 8];
+    target[7] = 0x00ff_ffff;
+    let tgt = U256::from_little_endian(&crate::target_words_bytes(&target));
+    let mut hits = vec![gpu::Hit::default(); 64];
+    let (_, stored) = gpu::attempt(&seed, &[], &[], m, &target, &mut hits)?;
+    let usable: Vec<gpu::Hit> = hits[..stored].iter().filter(|h| h.row != 0).cloned().collect();
+    ensure!(!usable.is_empty(), "no usable hit");
+    let rss = || std::fs::read_to_string("/proc/self/status").ok().and_then(|t| t.lines().find(|l| l.starts_with("VmHWM:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok())).unwrap_or(0) / 1024;
+    let one = Instant::now();
+    prove_hit(job, &row0, &usable[0], &seed, tgt)?;
+    let single = one.elapsed();
+    let t0 = Instant::now();
+    let times: Vec<f64> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..kp).map(|i| {
+            let (h, row0, seed) = (usable[i % usable.len()].clone(), row0.clone(), seed);
+            s.spawn(move || { prove_hit(job, &row0, &h, &seed, tgt).map(|_| t0.elapsed().as_secs_f64()) })
+        }).collect();
+        hs.into_iter().map(|h| h.join().unwrap().unwrap_or(-1.0)).collect()
+    });
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    Ok((true, format!("UVRESULT ok=1 BENCH m={m} one_proof={:.3}s burst{kp}: first {:.3}s last {:.3}s; VmHWM {} MB", single.as_secs_f64(), sorted[0], sorted[kp - 1], rss())))
+}
+
 fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     let count = gpu::device_count();
     ensure!((a.dev as usize) < count && a.dev >= 0, "device {} does not exist", a.dev);
@@ -2907,6 +2934,11 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     let job = Job::new(&test_header(7), 3, cm)?;
     gpu::init(a.dev)?;
     gpu::set_job(&job.br_t, &job.q1, &job.q2, N, k())?;
+    // test hook (1.7.3): FFG_BENCH_PROOFS=K proves K hits at once on K threads (a burst of K GPUs hitting together), prints the
+    // time of each and the peak RSS, and ends the check process
+    if let Some(kp) = std::env::var("FFG_BENCH_PROOFS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        return bench_proofs(&job, cm, kp);
+    }
     // fixed seeds: the digests depend only on the job (from the fixed test header), the seed and the kernel, never on the process
     let seeds: Vec<[u8; 32]> = (0..4u32).map(|i| std::array::from_fn(|j| (j as u32 * 37 + i * 101 + 5) as u8)).collect();
     let mut refs: Vec<Option<String>> = (0..4).map(|i| a.refs.get(i).cloned()).collect();
