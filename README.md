@@ -140,7 +140,8 @@ from its SM count (RTX 3070 &rarr; 47104; +0.4% at the same power), so a mixed-S
 multi-GPU rigs with older CPUs run at full speed.
 
 **NOCK merge mining (LuckyPool).** Use `prl1...+YOUR_NOCK_ADDRESS` as the wallet and LuckyPool pays NOCK for the same work,
-with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself). The step-by-step guide,
+with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself).
+**NACRE (NACR) merge mining (HimPool, AlphaPool):** `prl1...+nacr1p...` as the wallet (MANUAL.md). The step-by-step guide,
 in English and Russian, with overclock settings is in **[HIVEOS.md](HIVEOS.md)**.
 
 ## NOID (Parano1d)

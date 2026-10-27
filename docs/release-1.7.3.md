@@ -27,6 +27,10 @@ Files: `freeforgem-1.7.3.tar.gz` (HiveOS Installation URL
 Test (RTX 3070, 1 GPU, a memory cap like a 4 GB 5-GPU rig: 2.9 GB): 1.7.2 sat at the cap and did not mine; 1.7.3 tuned
 (+240), mined, peak 1.65 GB, no OOM, 11 of 11 shares accepted.
 
+**New: NACRE (NACR) merge mining on HimPool and AlphaPool.** `--wallet prl1...+nacr1p...` (HimPool also
+`+NOCK_ADDRESS` after it): the miner keeps the `+` parts on these pools and appends the worker after them. 1.7.2 dropped
+everything after `+` outside LuckyPool, so these pools got PRL only. Other pools: unchanged.
+
 ## Русский
 
 Файлы: `freeforgem-1.7.3.tar.gz` (ссылка для установки HiveOS
@@ -52,3 +56,7 @@ Test (RTX 3070, 1 GPU, a memory cap like a 4 GB 5-GPU rig: 2.9 GB): 1.7.2 sat at
 
 Тест (RTX 3070, 1 карта, лимит памяти как у рига 4 ГБ с 5 картами: 2,9 ГБ): 1.7.2 упёрся в лимит и не майнил; 1.7.3 подобрал
 (+240), майнил, пик 1,65 ГБ, без OOM, 11 из 11 шар принято.
+
+**Новое: merge-майнинг NACRE (NACR) на HimPool и AlphaPool.** `--wallet prl1...+nacr1p...` (на HimPool после него можно
+ещё `+АДРЕС_NOCK`): на этих пулах майнер оставляет части `+` и дописывает воркер после них. 1.7.2 вне LuckyPool отбрасывал
+всё после `+`, и эти пулы получали только PRL. Остальные пулы — без изменений.

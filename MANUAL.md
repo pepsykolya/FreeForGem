@@ -196,8 +196,14 @@ Any other Pearl stratum pool that speaks the same JSON-RPC stratum can be used; 
 hashrate loss: write the wallet as `PRL_ADDRESS+NOCK_ADDRESS`, for example
 `--wallet prl1...+YOUR_NOCK_ADDRESS`. NOCK stats are at `https://nock.luckypool.io` under your NOCK address. In the Windows
 `.bat` files put the same `prl1...+NOCK...` into `WALLET`; on HiveOS put it into the PRL wallet address. Other pools
-(Kryptex) do not support it: since 1.4.3 the miner drops the `+NOCK` part there by itself (log: `PRL+NOCK merge mining works on
-LuckyPool only`) and mines PRL to the `prl1...` part.
+(Kryptex) do not support it: since 1.4.3 the miner drops the `+...` part there by itself (log: `merge mining (+NOCK/+NACR) works on
+LuckyPool, HimPool and AlphaPool only`) and mines PRL to the `prl1...` part.
+
+**NACRE (NACR) merge mining (HimPool, AlphaPool; since 1.7.3).** These pools pay NACR for the same Pearl work: write the
+wallet as `PRL_ADDRESS+NACR_ADDRESS` (`--wallet prl1...+nacr1p...`; on HimPool `prl1...+nacr1p...+NOCK_ADDRESS` adds NOCK too).
+The miner keeps the `+` parts there and appends the worker after them (`prl1...+nacr1p....rig1`); the log shows
+`merge mining: PRL to prl1..., +nacr1p... on this pool`. Without a NACR address HimPool keeps the NACR share. Ports:
+AlphaPool `eu1.alphapool.tech:5571` (also `us1`, `us2`, `ru1`, `sg1`), HimPool `eu.himpool.com:1480` (also `in`, `ca`).
 
 **Kryptex** (checked in 1.4.1): `--pool prl-eu.kryptex.network:7048` (also `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
 `prl-ae` `.kryptex.network`; port 7048 is plain TCP). Wallet: your `prl1...` address. Kryptex reads the worker name from the login,
@@ -1113,8 +1119,14 @@ goto loop
 **Merge-майнинг NOCK (только LuckyPool).** LuckyPool за ту же работу Pearl платит ещё и Nockchain (NOCK), без потери хэшрейта:
 укажите кошелёк в виде `АДРЕС_PRL+АДРЕС_NOCK`, например `--wallet prl1...+ВАШ_АДРЕС_NOCK`. Статистика NOCK — на
 `https://nock.luckypool.io` по вашему адресу NOCK. В батниках Windows впишите тот же `prl1...+NOCK...` в `WALLET`; в HiveOS —
-в адрес кошелька PRL. Другие пулы (Kryptex) это не поддерживают: с 1.4.3 майнер сам отбрасывает там часть `+NOCK` (в логе
-`PRL+NOCK merge mining works on LuckyPool only`) и майнит PRL на адрес `prl1...`.
+в адрес кошелька PRL. Другие пулы (Kryptex) это не поддерживают: с 1.4.3 майнер сам отбрасывает там часть `+...` (в логе
+`merge mining (+NOCK/+NACR) works on LuckyPool, HimPool and AlphaPool only`) и майнит PRL на адрес `prl1...`.
+
+**Merge-майнинг NACRE (NACR) (HimPool, AlphaPool; с 1.7.3).** Эти пулы за ту же работу Pearl платят ещё и NACR: укажите
+кошелёк в виде `АДРЕС_PRL+АДРЕС_NACR` (`--wallet prl1...+nacr1p...`; на HimPool `prl1...+nacr1p...+АДРЕС_NOCK` — ещё и NOCK).
+Майнер оставляет там части `+` и дописывает воркер после них (`prl1...+nacr1p....rig1`); в логе
+`merge mining: PRL to prl1..., +nacr1p... on this pool`. Без адреса NACR доля NACR на HimPool остаётся пулу. Порты:
+AlphaPool `eu1.alphapool.tech:5571` (также `us1`, `us2`, `ru1`, `sg1`), HimPool `eu.himpool.com:1480` (также `in`, `ca`).
 
 **Kryptex** (проверено в 1.4.1): `--pool prl-eu.kryptex.network:7048` (также `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
 `prl-ae` `.kryptex.network`; порт 7048 — обычный TCP). Кошелёк — ваш адрес `prl1...`. Kryptex берёт имя воркера из логина, поэтому с 1.4.3
@@ -2016,7 +2028,12 @@ goto loop
 
 **NOCK 合并挖矿（仅 LuckyPool）。** LuckyPool 会为同一份 Pearl 算力额外支付 Nockchain（NOCK），不损失算力：钱包写成
 `PRL地址+NOCK地址`，例如 `--wallet prl1...+你的NOCK地址`。NOCK 统计见 `https://nock.luckypool.io`（按你的 NOCK 地址查询）。
-Windows `.bat` 中把同样的 `prl1...+NOCK...` 填入 `WALLET`；HiveOS 中填入 PRL 钱包地址。其他矿池（Kryptex）不支持：自 1.4.3 起矿工会在这些矿池上自动去掉 `+NOCK` 部分（日志：`PRL+NOCK merge mining works on LuckyPool only`），只向 `prl1...` 挖 PRL。
+Windows `.bat` 中把同样的 `prl1...+NOCK...` 填入 `WALLET`；HiveOS 中填入 PRL 钱包地址。其他矿池（Kryptex）不支持：自 1.4.3 起矿工会在这些矿池上自动去掉 `+...` 部分（日志：`merge mining (+NOCK/+NACR) works on LuckyPool, HimPool and AlphaPool only`），只向 `prl1...` 挖 PRL。
+
+**NACRE（NACR）合并挖矿（HimPool、AlphaPool；自 1.7.3）。** 这些矿池为同一份 Pearl 算力额外支付 NACR：钱包写成
+`PRL地址+NACR地址`（`--wallet prl1...+nacr1p...`；在 HimPool 上 `prl1...+nacr1p...+NOCK地址` 还可同时挖 NOCK）。矿工在这些矿池上保留 `+`
+部分，并把矿工名接在最后（`prl1...+nacr1p....rig1`）；日志：`merge mining: PRL to prl1..., +nacr1p... on this pool`。未填 NACR 地址时，
+HimPool 的 NACR 收益归矿池。端口：AlphaPool `eu1.alphapool.tech:5571`（另有 `us1`、`us2`、`ru1`、`sg1`），HimPool `eu.himpool.com:1480`（另有 `in`、`ca`）。
 
 **Kryptex**（1.4.1 已验证）：`--pool prl-eu.kryptex.network:7048`（另有 `prl`、`prl-us`、`prl-br`、`prl-sg`、`prl-hk`、`prl-ru`、
 `prl-ae` `.kryptex.network`；7048 端口为普通 TCP）。钱包填写你的 `prl1...` 地址。Kryptex 从登录名中读取矿工名，因此自 1.4.3 起矿工在该矿池发送 `prl1....矿工名`（1.4.3 之前 Kryptex 把所有矿机显示为 `worker`）。

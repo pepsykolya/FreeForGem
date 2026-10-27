@@ -139,6 +139,13 @@ pub fn is_luckypool(pool: &str) -> bool {
     host == "luckypool.io" || host.ends_with(".luckypool.io")
 }
 
+/// HimPool (`*.himpool.com`) and AlphaPool (`*.alphapool.tech`): merge-mine NACRE (and HimPool also NOCK) from a
+/// `PRL+NACR[+NOCK]` login, with the worker appended after all addresses (`prl1...+nacr1p....rig1`).
+pub fn is_merge_pool(pool: &str) -> bool {
+    let host = pool.rsplit_once(':').map_or(pool, |(h, _)| h).trim_end_matches('.').to_ascii_lowercase();
+    ["himpool.com", "alphapool.tech"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
 /// `--pool` as HOST:PORT. Drops a `stratum+tcp://`-style prefix copied from a pool's page. TLS schemes are refused with a
 /// clear error: the client speaks plain TCP only, so a TLS port would just fail the handshake.
 pub fn pool_addr(pool: &str) -> Result<String, String> {
@@ -156,9 +163,10 @@ pub fn pool_addr(pool: &str) -> Result<String, String> {
     Ok(addr.trim_end_matches('/').to_string())
 }
 
-/// Wallet string sent in mining.authorize. LuckyPool: as given. Other pools (Kryptex): a `+NOCK` part is dropped (merge
-/// mining is LuckyPool-only and such a login is refused) and the worker is appended as `wallet.worker`, because they read
-/// the worker name from the login string, not from the `worker` field. Returns the wallet and a note for the log.
+/// Wallet string sent in mining.authorize. LuckyPool: as given. HimPool/AlphaPool: the `+NACR` (`+NOCK`) parts are kept
+/// (merge mining). Other pools (Kryptex): a `+...` part is dropped (such a login is refused). Outside LuckyPool the worker
+/// is appended as `wallet.worker`, because those pools read the worker name from the login string, not from the `worker`
+/// field. Returns the wallet and a note for the log.
 pub fn login_wallet(pool: &str, wallet: &str, worker: &str) -> (String, Option<String>) {
     if is_luckypool(pool) {
         return (wallet.to_string(), None);
@@ -166,8 +174,12 @@ pub fn login_wallet(pool: &str, wallet: &str, worker: &str) -> (String, Option<S
     let mut note = None;
     let mut w = wallet;
     if let Some((prl, _)) = wallet.split_once('+') {
-        note = Some(format!("PRL+NOCK merge mining works on LuckyPool only: mining PRL to {prl} on this pool, the NOCK part is ignored"));
-        w = prl;
+        if is_merge_pool(pool) {
+            note = Some(format!("merge mining: PRL to {prl}, +{} on this pool", wallet[prl.len() + 1..].replace('+', " +")));
+        } else {
+            note = Some(format!("merge mining (+NOCK/+NACR) works on LuckyPool, HimPool and AlphaPool only: mining PRL to {prl} on this pool, the + part is ignored"));
+            w = prl;
+        }
     }
     if worker.is_empty() || w.contains('.') || w.contains('/') { (w.to_string(), note) } else { (format!("{w}.{worker}"), note) }
 }
@@ -403,6 +415,23 @@ mod login_tests {
         assert!(note.is_some());
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", &format!("{p}/own"), "rig1").0, format!("{p}/own"));
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", p, "").0, p);
+    }
+
+    #[test]
+    fn login_wallet_nacr_merge() {
+        let p = "prl1abcdefghijklmnopqrstuvwxyz";
+        let pa = format!("{p}+nacr1pqrstuvwxyz");
+        let pan = format!("{pa}+DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkm");
+        for pool in ["eu.himpool.com:1480", "EU1.AlphaPool.tech:5571", "himpool.com:1481"] {
+            let (w, note) = login_wallet(pool, &pa, "rig1");
+            assert_eq!(w, format!("{pa}.rig1"), "{pool}");
+            assert!(note.unwrap().contains("+nacr1p"), "{pool}");
+            assert_eq!(login_wallet(pool, p, "rig1"), (format!("{p}.rig1"), None), "{pool}");
+        }
+        assert_eq!(login_wallet("ca.himpool.com:1480", &pan, "rig1").0, format!("{pan}.rig1"));
+        assert_eq!(login_wallet("prl-eu.kryptex.network:7048", &pa, "rig1").0, format!("{p}.rig1"));
+        assert!(!is_merge_pool("himpool.com.evil.net:1480"));
+        assert!(!is_merge_pool("nothimpool.com:1480"));
     }
 
     #[test]
