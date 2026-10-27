@@ -195,6 +195,18 @@ fn const_cv(key: &[u8; 32], start: usize, len: usize, buf_chunks: usize) -> [u8;
 /// (1.7.3: the job no longer keeps a 0.7-0.8 GB copy, and a proof no longer clones it: Rig05, 4x CMP 50HX, 3.8 GB RAM).
 pub struct AMatrix {
     pub data: Vec<u8>,
+    _machine: Option<std::fs::File>,
+}
+
+/// MB one proof of this m takes (A and the Merkle tree over it, measured 2.1 x A)
+pub fn proof_mb(m: usize) -> u64 {
+    ((m as u64 * k() as u64) >> 20) * 21 / 10
+}
+
+/// Low on RAM (less than 4 proofs' worth free): one proof at a time on the whole machine, the miner's and its check processes'
+/// (a file lock in the temp dir; a killed holder releases it), so a check costs only its small rest (1.7.3, 4 GB rigs).
+pub fn proofs_serialized(m: usize) -> bool {
+    crate::uv::mem_available_mb().is_some_and(|a| a < 4 * proof_mb(m))
 }
 /// Proofs building their A right now, and the wake-up for the ones waiting.  More than one at a time only while the free RAM
 /// covers another (half of MemAvailable >= one A): a burst of GPUs hitting together (0.6 s per proof on an RTX 3070) does not
@@ -215,7 +227,7 @@ fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
     let (lk, cv) = a_slots();
     let mut busy = lk.lock().unwrap_or_else(|e| e.into_inner());
     loop {
-        let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * ((bytes as u64 >> 20) * 21 / 10));
+        let room = crate::uv::mem_available_mb().is_none_or(|a| a / 2 >= (*busy as u64 + 1) * proof_mb(m));
         if *busy == 0 || (room && *busy < 8) {
             break;
         }
@@ -223,9 +235,16 @@ fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
     }
     *busy += 1;
     drop(busy);
+    let machine = if proofs_serialized(m) {
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(std::env::temp_dir().join("freeforgem-proof.lock")).ok().inspect(|f| {
+            let _ = f.lock();
+        })
+    } else {
+        None
+    };
     let mut data = vec![64u8; bytes];
     data[..row0.len()].copy_from_slice(row0);
-    AMatrix { data }
+    AMatrix { data, _machine: machine }
 }
 
 pub struct Job {
