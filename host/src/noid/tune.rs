@@ -908,7 +908,11 @@ impl Tuner<'_> {
         if last_ok > c.base && edge == 0 {
             // upwards to the first failure, or to the voltage floor: two steps in a row that save < 0.5 W (agent M's rule:
             // below ~1400 MHz an RTX 3070 already sits at its minimum voltage, a higher offset only adds risk)
-            let mut o = last_ok + step;
+            // 30 MHz steps below the edge, then the step (15) between the last good one and the first failure (beta5: Rig01
+            // speed edges +315..+435 took ~20 min per lock in 15 MHz steps)
+            let mut st = if step < 30 { 30 } else { step };
+            let mut coarse_fail = 0;
+            let mut o = last_ok + st;
             let mut flat = 0;
             let mut plateau_at = None;
             let mut hist: Vec<(i32, f64, f64)> = vec![(last_ok, good.0, good.1)];
@@ -916,6 +920,14 @@ impl Tuner<'_> {
                 let r = self.check(c, o, self.step_secs());
                 if r.infra {
                     return self.abort(c, &r);
+                }
+                if !r.ok && st > step && o - st + step < o && last_ok + step < o {
+                    lg(format!("{} {}: FAILED ({}): {step} MHz steps from {} below it", c.label(), signed(o), r.reason, signed(last_ok + step)));
+                    coarse_fail = o;
+                    max = max.min(o - step);
+                    st = step;
+                    o = last_ok + step;
+                    continue;
                 }
                 if !r.ok {
                     lg(format!("{} {}: FAILED ({}): edge found", c.label(), signed(o), r.reason));
@@ -933,15 +945,20 @@ impl Tuner<'_> {
                     plateau_at = Some(hist[hist.len() - 3]);
                     break;
                 }
-                o += step;
+                o += st;
+            }
+            if edge == 0 && coarse_fail != 0 && plateau_at.is_none() && !self.stopped() {
+                // every fine step below the coarse failure passed: that failure is the edge
+                lg(format!("{} edge at {} (the 30 MHz step that failed)", c.label(), signed(coarse_fail)));
+                edge = coarse_fail;
             }
             if let Some((p, m, w)) = plateau_at {
                 lg(format!(
                     "{} power no longer drops above {} (voltage floor: {} and {} saved < 0.5 W each): stopping here, no edge searched beyond",
                     c.label(),
                     signed(p),
-                    signed(p + step),
-                    signed(p + 2 * step)
+                    signed(hist[hist.len() - 2].0),
+                    signed(hist[hist.len() - 1].0)
                 ));
                 last_ok = p;
                 good = (m, w);
@@ -1054,7 +1071,8 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         // --uv-min, else the card type's default start by the core lock (RTX 3070 at 1400: +105, the voltage floor starts at
         // +120..+195), else +120
         let lock_hint = r.core_lock.or_else(|| crate::hiveoc::load().and_then(|p| nv.index(d).and_then(|i| p.core_lock(i as usize))));
-        let start = o.min_offset.get(r.pos).or_else(|| uv::arch_start(&r.name, uv::Coin::Noid, lock_hint).map(|x| x.0)).unwrap_or(START).max(lo);
+        let coin = if mode == super::gpu::MODE_SPEED { uv::Coin::NoidSpeed } else { uv::Coin::Noid };
+        let start = o.min_offset.get(r.pos).or_else(|| uv::arch_start(&r.name, coin, lock_hint).map(|x| x.0)).unwrap_or(START).max(lo);
         list.push(Card {
             r: r.clone(),
             nv: d,

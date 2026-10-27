@@ -68,6 +68,10 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   results still in flight; `clean: false` keeps the older job valid; stale rejects counted (`rej N (stale N)`) and each logged
   with whether it was sent before the pool's pause reached the miner; shares go out within 20 ms.
 
+* **beta5, NOID speed tuning on RTX 3070 starts near its edge** (Rig01 beta4: edges +315..+435 at 1500, ~20 min per lock from
+  +135 in 15 MHz steps): +240 at 1500 down to +210 at 1750 (clamped +195..+270), climbing in 30 MHz steps and 15 MHz only below
+  the first failure. NOID eff unchanged (+105 at 1400).
+
 ### Checks
 
 Release gate `tests/hiveos_scenarios.sh` (one real GPU, fake HiveOS OC profile): lock switching and `--uv-reset` per lock, a
@@ -141,6 +145,10 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
 * **beta4, устаревшие шары NOID**: шара задания, которое пул отменил (pause / clean job), отбрасывается до отправки, в том числе
   результаты в полёте; `clean: false` оставляет старое задание действующим; отказы stale считаются отдельно (`rej N (stale N)`), и
   у каждого в логе видно, отправлена ли шара до того, как пауза пула дошла до майнера; шары уходят за 20 мс.
+
+* **beta5, тюнинг NOID speed на RTX 3070 начинается рядом с краем** (Rig01 beta4: края +315..+435 при 1500, ~20 мин на лок
+  от +135 шагами по 15 МГц): +240 при 1500 до +210 при 1750 (в пределах +195..+270), подъём шагами по 30 МГц, по 15 МГц только
+  под первым провалом. NOID eff без изменений (+105 при 1400).
 
 ### Проверки
 

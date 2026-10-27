@@ -867,7 +867,7 @@ past the edge there); it is never kept unchecked. A tuning whose start offset it
 
 **Where a tuning starts (1.7.2).** On an RTX 3070 / 3070 Ti / 3060 Ti the search starts near the edge instead of +0 / +120, by the
 core lock (`--lock-cclock`, else the HiveOS profile's lock): Pearl +210 at 1805 MHz, +270 at 1410 (210 + 0.15 x (1805 - lock),
-+150..+300; +210 without a known lock); NOID +105 at 1400, +150 at 1560 (the voltage floor; RTX 3080/3090: +180 at 1560); CMFD +150. The start is checked first and stepped down in 30 MHz steps
++150..+300; +210 without a known lock); NOID eff +105 at 1400, +150 at 1560 (the voltage floor; RTX 3080/3090: +180 at 1560), NOID speed +240 at 1500 down to +210 at 1750 (climbing in 30 MHz steps, then 15 MHz below the first failure); CMFD +150. The start is checked first and stepped down in 30 MHz steps
 when it fails; the climb stops at the voltage floor (two steps in a row that save < 0.5 W) or at the first failing step.
 `--uv-min N` overrides the start. Other cards keep the old start (current offset or +120, RTX 40 +200, RTX 50 +300).
 
@@ -1758,7 +1758,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 
 **С чего начинается тюнинг (1.7.2).** На RTX 3070 / 3070 Ti / 3060 Ti поиск начинается рядом с краем, а не с +0 / +120, по локу ядра
 (`--lock-cclock`, иначе лок профиля HiveOS): Pearl +210 при 1805 МГц, +270 при 1410 (210 + 0,15 x (1805 - лок), +150..+300; +210, если
-лок неизвестен); NOID +105 при 1400, +150 при 1560 (порог напряжения; RTX 3080/3090: +180 при 1560); CMFD +150. Старт сначала проверяется, при провале — шагами вниз по 30 МГц; подъём
+лок неизвестен); NOID eff +105 при 1400, +150 при 1560 (порог напряжения; RTX 3080/3090: +180 при 1560), NOID speed +240 при 1500 до +210 при 1750 (подъём шагами по 30 МГц, затем по 15 МГц под первым провалом); CMFD +150. Старт сначала проверяется, при провале — шагами вниз по 30 МГц; подъём
 останавливается на пороге напряжения (два шага подряд экономят < 0,5 Вт) или на первом провале. `--uv-min N` задаёт старт
 вручную. Остальные карты — как раньше (текущий offset или +120, RTX 40 +200, RTX 50 +300).
 
@@ -2534,7 +2534,7 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 60 MHz 步进寻找能通过的更低偏移并保存为配置。
 
 **调优起点（1.7.2）。** RTX 3070 / 3070 Ti / 3060 Ti 按核心锁频从边缘附近开始搜索，而不是 +0 / +120：Pearl 在 1805 MHz 为 +210，1410 为
-+270（210 + 0.15 × (1805 − 锁频)，+150..+300；锁频未知时 +210）；NOID 在 1400 为 +105，1560 为 +150；CMFD +150。起点先检查，失败则以 30 MHz
++270（210 + 0.15 × (1805 − 锁频)，+150..+300；锁频未知时 +210）；NOID eff 在 1400 为 +105，1560 为 +150；NOID speed 在 1500 为 +240，1750 为 +210（先 30 MHz 步进，首次失败后以 15 MHz 细化）；CMFD +150。起点先检查，失败则以 30 MHz
 步进下降；功耗不再下降（连续两步节省 < 0.5 W）或首次失败时停止上升。`--uv-min N` 覆盖起点。
 
 **进度与颜色。** 调优中的卡在统计行数字后显示状态（`GPU3 0.000 [tuning +240 (step 3/10)]`），并立即及约每分钟输出汇总行；每次调优以

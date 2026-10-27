@@ -223,7 +223,8 @@ pub fn card_defaults(name: &str, cc: Option<(i32, i32)>, pci_id: Option<u16>) ->
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Coin {
     Pearl,
-    Noid,
+    Noid,      // NOID eff mode
+    NoidSpeed, // NOID speed mode
     Cmfd,
 }
 
@@ -249,6 +250,10 @@ pub(crate) fn arch_start(name: &str, coin: Coin, lock: Option<u32>) -> Option<(i
         // NOID: the voltage floor moves up with the clock (+120..+195 at 1400)
         Coin::Noid if ga104 => Some((l.map_or(120, |l| round15(105.0 + (l - 1400.0) * 0.25).clamp(90, 210)), "RTX 3070 default (by the core lock)")),
         Coin::Noid if ga102 => Some((l.map_or(180, |l| round15(180.0 + (l - 1560.0) * 0.25).clamp(120, 240)), "RTX 3080/3090 default (by the core lock)")),
+        // NOID speed: far higher edges than eff (Rig01 beta4, 8x RTX 3070: 1500 results +285..+390 / edges +315..+435, 1560
+        // +270..+390, 1650 +195..+360, 1750 +255..+330): +240 at 1500 down to +210 at 1750
+        Coin::NoidSpeed if ga104 => Some((l.map_or(240, |l| round15(240.0 - (l - 1500.0) * 0.12).clamp(195, 270)), "RTX 3070 speed default (by the core lock)")),
+        Coin::NoidSpeed if ga102 => Some((l.map_or(180, |l| round15(180.0 + (l - 1560.0) * 0.25).clamp(120, 240)), "RTX 3080/3090 default (by the core lock)")),
         Coin::Cmfd if ga104 => Some((150, "RTX 3070 default")),
         _ => None,
     }
@@ -3182,6 +3187,14 @@ mod tests {
         assert_eq!(arch_start(n, Coin::Noid, Some(1400)).unwrap().0, 105);
         assert_eq!(arch_start(n, Coin::Noid, Some(1560)).unwrap().0, 150);
         assert_eq!(arch_start("NVIDIA GeForce RTX 3080 Ti", Coin::Noid, Some(1560)).unwrap().0, 180);
+        // NOID speed (Rig01 beta4): +240 at 1500 .. +210 at 1750, clamped
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(1500)).unwrap().0, 240);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(1560)).unwrap().0, 240);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(1650)).unwrap().0, 225);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(1750)).unwrap().0, 210);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(1200)).unwrap().0, 270);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, Some(2000)).unwrap().0, 195);
+        assert_eq!(arch_start(n, Coin::NoidSpeed, None).unwrap().0, 240);
         assert_eq!(arch_start(n, Coin::Cmfd, None).unwrap().0, 150);
         assert_eq!(arch_start("NVIDIA GeForce RTX 3060 Ti", Coin::Pearl, Some(1805)).unwrap().0, 210);
         // other cards: the old rules
