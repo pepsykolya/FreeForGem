@@ -336,9 +336,11 @@ pub fn restart_self(why: &str) -> String {
 /// One-shot flags: for the start the owner made, never for a restart by the miner itself (it keeps what this run found and the
 /// remembered faults; with --uv-reset-all left in a flight sheet every crash restart wiped every profile -> a full retune loop).
 /// The other flags are settings that hold for every start (--minutes restarts its count; --self-test / checks never restart).
+#[cfg_attr(not(unix), allow(dead_code))]
 pub const ONE_SHOT_FLAGS: [&str; 2] = ["--uv-reset", "--uv-reset-all"];
 
 /// The arguments of a self-restart: the miner's own without the one-shot flags.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn restart_args(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
     args.filter(|a| !ONE_SHOT_FLAGS.iter().any(|f| a == f)).collect()
 }
