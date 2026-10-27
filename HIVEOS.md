@@ -111,8 +111,8 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 
 Needs NVIDIA RTX 30/40/50 and **driver 580+** (`nvidia-driver-update 580`). Flight sheet: coin `NOID`, wallet `o1...`, Miner
 *Custom* `freeforgem` (same Installation URL), Hash algorithm `parano1d`, template `%WAL%.%WORKER_NAME%`, Pool URL
-`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv` (eff mode, best MH/W on RTX 30;
-`--noid-mode speed --lock-cclock 1560` for the most MH/s). Without `--auto-uv` a positive HiveOS core offset is set to 0 for NOID
+`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1300 --auto-uv` (eff mode, best MH/W on RTX 30;
+`--noid-mode speed --lock-cclock 1500 --auto-uv` for more MH/s at almost the same MH/W; 8x RTX 3070 table: MANUAL.md, section 15). Without `--auto-uv` a positive HiveOS core offset is set to 0 for NOID
 (a Pearl undervolt gives silently wrong NOID results) and put back when the miner stops. Results: MANUAL.md, sections 15 and 16.
 At the start the innovlab vardiff begins with an easy share target and the pool's replies can lag several seconds; since
 1.7.2 at most 12 shares wait for a reply per connection, the best ones go first and easier surplus ones are skipped
@@ -241,8 +241,8 @@ HiveOS кэширует скачанный архив по имени файла
 
 Нужны NVIDIA RTX 30/40/50 и **драйвер 580+** (`nvidia-driver-update 580`). Полётный лист: монета `NOID`, кошелёк `o1...`, Miner
 *Custom* `freeforgem` (та же ссылка), Hash algorithm `parano1d`, шаблон `%WAL%.%WORKER_NAME%`, Pool URL
-`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv` (режим eff, лучшие MH/Вт на RTX 30;
-`--noid-mode speed --lock-cclock 1560` — максимум MH/s). Без `--auto-uv` положительный offset ядра из OC HiveOS на время NOID
+`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1300 --auto-uv` (режим eff, лучшие MH/Вт на RTX 30;
+`--noid-mode speed --lock-cclock 1500 --auto-uv` — больше MH/s почти при тех же MH/Вт; таблица рига 8x RTX 3070: MANUAL.md, раздел 15). Без `--auto-uv` положительный offset ядра из OC HiveOS на время NOID
 ставится в 0 (андервольт Pearl даёт тихо неверные результаты NOID) и возвращается при остановке. Подробности: MANUAL.md,
 разделы 15 и 16.
 На старте vardiff innovlab начинает с лёгкой цели шары, и ответы пула могут отставать на секунды; с 1.7.2 ответа ждут не

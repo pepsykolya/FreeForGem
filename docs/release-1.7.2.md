@@ -82,6 +82,8 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   at most 12 unanswered shares per connection, the best go first, easier surplus ones are skipped, a block share is always
   sent. Stats line: `rej N (stale N, skipped N)`.
 * **HiveOS dashboard**: the rig efficiency (TH/W for Pearl, MH/W for NOID) is shown next to the miner version.
+* **NOID recommendation on RTX 30** (8x RTX 3070 rig, `--auto-uv`, MANUAL.md section 15): **eff `--lock-cclock 1300`** for the
+  best MH/W (0.474 MH/W), **speed `--lock-cclock 1500`** for ~30 % more MH/s at almost the same MH/W (0.472).
 
 ### Checks
 
@@ -172,6 +174,8 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
   больше 12 шар без ответа на соединение, лучшие уходят первыми, лишние более лёгкие пропускаются, шара блока отправляется
   всегда. Строка статистики: `rej N (stale N, skipped N)`.
 * **Панель HiveOS**: эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера.
+* **Рекомендация NOID на RTX 30** (риг 8x RTX 3070, `--auto-uv`, MANUAL.md раздел 15): **eff `--lock-cclock 1300`** — лучшие
+  MH/Вт (0.474), **speed `--lock-cclock 1500`** — примерно на 30 % больше MH/s почти при тех же MH/Вт (0.472).
 
 ### Проверки
 

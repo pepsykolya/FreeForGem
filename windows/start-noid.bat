@@ -17,8 +17,8 @@ rem Worker (rig) name: letters, numbers, dots, underscores, hyphens
 set "WORKER=%COMPUTERNAME%"
 rem GPUs to use: empty = all NVIDIA GPUs, or a list like 0,1,3 (indexes from nvidia-smi)
 set "DEVICES="
-rem eff = best MH per watt (default; recommended with LOCK_CCLOCK=1400 and AUTO_UV=1 on RTX 30),
-rem speed = best MH/s (recommended core clock 1560-1650 on RTX 30)
+rem eff = best MH per watt (default; recommended with LOCK_CCLOCK=1300 and AUTO_UV=1 on RTX 30),
+rem speed = more MH/s (recommended LOCK_CCLOCK=1500 and AUTO_UV=1 on RTX 30: almost the same MH per watt)
 set "MODE=eff"
 rem Optional undervolt auto-tuner for NOID (needs start-noid.bat run as Administrator). Every step is checked bit-exactly on the
 rem NOID kernel for 40 s (the long stress check), the result is saved per card and mode; the first run takes about 10 minutes.
@@ -29,7 +29,7 @@ rem Tuner limits (empty = default): first step (default: RTX 3070 by the core lo
 set "UV_MIN="
 set "UV_MAX="
 rem Optional GPU clock control (needs Administrator; empty = leave as is). One value for all GPUs, or a comma list in DEVICES order.
-rem NOID recommendation for RTX 30: eff 1400, speed 1560-1650 (MANUAL.md, NOID section)
+rem NOID recommendation for RTX 30: eff 1300, speed 1500 (MANUAL.md, NOID section)
 set "LOCK_CCLOCK="
 set "LOCK_MCLOCK="
 set "MOFFSET="

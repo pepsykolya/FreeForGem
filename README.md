@@ -35,7 +35,7 @@ Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 | Hash algorithm | `pearlhash` | `parano1d` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
-| Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1400 --auto-uv` |
+| Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1300 --auto-uv` |
 
 Use the **HiveOS** file of the release (`freeforgem-1.7.2.tar.gz`) as the Installation URL — not the Linux or Windows archive.
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
@@ -55,7 +55,7 @@ tar xzf freeforgem-1.7.2-linux-x86_64.tar.gz
 cd freeforgem-1.7.2
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
-./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv                                # NOID
+./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv                                # NOID
 ./freeforgem --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1                 # CMFD
 ```
 
@@ -149,7 +149,7 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 `parano1d-stratum-v1` over TLS, every candidate re-checked on the CPU with the official `noid_poseidon2b` crate, 1% dev fee.
 
 ```
-./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1 --lock-cclock 1400 --auto-uv
+./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1 --lock-cclock 1300 --auto-uv
 ```
 
 | RTX 3070, mem 810, PL 135 W | MH/s | W | MH/W |
@@ -157,6 +157,20 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 | `--noid-mode eff` (default) @1400 MHz, +220 | 34.70 | 73.2 | **0.474** |
 | `--noid-mode speed` @1560 MHz, +205 | 43.65 | 105.3 | 0.415 |
 | `--noid-mode speed` @1650 MHz, +220 | **46.16** | 121.1 | 0.381 |
+
+| 8x RTX 3070 rig, mem 810, `--auto-uv` (rig totals): mode / core lock | MH/s | W | MH/W |
+|---|---|---|---|
+| eff 1200 | 236.3 | 498 | 0.474 |
+| eff 1300 | **256.9** | 542 | **0.474** |
+| eff 1400 | 277.6 | 606 | 0.458 |
+| eff 1500 | 295.3 | 682 | 0.433 |
+| speed 1500 | **335.9** | 712 | **0.472** |
+| speed 1560 | 349.1 | 756 | 0.462 |
+| speed 1650 | 369.5 | 881 | 0.419 |
+| speed 1750 | 393.0 | 1014 | 0.388 |
+
+Recommended on RTX 30: **eff 1300** for the best MH/W, **speed 1500** (`--noid-mode speed --lock-cclock 1500`) for more MH/s at
+almost the same MH/W.
 
 `--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
 positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.

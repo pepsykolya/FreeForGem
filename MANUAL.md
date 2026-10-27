@@ -736,21 +736,37 @@ both use the shared-operand S-box chain x·(x·x²)²):
 | 1560 MHz / +205 | 38.40 @ 92.2 (0.417) (offset +175) | 43.65 @ 105.3 (0.415) |
 | 1650 MHz / +220 | — | **46.16 @ 121.1 (0.381)** |
 
-* **eff** (default, best MH per watt): lock the core at **1400 MHz** and use `--auto-uv`.
-* **speed** (best MH/s): core **1560–1650 MHz** (RTX 30): 43.65 MH/s at 1560 MHz, 46.16 MH/s at 1650 MHz.
+* **eff** (default, best MH per watt): lock the core at **1300 MHz** and use `--auto-uv`.
+* **speed** (more MH/s): lock the core at **1500 MHz** and use `--auto-uv`: almost the same MH/W as eff 1300 with ~30 % more
+  MH/s; higher locks (1560–1750) give more MH/s at a lower MH/W.
 * RTX 40/50: the same kernels built for sm_89 / sm_120; tune the clock yourself (start at the card's stock clock with `--auto-uv`).
+
+**8x RTX 3070 rig (HiveOS), memory 810 MHz, `--auto-uv`, totals of the rig:**
+
+| Mode / core lock (MHz) | MH/s | W | MH/W |
+|---|---|---|---|
+| eff 1200 | 236.3 | 498 | 0.474 |
+| eff 1300 | **256.9** | 542 | **0.474** |
+| eff 1400 | 277.6 | 606 | 0.458 |
+| eff 1500 | 295.3 | 682 | 0.433 |
+| speed 1500 | **335.9** | 712 | **0.472** |
+| speed 1560 | 349.1 | 756 | 0.462 |
+| speed 1650 | 369.5 | 881 | 0.419 |
+| speed 1750 | 393.0 | 1014 | 0.388 |
+
+**eff 1300** is recommended for the best MH/W, **speed 1500** for more MH/s at almost the same MH/W.
 
 **Command line**
 
 ```
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1 \
-             --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv
+             --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv
 ./freeforgem --algo noid --self-test          # official test vectors + GPU vs CPU digests, both kernels, every GPU
 ```
 
 **HiveOS flight sheet:** Coin `NOID` (any name), Wallet `o1...`, Pool: Configure in miner; Miner **Custom** → Miner name
 `freeforgem`, Installation URL of the release, Hash algorithm `parano1d`, Wallet and worker template `%WAL%.%WORKER_NAME%`,
-Pool URL `stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv`. The dashboard shows
+Pool URL `stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1300 --auto-uv`. The dashboard shows
 the hashrate in kH/s (MH/s × 1000).
 
 **Windows:** edit `start-noid.bat` (WALLET, POOL, MODE, optional AUTO_UV=1 and LOCK_CCLOCK; run as Administrator for
@@ -1636,21 +1652,37 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
 | 1560 МГц / +205 | 38.40 @ 92.2 (0.417) (offset +175) | 43.65 @ 105.3 (0.415) |
 | 1650 МГц / +220 | — | **46.16 @ 121.1 (0.381)** |
 
-* **eff** (по умолчанию, лучшие MH на ватт): лок ядра **1400 МГц** и `--auto-uv`.
-* **speed** (максимум MH/s): ядро **1560–1650 МГц** (RTX 30): 43.65 MH/s на 1560 МГц, 46.16 MH/s на 1650 МГц.
+* **eff** (по умолчанию, лучшие MH на ватт): лок ядра **1300 МГц** и `--auto-uv`.
+* **speed** (больше MH/s): лок ядра **1500 МГц** и `--auto-uv`: почти те же MH/Вт, что у eff 1300, и примерно на 30 % больше
+  MH/s; локи выше (1560–1750) дают больше MH/s при меньших MH/Вт.
 * RTX 40/50: те же ядра, собранные под sm_89 / sm_120; частоту подбирайте сами (начните со стоковой и `--auto-uv`).
+
+**Риг 8x RTX 3070 (HiveOS), память 810 МГц, `--auto-uv`, суммарно по ригу:**
+
+| Режим / лок ядра (МГц) | MH/s | Вт | MH/Вт |
+|---|---|---|---|
+| eff 1200 | 236.3 | 498 | 0.474 |
+| eff 1300 | **256.9** | 542 | **0.474** |
+| eff 1400 | 277.6 | 606 | 0.458 |
+| eff 1500 | 295.3 | 682 | 0.433 |
+| speed 1500 | **335.9** | 712 | **0.472** |
+| speed 1560 | 349.1 | 756 | 0.462 |
+| speed 1650 | 369.5 | 881 | 0.419 |
+| speed 1750 | 393.0 | 1014 | 0.388 |
+
+Рекомендуется **eff 1300** — лучшие MH/Вт, **speed 1500** — больше MH/s почти при тех же MH/Вт.
 
 **Командная строка**
 
 ```
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1ВАШ_АДРЕС --worker rig1 \
-             --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv
+             --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv
 ./freeforgem --algo noid --self-test          # официальные тест-векторы + дайджесты GPU против CPU, оба ядра, все GPU
 ```
 
 **Полётный лист HiveOS:** Coin `NOID` (любое имя), Wallet `o1...`, Pool: Configure in miner; Miner **Custom** → Miner name
 `freeforgem`, Installation URL релиза, Hash algorithm `parano1d`, Wallet and worker template `%WAL%.%WORKER_NAME%`, Pool URL
-`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv`. Хэшрейт в панели — в kH/s
+`stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1300 --auto-uv`. Хэшрейт в панели — в kH/s
 (MH/s × 1000).
 
 **Windows:** отредактируйте `start-noid.bat` (WALLET, POOL, MODE, при желании AUTO_UV=1 и LOCK_CCLOCK; для AUTO_UV и частот —
@@ -2440,21 +2472,37 @@ RTX 3070，显存 810 MHz，功耗上限 135 W，每个点 60 秒（`eff` = 每�
 | 1560 MHz / +205 | 38.40 @ 92.2（0.417）（偏移 +175） | 43.65 @ 105.3（0.415） |
 | 1650 MHz / +220 | — | **46.16 @ 121.1（0.381）** |
 
-* **eff**（默认，每瓦 MH 最高）：核心锁定 **1400 MHz** 并使用 `--auto-uv`。
-* **speed**（MH/s 最高）：核心 **1560–1650 MHz**（RTX 30）：1560 MHz 时 43.65 MH/s，1650 MHz 时 46.16 MH/s。
+* **eff**（默认，每瓦 MH 最高）：核心锁定 **1300 MHz** 并使用 `--auto-uv`。
+* **speed**（更高 MH/s）：核心锁定 **1500 MHz** 并使用 `--auto-uv`：MH/W 与 eff 1300 几乎相同，MH/s 高约 30 %；
+  更高的锁频（1560–1750）MH/s 更高，但 MH/W 更低。
 * RTX 40/50：同样的内核分别为 sm_89 / sm_120 编译；频率请自行调整（从默认频率加 `--auto-uv` 开始）。
+
+**8x RTX 3070 矿机（HiveOS），显存 810 MHz，`--auto-uv`，整机合计：**
+
+| 模式 / 核心锁频（MHz） | MH/s | W | MH/W |
+|---|---|---|---|
+| eff 1200 | 236.3 | 498 | 0.474 |
+| eff 1300 | **256.9** | 542 | **0.474** |
+| eff 1400 | 277.6 | 606 | 0.458 |
+| eff 1500 | 295.3 | 682 | 0.433 |
+| speed 1500 | **335.9** | 712 | **0.472** |
+| speed 1560 | 349.1 | 756 | 0.462 |
+| speed 1650 | 369.5 | 881 | 0.419 |
+| speed 1750 | 393.0 | 1014 | 0.388 |
+
+推荐 **eff 1300** 以获得最佳 MH/W，**speed 1500** 以在几乎相同的 MH/W 下获得更高 MH/s。
 
 **命令行**
 
 ```
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1您的地址 --worker rig1 \
-             --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv
+             --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv
 ./freeforgem --algo noid --self-test          # 官方测试向量 + GPU 与 CPU 摘要比对，两个内核，所有 GPU
 ```
 
 **HiveOS 飞行表：** Coin `NOID`（任意名称），Wallet `o1...`，Pool：Configure in miner；Miner **Custom** → Miner name
 `freeforgem`，发布版的 Installation URL，Hash algorithm `parano1d`，Wallet and worker template `%WAL%.%WORKER_NAME%`，
-Pool URL `stratum+ssl://eu2.innovlab.cc:19601`，Extra config `--algo noid --lock-cclock 1400 --auto-uv`。面板中的算力单位
+Pool URL `stratum+ssl://eu2.innovlab.cc:19601`，Extra config `--algo noid --lock-cclock 1300 --auto-uv`。面板中的算力单位
 为 kH/s（MH/s × 1000）。
 
 **Windows：** 编辑 `start-noid.bat`（WALLET、POOL、MODE，可选 AUTO_UV=1 和 LOCK_CCLOCK；使用 AUTO_UV/频率设置时以管理员
