@@ -658,6 +658,8 @@ pub struct Manager {
     at_once: u64,
     check_need: u64,
     main_more: u64,
+    /// a check process was killed for lack of RAM (SIGKILL by the OOM killer): no more checks this run
+    no_mem: AtomicBool,
 }
 
 /// RAM the OS can still hand out, MB (Linux: MemAvailable; Windows: available physical memory)
@@ -956,7 +958,10 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         at_once,
         check_need,
         main_more,
+        no_mem: AtomicBool::new(false),
     });
+    // the OOM killer takes a check process before the miner (Rig05 1.7.2: it killed the miner, HiveOS did not restart it)
+    crate::faults::oom_score_adj(None, -500);
     *active().lock().unwrap() = Some(m.clone());
     let guard = Guard;
     // only decisions and NVML sets here: mining starts right after; checks and tunings run then (attach), one GPU at a time
@@ -1287,6 +1292,11 @@ impl Manager {
         self.stop.load(Ordering::Relaxed)
     }
 
+    /// A check flow stops here: the miner stops, or a check process was killed for lack of RAM (1.7.3: no more checks this run)
+    fn aborted(&self) -> bool {
+        self.stopped() || self.no_mem.load(Ordering::Relaxed)
+    }
+
     // ----- per-card flow at start ---------------------------------------------------------------------------------
 
     /// What this card does at start.  Decided before mining starts, with no checks here (only NVML sets): the checks and the
@@ -1475,9 +1485,23 @@ impl Manager {
         }
     }
 
+    /// A check flow cut short because a check process was killed for lack of RAM: the GPU mines at the verified profile of these
+    /// clocks, else at the owner's offset; the offset under check is no crash point (its marker goes).
+    fn after_no_mem(&self, c: &Card) {
+        self.clear_trying(c);
+        let pick = best_fit(&self.profiles(c), c.lock, c.mlock, None).filter(|e| verified(e) && e.disabled_until <= now());
+        let want = pick.as_ref().map_or(c.orig, |e| e.offset);
+        if c.cur.load(Ordering::Relaxed) != want {
+            match self.set_checked(c, want) {
+                Ok(()) => lg(format!("{} mining at {} ({}) after the check could not run", c.label(), signed(want), if pick.is_some() { "the verified profile" } else { "your offset" })),
+                Err(e) => lg(format!("{} cannot set {} ({e:#})", c.label(), signed(want))),
+            }
+        }
+    }
+
     /// Runs a plan: Apply at once (an NVML set); the others in a thread of their own while the miner mines.
     fn launch(self: &Arc<Self>, c: &Arc<Card>, p: Plan) {
-        let p = if self.at_once == 0 { self.without_checks(c, p) } else { p };
+        let p = if self.at_once == 0 || self.no_mem.load(Ordering::Relaxed) { self.without_checks(c, p) } else { p };
         match p {
             Plan::None => {}
             Plan::Apply { e, want } if !verified(&e) => self.launch(c, Plan::Check { e, want }),
@@ -1502,6 +1526,8 @@ impl Manager {
                             lg(format!("{} error: {err:#}; restoring {}", c2.label(), signed(c2.orig)));
                             m.restore_card(&c2);
                         }
+                    } else if m.no_mem.load(Ordering::Relaxed) && !m.stopped() {
+                        m.after_no_mem(&c2);
                     }
                     *c2.next_reval.lock().unwrap() = Instant::now() + reval_interval(m.opts.reval_hours);
                     c2.reval_busy.store(false, Ordering::SeqCst);
@@ -1556,7 +1582,7 @@ impl Manager {
     fn step_check(&self, c: &Card, at: i32, back: i32, sp: &Spec) -> Res {
         let _slot = self.check_slot(c);
         let _hold = self.hold(c);
-        if self.stopped() {
+        if self.aborted() {
             return Res { reason: "interrupted".into(), ..Default::default() };
         }
         if c.cur.load(Ordering::Relaxed) != at {
@@ -1566,7 +1592,7 @@ impl Manager {
             std::thread::sleep(Duration::from_secs(3));
         }
         let r = self.run_check(c, sp);
-        if !r.ok && !self.stopped() && c.cur.load(Ordering::Relaxed) != back {
+        if !r.ok && !self.aborted() && c.cur.load(Ordering::Relaxed) != back {
             // the GPU may need a moment (and must still answer) after a failed check
             std::thread::sleep(Duration::from_secs(if r.driver_fault { 5 } else { 1 }));
             if let Err(e) = self.set_checked(c, back) {
@@ -1599,7 +1625,7 @@ impl Manager {
             // the reference digests depend on the test job and m, not on the offset
             let back = if want - step >= floor { want - step } else { c.orig };
             let r = self.step_check(c, want, back, &self.quick_spec(if m_changed { vec![] } else { e.refs.clone() }));
-            if self.stopped() {
+            if self.aborted() {
                 return Ok(());
             }
             if r.ok {
@@ -1656,7 +1682,7 @@ impl Manager {
         let _status = crate::status::Guard(c.dev);
         crate::status::set(c.dev, format!("check {}", signed(f)), false, Some(Instant::now() + Duration::from_secs(60)));
         let r = self.step_check(c, f, c.orig, &self.quick_spec(vec![]));
-        if self.stopped() {
+        if self.aborted() {
             return Ok(()); // a stop is not a failure of the offset (the shutdown restore puts the owner's back)
         }
         if r.ok {
@@ -1831,7 +1857,7 @@ impl Manager {
         // the transcript digests depend on m too: a reference saved at another m must not seed the check
         let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel_of(c) && e.m == c.m).map(|e| e.refs.clone()).unwrap_or_default();
         let base = self.step_check(c, start, c.orig, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
-        if self.stopped() {
+        if self.aborted() {
             return Ok(());
         }
         if !base.ok {
@@ -1840,12 +1866,12 @@ impl Manager {
             lg(format!("{} the start offset {} FAILS the check at these clocks ({}): looking for a lower one that passes (30 MHz steps)", c.label(), signed(start), base.reason));
             let mut v = start - 30;
             loop {
-                if v < c.lo || self.stopped() {
+                if v < c.lo || self.aborted() {
                     break;
                 }
                 crate::status::set(c.dev, format!("tuning: looking lower, {}", signed(v)), true, Some(Instant::now() + Duration::from_secs(self.opts.confirm_secs as u64 + 40)));
                 let r = self.step_check(c, v, (v - 60).max(c.lo), &Spec { secs: self.opts.confirm_secs, min_reruns: 150, cpu: 4, measure: 20, refs: golden.clone() });
-                if self.stopped() {
+                if self.aborted() {
                     return Ok(());
                 }
                 if r.ok {
@@ -1903,7 +1929,7 @@ impl Manager {
             let i = ((cand - start) / step) as u64;
             crate::status::set(c.dev, format!("tuning {} (step {}/{})", signed(cand), i, nsteps), true, Some(est(nsteps.saturating_sub(i) + 1)));
             let r = self.step_check(c, cand, good, &Spec { secs: self.opts.step_secs, min_reruns: 30, cpu: 2, measure: 12, refs: refs.clone() });
-            if self.stopped() {
+            if self.aborted() {
                 return Ok(());
             }
             if r.ok {
@@ -1952,7 +1978,7 @@ impl Manager {
         while fin > start {
             crate::status::set(c.dev, format!("tuning: confirming {}", signed(fin)), true, Some(Instant::now() + Duration::from_secs(self.opts.confirm_secs as u64 + 40)));
             let r = self.step_check(c, fin, (fin - step).max(start), &Spec { secs: self.opts.confirm_secs, min_reruns: 150, cpu: 4, measure: 20, refs: refs.clone() });
-            if self.stopped() {
+            if self.aborted() {
                 return Ok(());
             }
             if r.ok {
@@ -2033,7 +2059,7 @@ impl Manager {
 
     /// Runs the deterministic GPU check + CPU verification of hits in a child process and samples NVML meanwhile.
     fn run_check(&self, c: &Card, sp: &Spec) -> Res {
-        if self.stopped() {
+        if self.aborted() {
             return Res { reason: "interrupted".into(), ..Default::default() };
         }
         let cur = c.cur.load(Ordering::Relaxed);
@@ -2048,7 +2074,7 @@ impl Manager {
             };
             // an OC apply (HiveOS nvidia-oc at miner start or from the web UI) may have reset the offset during the check:
             // then the check ran at that offset, not at `cur`, and says nothing about `cur`: set it again and repeat
-            if r.driver_fault || self.stopped() {
+            if r.driver_fault || self.aborted() {
                 break;
             }
             match self.nv.get_offset(c.nv, c.mode) {
@@ -2132,6 +2158,7 @@ impl Manager {
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("cannot start the check process")?;
+        crate::faults::oom_score_adj(Some(child.id()), 900);
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         let out = child.stdout.take().unwrap();
         std::thread::spawn(move || {
@@ -2231,6 +2258,14 @@ impl Manager {
             res.ok = false;
             res.driver_fault = k != "interrupted";
             res.reason = k.to_string();
+        } else if result.is_none() && signal == Some(9) && xid.is_none() {
+            // killed by the OOM killer (or someone else's SIGKILL): says nothing about the offset; no more checks this run
+            self.no_mem.store(true, Ordering::SeqCst);
+            res.reason = "the check process was killed (SIGKILL: out of memory?): not a failure of the offset".into();
+            lg(format!(
+                "{} its check process was KILLED (out of memory?): the offset is not counted as failed; no more checks or tunings this run (more RAM / swap, or fewer GPUs checking at once: FFGP_UV_CHECK_MB)",
+                c.label()
+            ));
         }
         if let Some(x) = xid {
             res.ok = false;
@@ -2518,8 +2553,8 @@ impl Manager {
 
     /// Quick check of the current offset with mining on this GPU paused; on failure one step back and again.
     fn recheck(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, what: &str) {
-        if self.at_once == 0 {
-            return; // not enough RAM for a check process this run (logged at the start)
+        if self.at_once == 0 || self.no_mem.load(Ordering::Relaxed) {
+            return; // not enough RAM for a check process this run (logged)
         }
         // RAM for the check first: while other GPUs' checks fill the RAM this GPU keeps mining instead of idling paused
         let _slot = self.check_slot(c);
@@ -2533,7 +2568,7 @@ impl Manager {
             let refs = e.as_ref().map(|e| e.refs.clone()).unwrap_or_default();
             loop {
                 let cur = c.cur.load(Ordering::Relaxed);
-                if cur <= c.orig || !c.owned.load(Ordering::SeqCst) || self.stopped() {
+                if cur <= c.orig || !c.owned.load(Ordering::SeqCst) || self.aborted() {
                     break;
                 }
                 crate::status::set(c.dev, format!("check {}", signed(cur)), false, Some(Instant::now() + Duration::from_secs(60)));

@@ -465,7 +465,10 @@ impl Tuner<'_> {
             .stderr(Stdio::piped())
             .spawn();
         let mut child = match child {
-            Ok(ch) => ch,
+            Ok(ch) => {
+                crate::faults::oom_score_adj(Some(ch.id()), 900); // the OOM killer takes a check before the miner
+                ch
+            }
             Err(e) => {
                 res.reason = format!("cannot start the check process ({e})");
                 res.infra = true;

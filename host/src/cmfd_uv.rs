@@ -464,6 +464,7 @@ impl Worker {
         if let Ok(mut v) = cmfd::CHILDREN.lock() {
             v.push(child.id());
         }
+        crate::faults::oom_score_adj(Some(child.id()), 900); // the OOM killer takes a check worker before the miner
         let (tx, rx) = channel::<String>();
         for r in [Box::new(child.stdout.take().unwrap()) as Box<dyn Read + Send>, Box::new(child.stderr.take().unwrap())] {
             let tx = tx.clone();

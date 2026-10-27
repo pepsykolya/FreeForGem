@@ -345,6 +345,18 @@ pub fn restart_args(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::
     args.filter(|a| !ONE_SHOT_FLAGS.iter().any(|f| a == f)).collect()
 }
 
+/// Linux: the OOM killer's preference for a process (`pid` None = this one): -1000..1000, higher = killed first.  Lowering it
+/// needs root (the miner on HiveOS); a failure changes nothing.  1.7.3: check processes 900, the miner -500.
+pub fn oom_score_adj(pid: Option<u32>, v: i32) {
+    #[cfg(target_os = "linux")]
+    {
+        let p = pid.map_or("/proc/self/oom_score_adj".to_string(), |p| format!("/proc/{p}/oom_score_adj"));
+        let _ = std::fs::write(p, v.to_string());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (pid, v);
+}
+
 /// One log line for a GPU left out of mining.
 pub fn excluded_line(label: &str, r: &Rec, left: u64) -> String {
     format!(

@@ -309,6 +309,9 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                     it.mem_prev = prev;
                     lg(format!("GPU{dev} (bus {bus}): memory clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
                 }
+                Err(e) if format!("{e:#}").contains("Not Supported") => lg(format!(
+                    "GPU{dev} (bus {bus}): memory clock lock not supported by this GPU / driver (e.g. CMP cards): left as it is (the HiveOS memory setting stays); harmless"
+                )),
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot lock memory clock ({e:#})")),
             }
         }
