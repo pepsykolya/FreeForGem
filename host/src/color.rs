@@ -89,6 +89,11 @@ pub fn kind(s: &str) -> Kind {
         return Kind::Plain;
     }
     let has = |ws: &[&str]| ws.iter().any(|w| s.contains(w));
+    // a tuning result is green (red when it failed), whatever words it carries ("one step below the last good one" made the
+    // NOID RESULT yellow on Rig01 beta6)
+    if s.contains("RESULT") && !s.contains("UVRESULT") {
+        return if s.contains("FAILED") { Kind::Bad } else { Kind::Good };
+    }
     if has(&["FAILED", "Xid", "worker stopped", "CRASHED", "crashed", "Error:", "error:", "LEFT OUT", "share REJECTED", "rejected (", "COULD NOT", "panicked", "!! ", "cannot "]) {
         Kind::Bad
     } else if has(&["WARNING", "paused", "one step", "step down", "stepping back", "stepped", "lowered", "stands down", "below your offset", "waits for RAM", "no gain", "restarting itself", "MHz below", "FAILS", "not saved"]) {
@@ -136,6 +141,8 @@ mod tests {
         assert_eq!(kind("[stratum:user] share ACCEPTED (id 113, job 5047b7f7_1500000)"), Kind::Good);
         assert_eq!(kind("pool pause [user] (canonical-tip-unverified): current job dropped, waiting for the next"), Kind::Pool);
         assert_eq!(kind("devfee: next slot in 54.7 min"), Kind::Plain);
+        assert_eq!(kind("auto-uv (noid): GPU0 (bus 0d, RTX 3070) RESULT speed: offset +225 (edge +285, one step below the last good one); MH/W 0.357 -> 0.432 (+21.2%)"), Kind::Good);
+        assert_eq!(kind("auto-uv: GPU0 (bus 0d, RTX 3070) RESULT: FAILED, no offset down to +0 passes the check at these clocks"), Kind::Bad);
     }
 
     #[test]
