@@ -802,8 +802,9 @@ OPTIONS:
                          (HiveOS profile value, then 60 MHz steps), a GPU with nothing left to lower is left out for 1 h
     --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
                          CMP 30HX/40HX 150, all others 495
-    --uv-min N           offset the tuner starts from and never goes below (default: the HiveOS/driver offset, else 120;
-                         RTX 40: at least 200, RTX 50: at least 300)
+    --uv-min N           offset the tuner starts from; a start that fails steps down 30 MHz (default: RTX 3070/3060 Ti by
+                         the core lock, RTX 3080/3090 +180; else the HiveOS/driver offset or 120; RTX 40: at least 200,
+                         RTX 50: at least 300)
                          --uv-max, --uv-min and --uv-offset take one value for all GPUs, or one per GPU in --devices
                          order (without --devices: GPU0, GPU1, ...), e.g. --uv-max 225,495,150; '-' = that GPU's default
     --uv-step N          MHz per tuning step (default 15)
@@ -846,8 +847,9 @@ NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R
     --noid-mode eff|speed  eff = best MH per watt (default; RTX 30: lock the core at 1400 + --auto-uv), speed = best MH/s
                          (RTX 30: core 1560-1650)
     --auto-uv            NOID-specific undervolt: every step checked bit-exactly by a 40 s stress check on the NOID kernel,
-                         result per card and mode in uv.json (section noid); --uv-max/--uv-min/--uv-step/--uv-keep-last/--uv-reset as
-                         for Pearl (default first step +120). Without --auto-uv a positive core offset is set to 0 for NOID
+                         result per card and mode in uv.json (section noid); --uv-max/--uv-min/--uv-step/--uv-keep-last/--uv-reset/--uv-reset-all as
+                         for Pearl (default first step by card and lock: RTX 3070 eff +105 at 1400, speed +240 at 1500; climbs in
+                         30 MHz steps). Without --auto-uv a positive core offset is set to 0 for NOID
                          (Pearl offsets give silently wrong NOID results) and put back on exit; --uv-offset N forces N.
                          An OC apply (HiveOS) that resets the offset while mining: the tuned one comes back after a 30 s
                          stress check (mining on that GPU pauses), the base 0 / --uv-offset value is set again at once.

@@ -11,11 +11,13 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.2-beta3):**
+**Installation URL (1.7.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
 ```
+
+HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
 
 ### Flight sheet
 
@@ -41,7 +43,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 4. **Apply.** *Apply changes*, *Create flight sheet*, then apply it to the rig.
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
-The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares.
+The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig
+efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version.
 
 ### Overclocking (RTX 3070)
 
@@ -62,13 +65,15 @@ GPU, the lowest core voltage (V/F offset) at which the card still computes corre
 own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MHz: roughly 5-10 W less per card).
 
 - It needs root, which HiveOS miners have. Without NVML or permission it logs the reason and mines normally.
-- **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps). Since 1.7.2 the rig mines meanwhile:
+- **The first tuning takes about 15 minutes per GPU** (10-25 depending on the number of steps; RTX 3070 since 1.7.2: about 11 min for an 8-GPU rig, all GPUs at once). Since 1.7.2 the rig mines meanwhile:
   only the GPU being tuned pauses. The result is kept in `/hive-config/freeforgem/uv.json` (survives miner updates and reboots), **one
   profile per core clock lock** (since 1.7.2): switching the lock in the OC profile reuses that lock's verified result, a new lock is
   tuned once; it is tuned again when the driver or the kernel build changes. A GPU that crashes while mining is named in the log and
-  stepped back by the miner itself (`gpu-faults.json`), see [MANUAL.md](MANUAL.md#17-profiles-per-clock-lock-mining-during-tuning-crashes-while-mining-new-in-172).
-- Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset the card has when the
-  miner starts and only goes up; it never touches locked clocks, power limit or memory. When HiveOS re-applies its OC while mining (at miner
+  stepped back by the miner itself (`gpu-faults.json`; Linux / HiveOS: it restarts itself in the same process, at most 12 times an
+  hour), see [MANUAL.md](MANUAL.md#17-profiles-per-clock-lock-mining-during-tuning-crashes-while-mining-new-in-172).
+- Set your Overclock tab (core lock `1560`, memory, power limit) first. The tuner starts from the offset of the OC profile
+  (RTX 3070: from a default by the core lock, see below; a start that fails steps down 30 MHz); an offset another miner left on
+  the card is replaced by the OC profile value at start; it never touches locked clocks, power limit or memory. When HiveOS re-applies its OC while mining (at miner
   start or after an OC change it writes the *Core Clock* value, **0 when the field is empty**), auto-uv puts the verified offset
   back after a quick check (since 1.7.1; before, the undervolt was off until the next restart). A different offset set by hand
   makes it stand down on that GPU.
@@ -77,7 +82,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - It touches only the GPUs the miner mines on (matched by PCI bus id, shown in the log). Every change is logged as
   `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` in the miner log shows all of it.
 - Stopping the miner restores your offset. If the miner was killed, the next start restores it first.
-- On an RTX 3070 the tuning starts near the edge, by the core lock (Pearl +210 at 1805, +270 at 1410; NOID eff +105 at 1400, speed +240 at 1500 .. +210 at 1750; CMFD +150), and
+- On an RTX 3070 the tuning starts near the edge, by the core lock (Pearl +210 at 1805, +270 at 1410; NOID eff +105 at 1400, speed +240 at 1500 .. +210 at 1750; CMFD +150; NOID climbs in 30 MHz steps), and
   stops at the voltage floor; `--uv-min N` overrides it. The miner screen shows the progress per GPU and colours (`--no-color` to turn off).
 - **Reset:** add `--uv-reset` for one start: it forgets the profile of the current lock only (`--uv-reset-all`: every profile;
   or delete `/hive-config/freeforgem/uv.json`). On exit the offset of the OC profile (*Core Clock*) is put back.
@@ -95,7 +100,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
 - **HiveOS reboots the rig at a high load average, even with its watchdog off** (`/hive/bin/wd`, check_la: `sreboot fast` when the
   5-min load average reaches the rig's max_la, 28 on a 4C/8T Xeon rig). Weak CPUs (4 cores) with many GPUs are at risk while
-  several GPUs tune at once. Since 1.7.2-beta4 the miner keeps its runnable threads low (no busy wait for the GPU, one CPU reference
+  several GPUs tune at once. Since 1.7.2 the miner keeps its runnable threads low (no busy wait for the GPU, one CPU reference
   at a time at nice 10) and the tuning summary shows the load average, with a WARNING above 2 x the CPU threads.
 
 ### Developer fee
@@ -110,7 +115,7 @@ Needs NVIDIA RTX 30/40/50 and **driver 580+** (`nvidia-driver-update 580`). Flig
 `--noid-mode speed --lock-cclock 1560` for the most MH/s). Without `--auto-uv` a positive HiveOS core offset is set to 0 for NOID
 (a Pearl undervolt gives silently wrong NOID results) and put back when the miner stops. Results: MANUAL.md, sections 15 and 16.
 At the start the innovlab vardiff begins with an easy share target and the pool's replies can lag several seconds; since
-1.7.2-beta6 at most 12 shares wait for a reply per connection, the best ones go first and easier surplus ones are skipped
+1.7.2 at most 12 shares wait for a reply per connection, the best ones go first and easier surplus ones are skipped
 (stats line: `rej N (stale N, skipped N)`); a block share is always sent.
 
 ### Common Foundry (CMFD), since 1.6.0
@@ -129,7 +134,7 @@ warns about a low memory clock in the log (once per GPU, since 1.6.1) but does n
 CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in the package needs glibc 2.30+).
 `--auto-uv` in *Extra config* tunes a separate CMFD core offset per card on the CMFD load itself (every step checked
 bit-for-bit on the real model; first start ~15–20 min, then applied at once; owner's offset back on `miner stop`). Tune with the
-OC profile you mine with: a changed power limit re-tunes, a changed core clock lock needs `--uv-reset` once. MANUAL.md, section 13.
+OC profile you mine with: a changed power limit re-tunes; a changed core clock lock picks (or tunes once) its own CMFD profile (since 1.7.2). MANUAL.md, section 13.
 
 ## Русский
 
@@ -140,11 +145,13 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.2-beta3):**
+**Ссылка для установки (1.7.2):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz
 ```
+
+HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
 
 ### Полётный лист
 
@@ -170,7 +177,8 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 4. **Применить.** *Apply changes*, *Create flight sheet*, затем применить лист к ригу.
 
 Лог майнера лежит в `/var/log/miner/freeforgem/freeforgem.log`, его видно и в консоли майнера в HiveOS.
-На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары.
+На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность
+рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера.
 
 ### Разгон (RTX 3070)
 
@@ -191,13 +199,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 майнинге и вернёт ваши настройки при остановке. Тот же хешрейт, меньше ватт (RTX 3070 на 1560 МГц: примерно на 5-10 Вт меньше на карту).
 
 - Нужен root, а у майнеров в HiveOS он есть. Без NVML или прав майнер пишет причину в лог и майнит как обычно.
-- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов). С 1.7.2 риг при этом майнит: на паузе
+- **Первый подбор занимает около 15 минут на карту** (10-25 в зависимости от числа шагов; RTX 3070 с 1.7.2: около 11 мин на риг из 8 карт, все карты сразу). С 1.7.2 риг при этом майнит: на паузе
   только подбираемая карта. Результат хранится в `/hive-config/freeforgem/uv.json` (переживает обновления майнера и перезагрузки),
   **отдельный профиль на каждый лок ядра** (с 1.7.2): смена лока в профиле разгона берёт проверенный результат этого лока, новый лок
   подбирается один раз; при смене драйвера или сборки ядра подбор повторяется. Карту, падающую в майнинге, майнер называет в логе и
-  сам понижает (`gpu-faults.json`), см. [MANUAL.md](MANUAL.md).
-- Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с того offset, который
-  стоит на карте в момент запуска майнера, и идёт только вверх; зафиксированные частоты, лимит мощности и память он не трогает.
+  сам понижает (`gpu-faults.json`; в Linux / HiveOS перезапускает себя в том же процессе, не больше 12 раз в час), см.
+  [MANUAL.md, раздел 17](MANUAL.md#17-профили-по-локу-частоты-майнинг-во-время-тюнинга-падения-в-майнинге-новое-в-172).
+- Сначала задайте вкладку Overclock (фиксация ядра `1560`, память, лимит мощности). Подбор стартует с offset профиля разгона
+  (RTX 3070 — со значения по локу ядра, см. ниже; старт, не прошедший проверку, понижается на 30 МГц); offset, оставленный на
+  карте другим майнером, при старте заменяется значением профиля; зафиксированные частоты, лимит мощности и память он не трогает.
   Если HiveOS заново применит разгон во время майнинга (при старте майнера и после смены OC он записывает значение *Core Clock*,
   **0, если поле пустое**), auto-uv после быстрой проверки поставит проверенный offset обратно (с 1.7.1; раньше андервольт
   выключался до перезапуска). Другой offset, выставленный вручную, — и auto-uv отступит на этой карте.
@@ -206,7 +216,7 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 - Затрагиваются только карты, на которых работает майнер (сопоставление по PCI-адресу, он виден в логе). Каждое изменение
   пишется в лог так: `auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved`; `grep auto-uv` по логу майнера покажет всё.
 - При остановке майнера ваш offset возвращается. Если майнер был убит, при следующем запуске он восстанавливается первым делом.
-- На RTX 3070 тюнинг начинается рядом с краем, по локу ядра (Pearl +210 при 1805, +270 при 1410; NOID eff +105 при 1400, speed +240 при 1500 .. +210 при 1750; CMFD +150), и
+- На RTX 3070 тюнинг начинается рядом с краем, по локу ядра (Pearl +210 при 1805, +270 при 1410; NOID eff +105 при 1400, speed +240 при 1500 .. +210 при 1750; CMFD +150; NOID поднимается шагами по 30 МГц), и
   останавливается на пороге напряжения; `--uv-min N` задаёт старт. Экран майнера показывает прогресс по картам и цвета (`--no-color` — без цвета).
 - **Сброс:** добавьте `--uv-reset` на один запуск: он забывает только профиль текущего лока (`--uv-reset-all` — все профили; или
   удалите `/hive-config/freeforgem/uv.json`). При выходе возвращается offset профиля разгона (*Core Clock*).
@@ -224,7 +234,7 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
 - **HiveOS перезагружает риг при высоком load average, даже с выключенным вотчдогом** (`/hive/bin/wd`, check_la: `sreboot fast`,
   когда load average за 5 мин доходит до max_la рига, 28 на риге с Xeon 4C/8T). Слабые CPU (4 ядра) с многими картами
-  рискуют, пока тюнятся несколько карт сразу. С 1.7.2-beta4 майнер держит мало готовых к исполнению потоков (без активного ожидания
+  рискуют, пока тюнятся несколько карт сразу. С 1.7.2 майнер держит мало готовых к исполнению потоков (без активного ожидания
   GPU, одна CPU-сверка за раз с nice 10), а сводка тюнинга показывает load average с WARNING выше 2 x числа потоков CPU.
 
 ### NOID (Parano1d), с 1.7.0
@@ -235,7 +245,7 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 `--noid-mode speed --lock-cclock 1560` — максимум MH/s). Без `--auto-uv` положительный offset ядра из OC HiveOS на время NOID
 ставится в 0 (андервольт Pearl даёт тихо неверные результаты NOID) и возвращается при остановке. Подробности: MANUAL.md,
 разделы 15 и 16.
-На старте vardiff innovlab начинает с лёгкой цели шары, и ответы пула могут отставать на секунды; с 1.7.2-beta6 ответа ждут не
+На старте vardiff innovlab начинает с лёгкой цели шары, и ответы пула могут отставать на секунды; с 1.7.2 ответа ждут не
 больше 12 шар на соединение, лучшие уходят первыми, лишние более лёгкие пропускаются (строка статистики: `rej N (stale N,
 skipped N)`); шара, подходящая под цель блока, отправляется всегда.
 
@@ -256,7 +266,7 @@ CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04
 `--auto-uv` в *Extra config* подбирает отдельное смещение ядра под CMFD на каждой карте прямо на нагрузке CMFD (каждый шаг
 проверяется побитно на реальной модели; первый запуск ~15–20 мин, дальше применяется сразу; ваше смещение возвращается при
 `miner stop`). Подбирайте с тем профилем разгона, с которым майните: смена лимита мощности — подбор заново, смена лока частоты
-ядра — один раз `--uv-reset`. MANUAL.md, раздел 13.
+ядра — свой профиль CMFD для этого лока (подбирается один раз, с 1.7.2). MANUAL.md, раздел 13.
 
 ### Комиссия разработчика
 

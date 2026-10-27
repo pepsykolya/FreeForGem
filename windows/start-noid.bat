@@ -25,7 +25,7 @@ rem NOID kernel for 40 s (the long stress check), the result is saved per card a
 rem Without it the miner sets a positive core offset (e.g. one tuned for Pearl) to 0 for NOID and puts it back on exit.
 rem To enable it, remove "rem" from the next line:
 rem set "AUTO_UV=1"
-rem Tuner limits (empty = default): first step (default +120) and the highest offset tried (default per card, at most 600)
+rem Tuner limits (empty = default): first step (default: RTX 3070 by the core lock, eff +105 at 1400, speed +240 at 1500; RTX 3080/3090 +180; others +120) and the highest offset tried (default per card, at most 600)
 set "UV_MIN="
 set "UV_MAX="
 rem Optional GPU clock control (needs Administrator; empty = leave as is). One value for all GPUs, or a comma list in DEVICES order.
@@ -35,7 +35,7 @@ set "LOCK_MCLOCK="
 set "MOFFSET="
 rem Fixed core offset for NOID instead of tuning, MHz (AT YOUR OWN RISK: NOID fails silently above its edge). Example: 150
 set "UV_OFFSET="
-rem Any other miner options, e.g. --uv-reset to forget the saved undervolt results once:
+rem Any other miner options, e.g. --uv-reset to forget the saved undervolt result of the current core lock once (--uv-reset-all: all):
 set "EXTRA="
 rem ================================================================
 

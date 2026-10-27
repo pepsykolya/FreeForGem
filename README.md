@@ -8,7 +8,7 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.2-beta3**, pre-release)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.2**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
@@ -31,18 +31,18 @@ Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 | Field | Pearl | NOID |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforgem-1.7.2beta3.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz` | same |
 | Hash algorithm | `pearlhash` | `parano1d` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
 | Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1400 --auto-uv` |
 
-Use the **HiveOS** file of the release (`freeforgem-1.7.2beta3.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Use the **HiveOS** file of the release (`freeforgem-1.7.2.tar.gz`) as the Installation URL — not the Linux or Windows archive.
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
 
 ### Windows 10/11 x64
 
-Download `freeforgem-1.7.2-beta3-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+Download `freeforgem-1.7.2-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
 pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
 replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
 Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -51,8 +51,8 @@ Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details
 ### Linux x86_64
 
 ```
-tar xzf freeforgem-1.7.2-beta3-linux-x86_64.tar.gz
-cd freeforgem-1.7.2-beta3
+tar xzf freeforgem-1.7.2-linux-x86_64.tar.gz
+cd freeforgem-1.7.2
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1400 --lock-mclock 810 --auto-uv                                # NOID
@@ -65,8 +65,9 @@ The Linux binary is built on Ubuntu 20.04, so it runs on Ubuntu 20.04+ and HiveO
 
 Optional, off by default. With `--auto-uv` the miner finds, **per card** (and for NOID per mode), the deepest core V/F offset at
 which that GPU still computes correctly, applies it while mining and puts your own settings back on exit (needs
-root/Administrator). Each GPU gets its own result, saved in `uv.json` together with the driver, kernel, clock lock and power
-limit; if any of them changes, the card is tuned again. Typical gain: RTX 3070 on NOID, eff mode @1400 MHz: 87.5 W → 72.8 W at
+root/Administrator). Each GPU gets its own result, saved in `uv.json` together with the driver, kernel and power
+limit, one profile per core clock lock (switching the lock reuses that lock's result, a new lock is tuned once while the other GPUs
+mine); a crashing offset is stepped down by the miner itself. Typical gain: RTX 3070 on NOID, eff mode @1400 MHz: 87.5 W → 72.8 W at
 the same hashrate (**+20 % MH/W**); Pearl @1560 MHz: roughly 5–10 W less per card. Mixed rigs: the limits are chosen per card
 automatically. Details: [MANUAL.md](MANUAL.md), section 12 (Pearl), 13 (CMFD), 15 (NOID).
 
@@ -119,7 +120,8 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 | `--minutes N` | stop after N minutes (default: run until Ctrl-C / SIGTERM) |
 | `--self-test` | verify the kernel and exit |
 | `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
-| `--uv-offset N` / `--uv-reset` | apply a fixed undervolt offset after a check / forget the saved undervolt results |
+| `--uv-offset N` / `--uv-reset` / `--uv-reset-all` | apply a fixed undervolt offset after a check / forget the saved profile of the current lock / forget all saved results |
+| `--no-color` | no colours in the log (also `NO_COLOR=1`) |
 | `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 50HX up to +225, CMP 30HX/40HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
 
 The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per GPU and in total,

@@ -27,8 +27,8 @@ rem Power limit, W (nvidia-smi -pl):
 set "PLIMIT=165"
 rem Undervolt auto-tuner: 1 = on, empty = off
 set "AUTO_UV=1"
-rem Offset range the tuner tries, MHz. Empty = defaults per card (start from the current offset or +120, RTX 40 +200,
-rem RTX 50 +300; up to +495, RTX 20xx/GTX 16xx/CMP 50HX +225, CMP 30HX/40HX +150). RTX 3070 example: 135 and 360.
+rem Offset range the tuner tries, MHz. Empty = defaults per card (start: RTX 3070/3060 Ti by the core lock, RTX 3080/3090
+rem +180, else the current offset or +120, RTX 40 +200, RTX 50 +300; up to +495, RTX 20xx/GTX 16xx/CMP 50HX +225, CMP 30HX/40HX +150). RTX 3070 example: 135 and 360.
 rem One value for all GPUs, or a comma list in GPU order (or --devices order), e.g. UV_MAX=225,495,150 (- = default).
 set "UV_MIN=135"
 set "UV_MAX=360"
