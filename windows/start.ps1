@@ -166,6 +166,9 @@ try {
         $code = $LASTEXITCODE
         $writer.WriteLine(("--- {0} miner exited (code {1})" -f (Get-Date -Format 's'), $code))
         Write-Host ("Miner exited (code {0}), restarting in 15 s. Ctrl+C to stop." -f $code) -ForegroundColor Red
+        # one-shot options are for the first start only: a restart after a crash keeps the saved undervolt profiles
+        # (with --uv-reset-all every restart wiped them all: a full retune after every crash)
+        $cmdLine = $cmdLine -replace '\s--uv-reset(-all)?(?=\s|$)', ''
         Start-Sleep -Seconds 15
     }
 } finally {

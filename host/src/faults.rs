@@ -320,8 +320,7 @@ pub fn restart_self(why: &str) -> String {
         println!("{} restarting itself ({why}; restart {} within an hour)", crate::PRODUCT, hist.len());
         std::thread::sleep(std::time::Duration::from_millis(1500));
         let list = hist.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
-        // --uv-reset is for the start the owner made: the restart keeps what this run found (and the remembered faults)
-        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).filter(|a| a != "--uv-reset").collect();
+        let args = restart_args(std::env::args_os().skip(1));
         // the same argv[0] as before (HiveOS / scripts that look for "./freeforgem" still find the process)
         let arg0 = std::env::args_os().next().unwrap_or_else(|| exe.clone().into_os_string());
         let err = std::process::Command::new(&exe).arg0(arg0).args(args).env("FFG_SELF_RESTARTS", list).exec();
@@ -332,6 +331,16 @@ pub fn restart_self(why: &str) -> String {
         let _ = why;
         "no in-process restart on this OS".into()
     }
+}
+
+/// One-shot flags: for the start the owner made, never for a restart by the miner itself (it keeps what this run found and the
+/// remembered faults; with --uv-reset-all left in a flight sheet every crash restart wiped every profile -> a full retune loop).
+/// The other flags are settings that hold for every start (--minutes restarts its count; --self-test / checks never restart).
+pub const ONE_SHOT_FLAGS: [&str; 2] = ["--uv-reset", "--uv-reset-all"];
+
+/// The arguments of a self-restart: the miner's own without the one-shot flags.
+pub fn restart_args(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    args.filter(|a| !ONE_SHOT_FLAGS.iter().any(|f| a == f)).collect()
 }
 
 /// One log line for a GPU left out of mining.
@@ -348,6 +357,15 @@ pub fn excluded_line(label: &str, r: &Rec, left: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restart_drops_one_shot_flags() {
+        let a = |v: &[&str]| v.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        let got = restart_args(a(&["--algo", "noid", "--uv-reset-all", "--auto-uv", "--uv-reset", "--lock-cclock", "1500"]).into_iter());
+        assert_eq!(got, a(&["--algo", "noid", "--auto-uv", "--lock-cclock", "1500"]));
+        // a value that only looks like a flag stays (the worker name of a flight sheet)
+        assert_eq!(restart_args(a(&["--worker", "--uv-reset-rig"]).into_iter()), a(&["--worker", "--uv-reset-rig"]));
+    }
 
     #[test]
     fn lower_steps() {
