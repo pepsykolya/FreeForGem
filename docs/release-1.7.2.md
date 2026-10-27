@@ -7,6 +7,12 @@
 Files: `freeforgem-1.7.2.tar.gz` (HiveOS Installation URL
 `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz`),
 `freeforgem-1.7.2-linux-x86_64.tar.gz`, `freeforgem-1.7.2-windows-x64.zip`. Check the SHA-256 (MANUAL.md, section 9).
+
+| File | SHA-256 |
+|---|---|
+| `freeforgem-1.7.2.tar.gz` | `0295d630b91a871bd40b95bc8a92e16afa66ca01f1cc30abfa9983e0546a483c` |
+| `freeforgem-1.7.2-linux-x86_64.tar.gz` | `6b00ab31140b8f1190b8e4701e65e24997a69c8f7a5d37a12a4caff6ecd81bdb` |
+| `freeforgem-1.7.2-windows-x64.zip` | `b6ec88b86bdea4cd51c6026294afa963bca91486063cc7117b1e1c5dc471377d` |
 The beta history is in [release-1.7.2-beta.md](release-1.7.2-beta.md).
 
 **Fixed in 1.7.2** (from a real incident on an 8x RTX 3070 HiveOS rig, 26.10.2026): undervolt offsets verified at one core clock
@@ -101,6 +107,12 @@ options dropped on a restart.
 Файлы: `freeforgem-1.7.2.tar.gz` (Installation URL для HiveOS
 `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2/freeforgem-1.7.2.tar.gz`),
 `freeforgem-1.7.2-linux-x86_64.tar.gz`, `freeforgem-1.7.2-windows-x64.zip`. Сверьте SHA-256 (MANUAL.md, раздел 9).
+
+| Файл | SHA-256 |
+|---|---|
+| `freeforgem-1.7.2.tar.gz` | `0295d630b91a871bd40b95bc8a92e16afa66ca01f1cc30abfa9983e0546a483c` |
+| `freeforgem-1.7.2-linux-x86_64.tar.gz` | `6b00ab31140b8f1190b8e4701e65e24997a69c8f7a5d37a12a4caff6ecd81bdb` |
+| `freeforgem-1.7.2-windows-x64.zip` | `b6ec88b86bdea4cd51c6026294afa963bca91486063cc7117b1e1c5dc471377d` |
 История бет — в [release-1.7.2-beta.md](release-1.7.2-beta.md).
 
 **Исправлено в 1.7.2** (по реальному инциденту на риге 8x RTX 3070 под HiveOS, 26.10.2026): offset'ы андервольта, проверенные при
