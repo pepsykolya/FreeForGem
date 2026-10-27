@@ -232,7 +232,7 @@ fn round15(v: f64) -> i32 {
     ((v / 15.0).round() * 15.0) as i32
 }
 
-/// Default first offset of a tuning by card type, coin and core lock (1.7.2 beta3; --uv-min overrides it).  A start near the
+/// Default first offset of a tuning by card type, coin and core lock (1.7.2; --uv-min overrides it).  A start near the
 /// edge / the voltage floor saves the long ladder of +15 steps from +0 / +120; it is verified first and stepped down in 30 MHz
 /// steps when it fails.  Data: Rig01 8x RTX 3070 (Pearl at a 1805 lock: results +255..+330, at 1410: +300..+480; NOID at
 /// 1400: voltage floor at +120..+195), Shahtyor RTX 3070 (Pearl 1400: +210 passes, CMFD +195), RTX 3080 Ti (NOID floor

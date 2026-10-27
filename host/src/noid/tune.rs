@@ -902,7 +902,7 @@ impl Tuner<'_> {
             }
             lg(format!("{} {}: FAILED ({})", c.label(), signed(o), r.reason));
             edge = o;
-            o -= step.max(30); // a failing start: 30 MHz lower (1.7.2 beta3)
+            o -= step.max(30); // a failing start: 30 MHz lower (1.7.2)
         }
         let mut plateau = false;
         if last_ok > c.base && edge == 0 {

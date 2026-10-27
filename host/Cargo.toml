@@ -1,7 +1,7 @@
 # FreeForGemPear — see LICENSE
 [package]
 name = "freeforgem"
-version = "1.7.2-beta6"
+version = "1.7.2"
 edition = "2024"
 license-file = "../LICENSE"
 description = "FreeForGem: Pearl (PRL), Common Foundry (CMFD) and NOID (Parano1d) GPU miner"

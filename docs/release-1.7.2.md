@@ -80,7 +80,10 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
 * **NOID stale shares**: a share of a job the pool has voided (pause / clean job) is dropped before it is sent; `clean: false`
   keeps the older job valid; shares go out within 20 ms. At the start the innovlab vardiff target is easy and the replies lag:
   at most 12 unanswered shares per connection, the best go first, easier surplus ones are skipped, a block share is always
-  sent. Stats line: `rej N (stale N, skipped N)`.
+  sent. Stats line: `rej N (stale N, skipped N)`. Test against a mock pool that reproduces the innovlab start (easy target,
+  slow replies, a new job every 15 s; 1 GPU, 5 min): beta5 2918 sent, 148 accepted, 1847 stale, pool lag up to 93 s; 1.7.2
+  2009 sent, 1767 accepted, 229 stale, 628 skipped, lag at most 1.8 s. innovlab acknowledges `mining.suggest_difficulty` but
+  keeps its start target, so none is requested.
 * **HiveOS dashboard**: the rig efficiency (TH/W for Pearl, MH/W for NOID) is shown next to the miner version.
 * **NOID recommendation on RTX 30** (8x RTX 3070 rig, `--auto-uv`, MANUAL.md section 15): **eff `--lock-cclock 1300`** for the
   best MH/W (0.474 MH/W), **speed `--lock-cclock 1500`** for ~30 % more MH/s at almost the same MH/W (0.472).
@@ -172,7 +175,10 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
 * **Устаревшие шары NOID**: шара задания, которое пул отменил (pause / clean job), отбрасывается до отправки; `clean: false`
   оставляет старое задание действующим; шары уходят за 20 мс. На старте цель vardiff innovlab лёгкая, и ответы отстают: не
   больше 12 шар без ответа на соединение, лучшие уходят первыми, лишние более лёгкие пропускаются, шара блока отправляется
-  всегда. Строка статистики: `rej N (stale N, skipped N)`.
+  всегда. Строка статистики: `rej N (stale N, skipped N)`. Тест на мок-пуле, повторяющем старт innovlab (лёгкая цель,
+  медленные ответы, новое задание каждые 15 с; 1 карта, 5 мин): beta5 — отправлено 2918, принято 148, stale 1847, отставание
+  пула до 93 с; 1.7.2 — отправлено 2009, принято 1767, stale 229, skipped 628, отставание не больше 1,8 с. innovlab принимает
+  `mining.suggest_difficulty`, но стартовую цель не меняет, поэтому она не запрашивается.
 * **Панель HiveOS**: эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера.
 * **Рекомендация NOID на RTX 30** (риг 8x RTX 3070, `--auto-uv`, MANUAL.md раздел 15): **eff `--lock-cclock 1300`** — лучшие
   MH/Вт (0.474), **speed `--lock-cclock 1500`** — примерно на 30 % больше MH/s почти при тех же MH/Вт (0.472).
