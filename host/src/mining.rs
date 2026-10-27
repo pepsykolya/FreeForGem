@@ -67,6 +67,20 @@ pub fn warn_m_align(dev: i32, m: usize, align: usize) {
 }
 
 #[cfg(test)]
+mod const_cv_tests {
+    use super::*;
+    #[test]
+    fn piecewise_equals_whole() {
+        // the piecewise CV (small buffer) equals the CV of the whole constant slice, for power-of-two and other lengths
+        let key = [7u8; 32];
+        for (start, len) in [(8usize, 8usize), (16, 16), (64, 40), (128, 128), (1024, 1000), (2048, 1536)] {
+            let data = vec![64u8; len * CHUNK];
+            assert_eq!(const_cv(&key, start, len, 4), subtree_cv(&key, &data, start), "start {start} len {len}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod m_tests {
     #[test]
     fn device_m_is_256_aligned_and_wave_even() {
@@ -157,6 +171,40 @@ fn subtree_cv(key: &[u8; 32], data: &[u8], start_chunk: usize) -> [u8; 32] {
     h.finalize_non_root()
 }
 
+/// A buffer of 64-bytes (the value of every A element outside row 0), reused to hash constant subtrees of A without the whole
+/// matrix in memory.
+const CONST_BUF: usize = 16 << 20;
+fn const_buf() -> &'static [u8] {
+    static B: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    B.get_or_init(|| vec![64u8; CONST_BUF])
+}
+
+/// Keyed BLAKE3 chaining value of the subtree of `len` chunks at chunk `start` whose bytes are all 64 (1.7.3: computed piecewise
+/// from a 16 MB buffer, the same tree BLAKE3 builds: left part = the largest power of two below `len`).
+fn const_cv(key: &[u8; 32], start: usize, len: usize, buf_chunks: usize) -> [u8; 32] {
+    if len <= buf_chunks {
+        return subtree_cv(key, &const_buf()[..len * CHUNK], start);
+    }
+    let left = 1usize << (usize::BITS - 1 - (len - 1).leading_zeros());
+    let l = const_cv(key, start, left, buf_chunks);
+    let r = const_cv(key, start + left, len - left, buf_chunks);
+    merge_subtrees_non_root(&l, &r, Mode::KeyedHash(key))
+}
+
+/// The whole A of a job (row 0 = `row0`, every other byte 64), built only while a proof needs it: one at a time in the process
+/// (1.7.3: the job no longer keeps a 0.7-0.8 GB copy, and a proof no longer clones it: Rig05, 4x CMP 50HX, 3.8 GB RAM).
+pub struct AMatrix {
+    _g: std::sync::MutexGuard<'static, ()>,
+    pub data: Vec<u8>,
+}
+fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let g = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut data = vec![64u8; m * k()];
+    data[..row0.len()].copy_from_slice(row0);
+    AMatrix { _g: g, data }
+}
+
 pub struct Job {
     pub header: IncompleteBlockHeader,
     #[allow(dead_code)]
@@ -165,7 +213,6 @@ pub struct Job {
     pub deriv: SeedDerivation,
     pub job_key: [u8; 32],
     pub b_noise_seed: [u8; 32],
-    a_base: Vec<u8>, // A with row 0 == 64 as well (row 0 is replaced per attempt)
     b_col: Vec<u8>,  // B^T (column major), all 64
     /// CVs of the subtrees hanging off the left path of A's tree, bottom (row 0 = K/CHUNK chunks) to top.
     sibs: Vec<[u8; 32]>,
@@ -186,15 +233,16 @@ impl Job {
         let job_key = blake3_digest(&data, None);
 
         let kk = k();
-        let a_base = vec![64u8; m * kk];
+        // A (m x k) is all 64 except row 0 (replaced per attempt): never kept in memory (1.7.3), see const_cv / a_matrix
+        let a_len = m * kk;
         let b_col = vec![64u8; N * kk];
-        ensure!(a_base.len() % CHUNK == 0 && b_col.len() % CHUNK == 0 && kk % CHUNK == 0 && (kk / CHUNK).is_power_of_two());
+        ensure!(a_len % CHUNK == 0 && b_col.len() % CHUNK == 0 && kk % CHUNK == 0 && (kk / CHUNK).is_power_of_two());
         let hash_b = blake3_digest(&b_col, Some(job_key));
         let (_, bound_b) = deriv.bind_roots(&[0; 32], &hash_b, m as u32, N as u32);
         let b_noise_seed = blake3_digest(&[&job_key[..], &bound_b[..]].concat(), None);
 
         // Subtrees right of the left path (everything not containing the chunks of row 0).
-        let mut n = a_base.len() / CHUNK;
+        let mut n = a_len / CHUNK;
         let mut parts = vec![]; // (start chunk, chunk count), top to bottom
         while n > kk / CHUNK {
             let left = 1usize << (usize::BITS - 1 - (n - 1).leading_zeros()); // largest power of two < n
@@ -204,14 +252,14 @@ impl Job {
         let sibs = parts
             .iter()
             .rev()
-            .map(|&(s, len)| subtree_cv(&job_key, &a_base[s * CHUNK..(s + len) * CHUNK], s))
+            .map(|&(s, len)| const_cv(&job_key, s, len, CONST_BUF / CHUNK))
             .collect();
 
         let all_cols: Vec<usize> = (0..N).collect();
         let br_t: Vec<i8> = generate_uniform_random_matrix(&LABEL_B, &b_noise_seed, &all_cols, RANK).concat();
         let (q1, q2) = split_pairs(&generate_permutation_matrix(&LABEL_B, &b_noise_seed, kk, RANK));
 
-        Ok(Job { header, cert_version, m, deriv, job_key, b_noise_seed, a_base, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
+        Ok(Job { header, cert_version, m, deriv, job_key, b_noise_seed, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
     }
 
     /// Nonce row (A row 0): K int8 values in [-64, 63] derived from (job_key, counter).
@@ -245,9 +293,8 @@ impl Job {
 
     /// Reference: hash of the whole A with the given row 0.
     pub fn hash_a_full(&self, row0: &[u8]) -> [u8; 32] {
-        let mut a = self.a_base.clone();
-        a[..k()].copy_from_slice(row0);
-        blake3_digest(&a, Some(self.job_key))
+        let a = a_matrix(self.m, row0);
+        blake3_digest(&a.data, Some(self.job_key))
     }
 
     pub fn a_noise_seed(&self, row0: &[u8]) -> [u8; 32] {
@@ -260,14 +307,13 @@ impl Job {
         let cfg = mining_config();
         let a_rows: Vec<usize> = cfg.rows_pattern.to_list().iter().map(|&d| t_rows + d as usize).collect();
         let b_cols: Vec<usize> = cfg.cols_pattern.to_list().iter().map(|&d| t_cols + d as usize).collect();
-        let mut a = self.a_base.clone();
-        a[..k()].copy_from_slice(row0);
+        let a = a_matrix(self.m, row0);
         PlainProof {
             m: self.m,
             n: N,
             k: k(),
             noise_rank: RANK,
-            a: matrix_proof(&a, &self.job_key, &a_rows, self.m),
+            a: matrix_proof(&a.data, &self.job_key, &a_rows, self.m),
             bt: matrix_proof(&self.b_col, &self.job_key, &b_cols, N),
             moe: None,
         }
