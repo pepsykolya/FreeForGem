@@ -90,6 +90,27 @@ pub struct Submit {
     pub id: u64,
     pub job_id: String,
     pub line: String,
+    pub digest: [u8; 32], // lower = better (256-bit little-endian)
+    pub block: bool,      // meets the block target: always sent at once
+}
+
+/// Unanswered shares per connection.  The pool's vardiff starts easy (Rig01 beta5, 8x RTX 3070: ~1150 shares in 100 s while
+/// the share target rose x4 per step); its replies then lagged 3-12 s and 624 shares came back "stale share (job not found)".
+/// Above this many unanswered shares the easier ones wait (the best few) or are skipped: at the pool's share target every
+/// share counts the same, so a surplus while the pool lags is worth little.
+pub const MAX_INFLIGHT: usize = 12;
+/// Shares held back while MAX_INFLIGHT are unanswered (the best ones, by digest)
+const MAX_HELD: usize = 12;
+/// An unanswered share older than this no longer counts against MAX_INFLIGHT (a reply the pool never sent)
+const REPLY_GIVEUP: Duration = Duration::from_secs(20);
+
+fn better(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    for i in (0..32).rev() {
+        if a[i] != b[i] {
+            return a[i] < b[i];
+        }
+    }
+    false
 }
 
 pub struct Login {
@@ -316,6 +337,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     // the miner switching its GPUs (results in flight included).  voided: job id -> when we learned it was void (for the log
     // of a stale reject: sent before or after that)
     let mut valid: Vec<String> = Vec::new();
+    let mut held: Vec<Submit> = Vec::new();
     let mut voided: std::collections::HashMap<String, Instant> = Default::default();
     let mut next_id = 100u64;
     let mut namespace: Option<Vec<u8>> = None;
@@ -330,7 +352,19 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
         if last_rx.elapsed() > SILENCE_LIMIT {
             return Err(std::io::Error::new(ErrorKind::TimedOut, format!("no data from the pool for {}s", SILENCE_LIMIT.as_secs())));
         }
+        // replies the pool never sent: they stop counting as unanswered after REPLY_GIVEUP (kept for the log of a late reply)
+        if pending.len() > 64 {
+            pending.retain(|_, (_, t)| t.elapsed() < Duration::from_secs(120));
+        }
+        let unanswered = pending.values().filter(|(_, t)| t.elapsed() < REPLY_GIVEUP).count();
+        let mut free = MAX_INFLIGHT.saturating_sub(unanswered);
+        let mut incoming: Vec<Submit> = held.drain(..).collect();
         while let Ok(s) = rx.try_recv() {
+            incoming.push(s);
+        }
+        // the best first: when only some can go, the easier ones wait or are skipped
+        incoming.sort_by(|a, b| if better(&a.digest, &b.digest) { std::cmp::Ordering::Less } else if better(&b.digest, &a.digest) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal });
+        for s in incoming {
             if !valid.contains(&s.job_id) {
                 stats.submitted.fetch_sub(1, Ordering::Relaxed);
                 stats.stale_drop.fetch_add(1, Ordering::Relaxed);
@@ -338,6 +372,19 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                 log(l, &format!("share for job {} dropped, not sent: the pool voided that job{ago} (pause / new clean job)", s.job_id));
                 continue;
             }
+            if free == 0 && !s.block {
+                if held.len() < MAX_HELD {
+                    held.push(s);
+                } else {
+                    stats.submitted.fetch_sub(1, Ordering::Relaxed);
+                    let n = stats.skipped.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n == 1 || n % 100 == 0 {
+                        log(l, &format!("pool replies lag ({MAX_INFLIGHT} shares unanswered): easier surplus shares skipped, the best ones go first ({n} skipped so far)"));
+                    }
+                }
+                continue;
+            }
+            free = free.saturating_sub(1);
             pending.insert(s.id, (s.job_id, Instant::now()));
             c.send(format!("{}\n", s.line).as_bytes())?;
         }

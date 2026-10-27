@@ -109,6 +109,9 @@ Needs NVIDIA RTX 30/40/50 and **driver 580+** (`nvidia-driver-update 580`). Flig
 `stratum+ssl://eu2.innovlab.cc:19601`, Extra config `--algo noid --lock-cclock 1400 --auto-uv` (eff mode, best MH/W on RTX 30;
 `--noid-mode speed --lock-cclock 1560` for the most MH/s). Without `--auto-uv` a positive HiveOS core offset is set to 0 for NOID
 (a Pearl undervolt gives silently wrong NOID results) and put back when the miner stops. Results: MANUAL.md, sections 15 and 16.
+At the start the innovlab vardiff begins with an easy share target and the pool's replies can lag several seconds; since
+1.7.2-beta6 at most 12 shares wait for a reply per connection, the best ones go first and easier surplus ones are skipped
+(stats line: `rej N (stale N, skipped N)`); a block share is always sent.
 
 ### Common Foundry (CMFD), since 1.6.0
 
@@ -232,6 +235,9 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.2-beta3/freeforg
 `--noid-mode speed --lock-cclock 1560` — максимум MH/s). Без `--auto-uv` положительный offset ядра из OC HiveOS на время NOID
 ставится в 0 (андервольт Pearl даёт тихо неверные результаты NOID) и возвращается при остановке. Подробности: MANUAL.md,
 разделы 15 и 16.
+На старте vardiff innovlab начинает с лёгкой цели шары, и ответы пула могут отставать на секунды; с 1.7.2-beta6 ответа ждут не
+больше 12 шар на соединение, лучшие уходят первыми, лишние более лёгкие пропускаются (строка статистики: `rej N (stale N,
+skipped N)`); шара, подходящая под цель блока, отправляется всегда.
 
 ### Common Foundry (CMFD), с 1.6.0
 

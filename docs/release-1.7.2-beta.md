@@ -72,6 +72,11 @@ and start once with `--uv-reset`) **is fixed: no workaround is needed any more.*
   +135 in 15 MHz steps): +240 at 1500 down to +210 at 1750 (clamped +195..+270), climbing in 30 MHz steps and 15 MHz only below
   the first failure. NOID eff unchanged (+105 at 1400).
 
+* **beta6, NOID start-up stale flood** (Rig01 beta5, innovlab: ~1150 shares in 100 s while the vardiff target was easy, replies
+  3-12 s late, 624 "stale share (job not found)"): at most 12 unanswered shares per connection; the best wait first, easier
+  surplus ones are skipped (`skipped N` in the stats line), a block share is always sent. innovlab accepts
+  `mining.suggest_difficulty` but ignores it (the first target stays the same), so no start difficulty is requested.
+
 ### Checks
 
 Release gate `tests/hiveos_scenarios.sh` (one real GPU, fake HiveOS OC profile): lock switching and `--uv-reset` per lock, a
@@ -149,6 +154,11 @@ HiveOS и один раз запустить с `--uv-reset`) **исправле
 * **beta5, тюнинг NOID speed на RTX 3070 начинается рядом с краем** (Rig01 beta4: края +315..+435 при 1500, ~20 мин на лок
   от +135 шагами по 15 МГц): +240 при 1500 до +210 при 1750 (в пределах +195..+270), подъём шагами по 30 МГц, по 15 МГц только
   под первым провалом. NOID eff без изменений (+105 при 1400).
+
+* **beta6, поток stale-шар NOID на старте** (Rig01 beta5, innovlab: ~1150 шар за 100 с при лёгкой цели vardiff, ответы с
+  опозданием 3-12 с, 624 "stale share (job not found)"): не больше 12 шар без ответа на соединение; лучшие ждут первыми, лишние
+  более лёгкие пропускаются (`skipped N` в строке статистики), шара блока отправляется всегда. innovlab принимает
+  `mining.suggest_difficulty`, но игнорирует (первая цель та же), поэтому стартовая сложность не запрашивается.
 
 ### Проверки
 

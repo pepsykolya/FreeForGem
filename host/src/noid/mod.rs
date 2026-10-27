@@ -569,7 +569,8 @@ fn check_hit(sh: &Shared, gs: &GpuStat, fl: &Flight, idx: u32) {
     let nonce: [u8; 16] = f[o..o + 16].try_into().unwrap();
     let line = pool::submit_line(id, j, &nonce);
     sh.stats[fl.a.src.idx()].submitted.fetch_add(1, Ordering::Relaxed);
-    let _ = sh.subs[fl.a.src.idx()].lock().unwrap().send(Submit { id, job_id: j.job_id.clone(), line });
+    let block = j.block_target.as_ref().is_some_and(|b| cpu::below(&d, b));
+    let _ = sh.subs[fl.a.src.idx()].lock().unwrap().send(Submit { id, job_id: j.job_id.clone(), line, digest: d, block });
 }
 
 #[derive(Default)]
@@ -901,7 +902,7 @@ pub fn mine(o: Opts) -> Result<()> {
             let bad: u64 = gstats.iter().map(|g| g.bad.load(Ordering::Relaxed)).sum();
             let (u, f) = (&stats[0], &stats[1]);
             println!(
-                "[{:>4}s] {} | total {:.3} MH/s{} | hits {} (bad {}, stale {}) | user sub {} acc {} rej {} (stale {}) | fee sub {} acc {} rej {}{}{}{}",
+                "[{:>4}s] {} | total {:.3} MH/s{} | hits {} (bad {}, stale {}) | user sub {} acc {} rej {} (stale {}, skipped {}) | fee sub {} acc {} rej {}{}{}{}",
                 start.elapsed().as_secs(),
                 parts.join("  "),
                 tot,
@@ -913,6 +914,7 @@ pub fn mine(o: Opts) -> Result<()> {
                 u.accepted.load(Ordering::Relaxed),
                 u.rejected.load(Ordering::Relaxed),
                 u.stale_rej.load(Ordering::Relaxed),
+                u.skipped.load(Ordering::Relaxed),
                 f.submitted.load(Ordering::Relaxed),
                 f.accepted.load(Ordering::Relaxed),
                 f.rejected.load(Ordering::Relaxed),

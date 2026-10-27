@@ -47,6 +47,8 @@ pub struct Stats {
     pub stale_rej: AtomicU64,
     /// NOID: shares for a job the pool had already voided (pause / clean job), dropped before sending (not in `submitted`)
     pub stale_drop: AtomicU64,
+    /// NOID: easier surplus shares not sent while the pool's replies lag (bounded backlog), not in `submitted`
+    pub skipped: AtomicU64,
 }
 
 /// Which login a job / share belongs to.
