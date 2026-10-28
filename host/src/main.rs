@@ -845,7 +845,7 @@ NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R
     --pool URL           stratum+ssl://HOST:PORT (TLS, default for a bare HOST:PORT) or stratum+tcp://HOST:PORT;
                          add ?insecure for a pool with a self-signed certificate. E.g. stratum+ssl://eu2.innovlab.cc:19601
     --noid-mode eff|speed  eff = best MH per watt (default; RTX 30: lock the core at 1300 + --auto-uv), speed = more MH/s
-                         (RTX 30: lock the core at 1500 + --auto-uv, almost the same MH/W)
+                         (RTX 30: lock the core at 1500 + --auto-uv, +31 % MH/s, ~4 % lower MH/W)
     --auto-uv            NOID-specific undervolt: every step checked bit-exactly by a 40 s stress check on the NOID kernel,
                          result per card and mode in uv.json (section noid); --uv-max/--uv-min/--uv-step/--uv-keep-last/--uv-reset/--uv-reset-all as
                          for Pearl (default first step by card and lock: RTX 3070 eff +105 at 1400, speed +240 at 1500; climbs in
