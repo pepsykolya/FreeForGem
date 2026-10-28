@@ -8,6 +8,15 @@ Files: `freeforgem-1.7.3.tar.gz` (HiveOS Installation URL
 `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz`),
 `freeforgem-1.7.3-linux-x86_64.tar.gz`, `freeforgem-1.7.3-windows-x64.zip`. Check the SHA-256 (MANUAL.md, section 9).
 
+| File | SHA-256 |
+|---|---|
+| `freeforgem-1.7.3.tar.gz` | `6c29130fc6ba4660ac6b1d90dccd3667e9bcb112fc1441bbfd3c2a0e4037d126` |
+| `freeforgem-1.7.3-linux-x86_64.tar.gz` | `59f94d03364f8908340e963190927c5e2399f2de2045a4c519905f89b4a51325` |
+| `freeforgem-1.7.3-windows-x64.zip` | `6a53f9338834be12213493a53df37f32c34682712f73f868005611484e89ca53` |
+
+Checked on HiveOS rigs, Pearl, core lock 1805, mem 810, `--auto-uv`: 8x RTX 3070 — 647.8 TH/s, 1179 W, 0.550 TH/W
+(about an hour, no rejected shares, peak RAM 4.3 GB of 12 GB); 4x RTX 3070 — 326.2 TH/s, 547 W, 0.596 TH/W.
+
 **Fixed: Pearl on rigs with little RAM** (a 4 GB rig with 5x CMP 50HX swapped for minutes, then the OOM killer stopped the miner):
 
 * **Far less RAM for Pearl.** A job kept its 0.7-0.8 GB matrix A in memory, and every proof copied it on the GPU's own prover
@@ -39,6 +48,15 @@ there (1.7.2 kept reconnecting and got no jobs). Test, RTX 3070, 5 min: 107 of 1
 Файлы: `freeforgem-1.7.3.tar.gz` (ссылка для установки HiveOS
 `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz`),
 `freeforgem-1.7.3-linux-x86_64.tar.gz`, `freeforgem-1.7.3-windows-x64.zip`. Сверьте SHA-256 (MANUAL.md, раздел 9).
+
+| Файл | SHA-256 |
+|---|---|
+| `freeforgem-1.7.3.tar.gz` | `6c29130fc6ba4660ac6b1d90dccd3667e9bcb112fc1441bbfd3c2a0e4037d126` |
+| `freeforgem-1.7.3-linux-x86_64.tar.gz` | `59f94d03364f8908340e963190927c5e2399f2de2045a4c519905f89b4a51325` |
+| `freeforgem-1.7.3-windows-x64.zip` | `6a53f9338834be12213493a53df37f32c34682712f73f868005611484e89ca53` |
+
+Проверено на ригах HiveOS, Pearl, лок ядра 1805, память 810, `--auto-uv`: 8x RTX 3070 — 647,8 TH/s, 1179 Вт, 0,550 TH/W
+(около часа, без отклонённых шар, пик памяти 4,3 ГБ из 12 ГБ); 4x RTX 3070 — 326,2 TH/s, 547 Вт, 0,596 TH/W.
 
 **Исправлено: Pearl на ригах с малым объёмом ОЗУ** (риг с 4 ГБ и 5x CMP 50HX минутами сидел в свопе, затем OOM killer остановил
 майнер):
