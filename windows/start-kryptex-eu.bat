@@ -46,11 +46,20 @@ rem Lock memory clock (MHz):
 set "LOCK_MCLOCK="
 rem Memory clock offset (MHz, may be negative; needs NVIDIA driver 555+):
 set "MOFFSET="
+rem Idle mode: mine only while nobody uses this PC (gamers, office PCs). 1 = on. Needs start.bat started by the user
+rem (not as a service). Keyboard, mouse, gamepad or a fullscreen game = "in use"; a locked screen = idle.
+set "IDLE="
+rem Minutes without keyboard / mouse / gamepad before mining starts again (empty = 5):
+set "IDLE_MINUTES="
+rem While the PC is in use: pause (no mining, default) or light:PCT = keep mining at PCT %% of the time, e.g. light:30
+set "ACTIVE="
+rem Programs that always pause mining while they run, even with no input (comma list), e.g. cs2.exe,blender.exe
+set "ALWAYS_PAUSE="
 rem ================================================================
 
 set "PS=powershell.exe"
 where pwsh.exe >nul 2>&1 && set "PS=pwsh.exe"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -UvMin "%UV_MIN%" -UvStep "%UV_STEP%" -UvKeepLast "%UV_KEEP_LAST%" -UvRevalHours "%UV_REVAL_HOURS%" -UvOffset "%UV_OFFSET%" -Extra "%EXTRA%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" -Wallet "%WALLET%" -Pool "%POOL%" -Worker "%WORKER%" -Devices "%DEVICES%" -AutoUv "%AUTO_UV%" -UvMax "%UV_MAX%" -UvMin "%UV_MIN%" -UvStep "%UV_STEP%" -UvKeepLast "%UV_KEEP_LAST%" -UvRevalHours "%UV_REVAL_HOURS%" -UvOffset "%UV_OFFSET%" -Extra "%EXTRA%" -Password "%PASSWORD%" -LockCclock "%LOCK_CCLOCK%" -LockMclock "%LOCK_MCLOCK%" -Moffset "%MOFFSET%" -Idle "%IDLE%" -IdleMinutes "%IDLE_MINUTES%" -Active "%ACTIVE%" -AlwaysPause "%ALWAYS_PAUSE%"
 echo.
 echo FreeForGem stopped (exit code %ERRORLEVEL%).
 pause

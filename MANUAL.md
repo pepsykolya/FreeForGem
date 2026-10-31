@@ -46,10 +46,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.7.4):**
+**Installation URL (1.7.5):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -73,15 +73,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7
 4. **Apply.** *Apply changes*, *Create flight sheet*, then apply it to the rig.
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
-The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version.
+The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.5 0.652 TH/W, new 1.7.6`: the miner looks for one on GitHub ~1 min after the start and every ~12 h, nothing is installed by itself; `--no-update-check` turns it off).
 To update, change the Installation URL to the new version. The same guide with more details: [HIVEOS.md](HIVEOS.md).
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
 
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
-cd freeforgem-1.7.4
+tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
+cd freeforgem-1.7.5
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -102,8 +102,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.4-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
+1. Download **`freeforgem-1.7.5-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -154,7 +154,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.4-windows-x64
+cd /d C:\Mining\freeforgem-1.7.5-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -291,9 +291,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -348,10 +348,10 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version, kernel build and core clock lock (one profile per lock,
    section 17). Later starts apply it after a quick check (about 30 s). If the driver or the kernel build changed, the GPU is
    tuned again; a new lock is tuned once, a known lock reuses its profile.
-   Each check runs in a child process that needs about 2.4 GB of RAM (`FFGP_UV_CHECK_MB`): on a rig with little RAM the
-   checks of several GPUs run together only while the free RAM covers them, the others wait (`waits for RAM` in the log) and
-   go next; the other GPUs mine meanwhile (since 1.7.2 mining starts at once). While mining, a re-check takes its RAM first and only then
-   pauses its GPU (since 1.7.1), so a GPU that waits for RAM keeps mining.
+   Each check runs in a child process that needs about 1.8 GB of RAM (`FFGP_UV_CHECK_MB`): on a rig with little RAM the
+   checks of several GPUs run together only while the free RAM covers them, the others wait (`waits its turn for a check` in the log) and
+   go next; a running check counts only with the RAM it has not taken yet (since 1.7.5); the other GPUs mine meanwhile (since 1.7.2 mining starts at once). While mining, a re-check takes its RAM first and only then
+   pauses its GPU (since 1.7.1), so a GPU that waits its turn keeps mining.
 5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
    If a found result fails the CPU verification, or a burst of rejected shares appears, the offset goes one step down (never
    below your own value) and is saved. **OC applies (since 1.7.1):** HiveOS `nvidia-oc` writes the *Core Clock* value of the
@@ -897,7 +897,7 @@ these offsets were "applied without a start check": illegal memory access, Xid 1
 **Mining during tuning.** Before 1.7.2 no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now mining starts at
 once; each GPU's checks and tuning run in the background and pause only that GPU (for its tuning or its quick check); the
 other GPUs mine meanwhile. The RAM
-queue of the checks ("waits for RAM") lets the waiting GPU mine meanwhile.
+queue of the checks ("waits its turn for a check") lets the waiting GPU mine meanwhile.
 
 **Your offset.** On HiveOS the offset put back on exit is the OC profile's *Core Clock* value of that GPU (`/hive-config/nvidia-oc.conf`),
 not whatever the card had at start (seen on a rig: +325 left by another miner whose exit restore was cut short, instead of the profile's +275); at start such a leftover
@@ -933,6 +933,30 @@ the **whole miner process**: every worker stops with the same error, also on GPU
 5. a GPU that still crashes with nothing left to lower (without `--auto-uv`: after 2 crash starts in a row) is **left out of mining
    for an hour**, the other GPUs mine. 30 min without a fault clear the count; `--uv-reset` does not clear `gpu-faults.json`
    (delete the file to clear it now).
+
+### 18. Windows: mine only while the PC is idle (new in 1.7.5)
+
+**Idle mode** (`IDLE=1` in start.bat, `--idle`) is for PCs people play and work on: the miner mines only while nobody uses
+the PC and stops within a second when someone does. "In use" is any of:
+- keyboard or mouse input (`IDLE_MINUTES`, default 5: this long without input before mining starts again), a gamepad;
+- a fullscreen program (a game, a fullscreen video), presentation mode, "do not disturb";
+- other programs at work: more than `--idle-cpu` % of the CPU (default 25 %, for 3 s; the miner, its undervolt checks and other
+  miners — xmrig, SRBMiner, lolMiner, T-Rex, Rigel and others, more with `--idle-ignore myminer.exe` — do not count), a GPU engine of another program over `--idle-gpu` % (default 10 %), or any video decoding (a film, a
+  stream, a video call); `0` turns a signal off;
+- a program from `ALWAYS_PAUSE` (`--idle-pause-for cs2.exe,blender.exe`) is running.
+
+A locked screen or the screensaver counts as idle at once. While the PC is in use (`ACTIVE`, `--active`):
+- `pause` (default): the GPUs get no work; the owner's core / memory clocks and V/F offsets go back on the cards (a clock lock
+  would cap a game), no undervolt check starts (one already running finishes, ≤1 min); everything comes back when idle;
+- `light:PCT`: mining goes on PCT % of the time (1-99, `light` = 30): in every 200 ms the GPUs mine PCT % of it, on the verified
+  mining clocks and offsets (no new check starts). Some laptop GPUs do not raise their clocks for such bursts and give far less
+  than PCT % of the hashrate.
+
+The log says why: `idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`, and
+the 10 s line ends with `[PAUSED: PC in use]` or `[LIGHT 30 %: PC in use]`. The dev fee counts the mining time only (a pause
+stops its clock). Idle mode needs the miner in the user's own session: start.bat, or a scheduled task "at log on" of that
+user — not a service or a task "run whether the user is logged on or not" (the miner refuses to start there). In 1.7.5 it
+works with Pearl (not CMFD / NOID); on Linux / HiveOS `--idle` is ignored.
 
 ---
 
@@ -974,10 +998,10 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.7.4):**
+**Ссылка для установки (1.7.5):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1001,15 +1025,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7
 4. **Применить.** *Apply changes*, *Create flight sheet*, затем применить лист к ригу.
 
 Лог майнера: `/var/log/miner/freeforgem/freeforgem.log` и консоль майнера в HiveOS.
-На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера.
+На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера; с 1.7.5 там же — вышедшая новая версия (`1.7.5 0.652 TH/W, new 1.7.6`: майнер проверяет GitHub через ~1 мин после старта и раз в ~12 ч, сам ничего не устанавливает; `--no-update-check` выключает).
 Для обновления смените Installation URL на новую версию. То же подробнее: [HIVEOS.md](HIVEOS.md).
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
 
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
-cd freeforgem-1.7.4
+tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
+cd freeforgem-1.7.5
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1030,8 +1054,8 @@ cd freeforgem-1.7.4
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.4-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.5-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1082,7 +1106,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.4-windows-x64
+cd /d C:\Mining\freeforgem-1.7.5-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1217,9 +1241,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1275,9 +1299,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 4. Результат сохраняется в `uv.json` с ключом: UUID карты, версия драйвера, сборка ядра и лок ядра (профиль на каждый лок,
    раздел 17). При следующих запусках он применяется после быстрой проверки (около 30 с). Если изменились драйвер или сборка
    ядра, карта подбирается заново; новый лок подбирается один раз, известный — берёт свой профиль.
-   Каждая проверка идёт в отдельном процессе, которому нужно около 2,4 ГБ ОЗУ (`FFGP_UV_CHECK_MB`): на риге с малым объёмом
-   ОЗУ проверки нескольких карт идут одновременно, только пока хватает свободной памяти, остальные ждут (`waits for RAM` в
-   логе) и идут следом; остальные карты при этом майнят (с 1.7.2 майнинг стартует сразу). Во время майнинга перепроверка сначала
+   Каждая проверка идёт в отдельном процессе, которому нужно около 1,8 ГБ ОЗУ (`FFGP_UV_CHECK_MB`): на риге с малым объёмом
+   ОЗУ проверки нескольких карт идут одновременно, только пока хватает свободной памяти, остальные ждут (`waits its turn for a check` в
+   логе) и идут следом; идущая проверка учитывается только той памятью, которую ещё не заняла (с 1.7.5); остальные карты при этом майнят (с 1.7.2 майнинг стартует сразу). Во время майнинга перепроверка сначала
    получает память и только потом ставит карту на паузу (с 1.7.1) — карта, ждущая ОЗУ, продолжает майнить.
 5. Во время майнинга: каждые 6 часов (`--uv-reval-hours`) настройка перепроверяется (майнинг на этой карте приостанавливается
    примерно на 30 с). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
@@ -1827,7 +1851,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 **Майнинг во время тюнинга.** До 1.7.2 ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт). Теперь майнинг
 стартует сразу; проверки и тюнинг каждой карты идут в фоне и ставят на паузу только её (на время её тюнинга или быстрой проверки); остальные
 карты майнят. Очередь
-проверок по RAM («waits for RAM») не останавливает майнинг ждущей карты.
+проверок по RAM («waits its turn for a check») не останавливает майнинг ждущей карты.
 
 **Ваш offset.** На HiveOS при выходе возвращается значение *Core Clock* профиля разгона этой карты (`/hive-config/nvidia-oc.conf`),
 а не то, что было на карте при старте (было на риге: +325 — остаток другого майнера, чьё восстановление на выходе прервалось, вместо +275 профиля); такой остаток при старте
@@ -1862,6 +1886,30 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
    профиля HiveOS, затем шагами по 60 МГц до 0; ваш новый offset отменяет понижение;
 5. карта, которая падает и дальше, когда понижать некуда (без `--auto-uv` — после 2 стартов подряд с падением), **исключается из
    майнинга на час**, остальные майнят. 30 мин без сбоя обнуляют счёт; `--uv-reset` не очищает `gpu-faults.json` (удалите файл).
+
+### 18. Windows: майнинг только в простое (новое в 1.7.5)
+
+**Режим простоя** (`IDLE=1` в start.bat, `--idle`) — для компьютеров, на которых играют и работают: майнер майнит, только пока
+компьютером никто не пользуется, и останавливается меньше чем за секунду, когда им начинают пользоваться. «Занят» — любое из:
+- ввод с клавиатуры или мыши (`IDLE_MINUTES`, по умолчанию 5: столько минут без ввода до возобновления майнинга), геймпад;
+- полноэкранная программа (игра, видео на весь экран), режим презентации, «не беспокоить»;
+- работа других программ: больше `--idle-cpu` % процессора (по умолчанию 25 %, 3 с подряд; сам майнер, его проверки андервольта
+  и другие майнеры — xmrig, SRBMiner, lolMiner, T-Rex, Rigel и др., свои добавьте через `--idle-ignore myminer.exe` — не считаются), движок видеокарты у другой программы выше `--idle-gpu` % (по умолчанию 10 %) или любое декодирование
+  видео (фильм, стрим, видеозвонок); `0` выключает признак;
+- запущена программа из `ALWAYS_PAUSE` (`--idle-pause-for cs2.exe,blender.exe`).
+
+Заблокированный экран или заставка сразу считаются простоем. Пока компьютер занят (`ACTIVE`, `--active`):
+- `pause` (по умолчанию): видеокарты не получают работу; на карты возвращаются ваши частоты ядра и памяти и V/F offset (лок частоты
+  ограничил бы игру), новые проверки андервольта не начинаются (уже идущая заканчивается, ≤1 мин); в простое всё возвращается;
+- `light:PCT`: майнинг продолжается PCT % времени (1–99, `light` = 30): в каждые 200 мс видеокарты майнят PCT % из них, на проверенных
+  майнинговых частотах и offset (новые проверки не начинаются). Некоторые видеокарты ноутбуков не поднимают частоты под такие короткие нагрузки и дают
+  намного меньше PCT % хешрейта.
+
+В логе видно почему: `idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`, строка
+каждые 10 с заканчивается `[PAUSED: PC in use]` или `[LIGHT 30 %: PC in use]`. Комиссия считается только по времени майнинга (пауза
+останавливает её часы). Майнер должен работать в сеансе пользователя: start.bat или задача планировщика «при входе» этого
+пользователя — не служба и не задача «выполнять для всех пользователей» (там майнер не запустится в этом режиме). В 1.7.5 режим
+работает с Pearl (не CMFD / NOID); в Linux / HiveOS `--idle` игнорируется.
 
 ---
 
@@ -1905,7 +1953,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.7.2)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1929,15 +1977,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7
 4. **应用。** *Apply changes*，*Create flight sheet*，然后应用到矿机。
 
 矿工日志位于 `/var/log/miner/freeforgem/freeforgem.log`，也可在 HiveOS 矿工控制台查看。
-仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）。更新时把 Installation URL 改成新版本即可。
+仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）；自 1.7.5 起还显示已发布的新版本（`1.7.5 0.652 TH/W, new 1.7.6`：矿工在启动约 1 分钟后及每约 12 小时检查 GitHub，不会自动安装；`--no-update-check` 关闭）。更新时把 Installation URL 改成新版本即可。
 更详细的同一指南：[HIVEOS.md](HIVEOS.md)。
 HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同，因此请始终粘贴新版本的链接。
 
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
-cd freeforgem-1.7.4
+tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
+cd freeforgem-1.7.5
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1958,8 +2006,8 @@ cd freeforgem-1.7.4
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.4-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.5-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -2001,7 +2049,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.4-windows-x64
+cd /d C:\Mining\freeforgem-1.7.5-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2115,9 +2163,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -2165,8 +2213,8 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
    （先快速检查），已保存的结果保留，待上限再次提高时使用；若已保存的结果*正好*等于旧上限，上限提高后会重新调校。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本、内核版本和核心锁频为键（每个锁频一个配置，第 17 节）。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动或内核版本发生变化，则重新调校；新的锁频调校一次，已知锁频直接复用其配置。
-   每次检查在单独的子进程中运行，约需 2.4 GB 内存（`FFGP_UV_CHECK_MB`）：内存较小的矿机上，只有在空闲内存足够时多块显卡的检查才会
-   同时进行，其余的等待（日志中的 `waits for RAM`）并随后进行；其他显卡同时继续挖矿（自 1.7.2 起挖矿立即开始）。挖矿期间的复查会先获得内存，
+   每次检查在单独的子进程中运行，约需 1.8 GB 内存（`FFGP_UV_CHECK_MB`）：内存较小的矿机上，只有在空闲内存足够时多块显卡的检查才会
+   同时进行，其余的等待（日志中的 `waits its turn for a check`）并随后进行；正在运行的检查只按其尚未占用的内存计算（自 1.7.5 起）；其他显卡同时继续挖矿（自 1.7.2 起挖矿立即开始）。挖矿期间的复查会先获得内存，
    再暂停该显卡（自 1.7.1 起），因此等待内存的显卡会继续挖矿。
 5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
    或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。**超频重新应用（自 1.7.1 起）：** HiveOS 的 `nvidia-oc`
@@ -2641,7 +2689,7 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 * 挖矿中同一偏移下负载频率上升（锁频被提高）时恢复您的偏移并重新按频率选择配置。
 
 **调优期间继续挖矿。** 1.7.2 之前所有显卡都要等最慢的调优结束才开始挖矿。现在挖矿立即开始；每张卡的检查与调优在后台进行，只在检查
-期间暂停该卡（其调优或快速检查期间），其他卡继续挖矿。检查的内存队列（"waits for RAM"）期间，等待的显卡继续挖矿。
+期间暂停该卡（其调优或快速检查期间），其他卡继续挖矿。检查的内存队列（"waits its turn for a check"）期间，等待的显卡继续挖矿。
 
 **您的偏移。** 在 HiveOS 上，退出时恢复的是该卡 OC 配置的 *Core Clock* 值（`/hive-config/nvidia-oc.conf`），而不是启动时卡上残留
 的值（曾在矿机上出现：另一个挖矿程序退出时恢复被中断而留下 +325，而配置为 +275）；启动时此类残留会被替换为配置值。在当前频率下验证过且低于您的偏移的结果会**代替您的偏移使用**，绝不在未检查的情况下保留。若调优的起始偏移本身失败，会以
@@ -2658,3 +2706,20 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 `gpu-faults.json`；自行重启（Linux / HiveOS 同一进程内，HiveOS 不计为重启，每小时最多 12 次，之后照旧退出；Windows 由 start.ps1 重启）；使用 `--auto-uv` 时崩溃的降压偏移视为失败，该卡在快速检查后回到其锁频的已验证偏移（或崩溃值下方 30 MHz），已验证的偏移若未通过快速检查则从它逐步下调，
 不从头调优，在您自己的偏移上连续 2 次启动崩溃则降低它（先降到 HiveOS 配置的 Core Clock 值，再以 60 MHz 步进降到 0；您设置新的偏移会取消降低）；无可再降仍
 崩溃的卡（不使用 `--auto-uv` 时：连续 2 次启动崩溃后）暂停挖矿一小时，其他卡继续。无故障 30 分钟清零计数；`--uv-reset` 不清除 `gpu-faults.json`（删除该文件即可）。
+
+### 18. Windows：仅在电脑空闲时挖矿（1.7.5 新增）
+
+**空闲模式**（start.bat 中 `IDLE=1`，`--idle`）适用于用来玩游戏和工作的电脑：仅在无人使用电脑时挖矿，有人使用时一秒内停止。以下任一情况视为“使用中”：
+- 键盘或鼠标输入（`IDLE_MINUTES`，默认 5：无输入这么多分钟后恢复挖矿）、游戏手柄；
+- 全屏程序（游戏、全屏视频）、演示模式、“勿扰”；
+- 其他程序在工作：占用超过 `--idle-cpu` % 的 CPU（默认 25 %，持续 3 秒；矿工本身、其降压检查以及其他矿工——xmrig、SRBMiner、lolMiner、T-Rex、Rigel 等，其他的可用 `--idle-ignore myminer.exe` 添加——不计入），其他程序的 GPU 引擎超过
+  `--idle-gpu` %（默认 10 %），或任何视频解码（电影、直播、视频通话）；`0` 关闭该信号；
+- `ALWAYS_PAUSE` 中的程序正在运行（`--idle-pause-for cs2.exe,blender.exe`）。
+
+锁屏或屏幕保护立即视为空闲。电脑使用中时（`ACTIVE`，`--active`）：
+- `pause`（默认）：显卡不再获得工作；恢复您原来的核心/显存频率和 V/F 偏移（锁频会限制游戏），不开始新的降压检查（正在进行的会完成，≤1 分钟）；空闲时全部恢复；
+- `light:PCT`：以 PCT % 的时间继续挖矿（1-99，`light` = 30）：每 200 毫秒中显卡挖 PCT %，使用已验证的挖矿频率和偏移（不开始新的检查）。部分笔记本显卡在这种短负载下不提升频率，算力远低于 PCT %。
+
+日志会说明原因：`idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`，每 10 秒的行以
+`[PAUSED: PC in use]` 或 `[LIGHT 30 %: PC in use]` 结尾。开发者抽水只按挖矿时间计算（暂停时停止计时）。矿工必须在用户自己的会话中运行：start.bat 或该用户“登录时”的计划任务，
+不能是服务或“不管用户是否登录都运行”的任务（在那里该模式会拒绝启动）。1.7.5 中仅支持 Pearl（不支持 CMFD / NOID）；在 Linux / HiveOS 上 `--idle` 被忽略。

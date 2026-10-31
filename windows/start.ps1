@@ -23,7 +23,11 @@ param(
     [string]$CmfdMode = '',
     [string]$UvGoal = '',
     [string]$Algo = '',
-    [string]$NoidMode = ''
+    [string]$NoidMode = '',
+    [string]$Idle = '',
+    [string]$IdleMinutes = '',
+    [string]$Active = '',
+    [string]$AlwaysPause = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -136,6 +140,20 @@ if ($UvOffset -match '^[+-]?[0-9]+$' -or ($UvOffset -match '^([+-]?[0-9]+|-)?(,(
 # AMD undervolt profile (amduv): CMFD eff|bal|max, Pearl eff|max (used when it tunes)
 if ($AutoUv -eq '1' -and $UvGoal -match '^(eff|bal|max)$') { $env:FFGP_AMD_UV_GOAL = $UvGoal }
 if (($UvOffset -or $AutoUv -eq '1') -and $UvRevalHours -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --uv-reval-hours $UvRevalHours" }
+# idle mode (Pearl): mine only while the PC is not in use
+if ($Idle -eq '1') {
+    if ($Cmfd -or $Algo -eq 'noid') { Fail 'IDLE=1 works with Pearl only in this version (not CMFD / NOID)' }
+    $cmdLine += ' --idle'
+    if ($IdleMinutes -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --idle-minutes $IdleMinutes" }
+    if ($Active) {
+        if ($Active -notmatch '^(pause|light(:[0-9]{1,2}%?)?)$') { Fail "ACTIVE must be pause, light or light:PCT (1-99), e.g. light:30 (got: $Active)" }
+        $cmdLine += " --active $($Active -replace '%','')"
+    }
+    if ($AlwaysPause) {
+        if ($AlwaysPause -notmatch '^[A-Za-z0-9._ -]+(,[A-Za-z0-9._ -]+)*$') { Fail 'ALWAYS_PAUSE: program names separated by commas, e.g. cs2.exe,blender.exe' }
+        $cmdLine += " --idle-pause-for `"$AlwaysPause`""
+    }
+}
 if ($Extra) {
     if ($Extra -match '[&|<>^"]') { Fail 'EXTRA must not contain & | < > ^ or quotes' }
     $cmdLine += " $Extra"

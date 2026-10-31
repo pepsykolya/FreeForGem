@@ -96,7 +96,7 @@ pub fn kind(s: &str) -> Kind {
     }
     if has(&["FAILED", "Xid", "worker stopped", "CRASHED", "crashed", "Error:", "error:", "LEFT OUT", "share REJECTED", "rejected (", "COULD NOT", "panicked", "!! ", "cannot "]) {
         Kind::Bad
-    } else if has(&["WARNING", "paused", "one step", "step down", "stepping back", "stepped", "lowered", "stands down", "below your offset", "waits for RAM", "no gain", "restarting itself", "MHz below", "FAILS", "not saved"]) {
+    } else if has(&["WARNING", "paused", "one step", "step down", "stepping back", "stepped", "lowered", "stands down", "below your offset", "no gain", "restarting itself", "MHz below", "FAILS", "not saved"]) {
         Kind::Warn
     } else if has(&[": ok", "passed", "PASSED", "saved as profile", "RESULT", "applied", "ACCEPTED", "restored", "put back", "self-test PASSED"]) {
         Kind::Good

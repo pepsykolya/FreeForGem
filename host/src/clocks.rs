@@ -159,6 +159,7 @@ struct Item {
     mem_locked: bool,
     mem_mhz: u32,
     mem_off: bool,
+    mem_off_mhz: i32,
     core_prev: Prev,
     mem_prev: Prev,
 }
@@ -167,6 +168,7 @@ struct State {
     nv: Nvml,
     marker: PathBuf,
     items: Vec<Item>,
+    suspended: bool, // idle mode: the owner's clocks are back while the PC is in use (suspend / resume)
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -279,7 +281,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 mem_hive.map_or(String::new(), |m| format!(" memory {m} MHz"))
             ));
         }
-        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
+        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, mem_off_mhz: 0, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
         if let Some(mhz) = core {
             let (prev, src) = prev_lock(&nv, d, Kind::Core, i, n);
             match nv.set_core_locked(d, mhz) {
@@ -319,6 +321,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
             match nv.set_mem_offset(d, v) {
                 Ok(()) => {
                     it.mem_off = true;
+                    it.mem_off_mhz = v;
                     lg(format!("GPU{dev} (bus {bus}): memory clock offset {v:+} MHz"));
                 }
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot set memory offset ({e:#}); needs driver 555+ and root/Administrator")),
@@ -339,7 +342,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
             "mem_off": it.mem_off, "core_prev": it.core_prev.to_json(), "mem_prev": it.mem_prev.to_json()})).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
-    *state().lock().unwrap() = Some(State { nv, marker, items });
+    *state().lock().unwrap() = Some(State { nv, marker, items, suspended: false });
     Some(Guard)
 }
 
@@ -392,6 +395,47 @@ pub fn restore_all() {
     // logged only after every card is put back (the log pipe may be gone at shutdown)
     for l in lines {
         lg(l);
+    }
+}
+
+/// Idle mode (1.7.5): the PC is in use, the clocks go back to what they were before the miner (a lock would cap a game); the
+/// marker stays, `restore_all` still works.  `resume` sets this run's locks / offset again.
+pub fn suspend() {
+    let mut g = state().lock().unwrap();
+    let Some(st) = g.as_mut() else { return };
+    if st.suspended {
+        return;
+    }
+    st.suspended = true;
+    for it in &st.items {
+        if it.core_locked {
+            put_back(&st.nv, it.dev, Kind::Core, it.core_prev, it.pos, it.n);
+        }
+        if it.mem_locked {
+            put_back(&st.nv, it.dev, Kind::Mem, it.mem_prev, it.pos, it.n);
+        }
+        if it.mem_off {
+            let _ = st.nv.set_mem_offset(it.dev, 0);
+        }
+    }
+}
+
+pub fn resume() {
+    let mut g = state().lock().unwrap();
+    let Some(st) = g.as_mut() else { return };
+    if !st.suspended {
+        return;
+    }
+    st.suspended = false;
+    for it in &st.items {
+        let r = [
+            it.core_locked.then(|| st.nv.set_core_locked(it.dev, it.core_mhz)),
+            it.mem_locked.then(|| st.nv.set_mem_locked(it.dev, it.mem_mhz)),
+            it.mem_off.then(|| st.nv.set_mem_offset(it.dev, it.mem_off_mhz)),
+        ];
+        for e in r.into_iter().flatten().filter_map(|r| r.err()) {
+            lg(format!("GPU bus {}: cannot set the clocks again after the pause ({e:#})", it.bus));
+        }
     }
 }
 

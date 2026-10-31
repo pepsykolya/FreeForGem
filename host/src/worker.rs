@@ -175,6 +175,7 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
     let mut hit_buf = vec![gpu::Hit::default(); MAX_HITS];
     let mut fd = FeedDiag::new(dev);
     // test hook (faults.rs): a fault of this GPU after N s of mining (FFG_TEST_FAULT_ALL=1: of every GPU, as a real CUDA fault)
+    let mut burst = Instant::now();
     let inject = crate::faults::test_fault_for(dev).map(|secs| Instant::now() + std::time::Duration::from_secs(secs));
     while !sh.stop.load(Ordering::Relaxed) {
         if inject.is_some_and(|t| Instant::now() >= t && gs.attempts.load(Ordering::Relaxed) > 0) {
@@ -243,6 +244,21 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
             let t_wait = Instant::now();
             finish(p, &mut hit_buf, sh, gs, work_tx)?;
             fd.finished(t_wait);
+        }
+        // idle mode, light load while the PC is in use (1.7.5): in every 200 ms mine PCT % of it, let the queue run dry, then
+        // rest (light:30 = 60 ms of work, 140 ms idle: short enough not to stall a game's frames for long).  An RTX 4070 Laptop
+        // stays at 150-500 MHz under such a load (its driver does not boost for bursts): ~5 % of the hashrate, not 30 %
+        if let crate::idle::Mode::Light(pct) = crate::idle::mode() {
+            if burst.elapsed() >= std::time::Duration::from_millis(2 * pct as u64) {
+                if let Some(p) = pending.take() {
+                    finish(p, &mut hit_buf, sh, gs, work_tx)?;
+                }
+                let busy = burst.elapsed();
+                std::thread::sleep(busy * (100 - pct as u32) / pct as u32);
+                burst = Instant::now();
+            }
+        } else {
+            burst = Instant::now();
         }
     }
     if let Some(p) = pending.take() {

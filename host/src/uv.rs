@@ -661,6 +661,9 @@ pub struct Manager {
     main_more: u64,
     /// a check process was killed for lack of RAM (SIGKILL by the OOM killer): no more checks this run
     no_mem: AtomicBool,
+    /// idle mode (1.7.5): the PC is in use, no check may start; `aside` = the owner's offsets are back on the cards meanwhile
+    suspended: AtomicBool,
+    aside: AtomicBool,
 }
 
 /// RAM the OS can still hand out, MB (Linux: MemAvailable; Windows: available physical memory)
@@ -733,18 +736,40 @@ thread_local! {
 impl Drop for CheckSlot {
     fn drop(&mut self) {
         SLOT_HELD.with(|h| h.set(false));
+        check_pids().lock().unwrap().remove(&std::thread::current().id());
         let (m, cv) = check_slots();
         *m.lock().unwrap() -= 1;
         cv.notify_all();
     }
 }
 
-/// May one more check process start? `running` checks are already running (each counted in full: they may not have
-/// reached their peak yet), each needs `need` MB; `avail` = free RAM in MB (None = unknown: no limit); `main_more` = what the
-/// miner itself may still take (a proof's A matrix).  1.7.3: the first check is no exception (1.7.2 started it whatever the
-/// free RAM: Rig05, 3.8 GB, no swap, hung at the miner start).
-fn check_fits(running: u64, need: u64, avail: Option<u64>, main_more: u64) -> bool {
-    avail.is_none_or(|a| (a * RAM_SHARE_PCT / 100).saturating_sub(main_more).saturating_sub(running * need) >= need)
+/// pid of the check process each slot holder runs (by the holder's thread), to see how much of its RAM it already took
+fn check_pids() -> &'static Mutex<std::collections::HashMap<std::thread::ThreadId, u32>> {
+    static P: OnceLock<Mutex<std::collections::HashMap<std::thread::ThreadId, u32>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// resident RAM of a process, MB (Linux; None elsewhere or when it is gone)
+fn proc_rss_mb(pid: u32) -> Option<u64> {
+    let t = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    t.lines().find(|l| l.starts_with("VmRSS:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
+}
+
+/// RAM the `running` checks may still take, MB: free RAM already shows what a running check holds, so only the rest up to
+/// its peak (`need`) is reserved (1.7.4 reserved the full peak even while a check sat at it).  A check frees its proof
+/// between proofs, so most of the time nearly the full peak is still to come (Rig01 1.7.5: RSS ~80 MB of 1795, still two
+/// at once on 9 GB free).  A slot without a started process yet, or no RSS to read (Windows), counts in full.
+fn checks_reserved_mb(running: u64, need: u64, rss: &[Option<u64>]) -> u64 {
+    let started = (rss.len() as u64).min(running);
+    rss.iter().take(started as usize).map(|r| need.saturating_sub(r.unwrap_or(0))).sum::<u64>() + (running - started) * need
+}
+
+/// May one more check process start? `reserved` = MB the running checks may still take (checks_reserved_mb), a check needs
+/// `need` MB; `avail` = free RAM in MB (None = unknown: no limit); `main_more` = what the miner itself may still take (a
+/// proof's A matrix).  1.7.3: the first check is no exception (1.7.2 started it whatever the free RAM: Rig05, 3.8 GB, no
+/// swap, hung at the miner start).
+fn check_fits(reserved: u64, need: u64, avail: Option<u64>, main_more: u64) -> bool {
+    avail.is_none_or(|a| (a * RAM_SHARE_PCT / 100).saturating_sub(main_more).saturating_sub(reserved) >= need)
 }
 
 static ACTIVE: OnceLock<Mutex<Option<Arc<Manager>>>> = OnceLock::new();
@@ -841,11 +866,19 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     let total = nv.device_count().unwrap_or(0);
     lg(format!("NVML loaded, driver {driver}, kernel {kernel}, {total} GPU(s) in the system; only the {} mining device(s) below are touched", devices.len()));
     let mut cards = Vec::new();
+    let db0 = load_db(&state_dir(o));
     for (pos, &dev) in devices.iter().enumerate() {
         match map_card(&nv, dev, pos, o) {
-            Ok(c) => {
+            Ok(mut c) => {
                 let idx = nv.index(c.nv).map_or("?".to_string(), |i| i.to_string());
                 lg(format!("{}: CUDA device {dev} -> NVML index {idx}, PCI {}, {}, current offset {} (allowed {}..{})", c.label(), c.bus, c.uuid, signed(c.orig), c.lo, c.hi));
+                if let Some(o0) = hive_offset(&nv, c.nv).is_none().then(|| leftover_orig(&db0, &c.uuid, c.orig)).flatten() {
+                    lg(format!(
+                        "{}: the current offset {} is a tuned profile of this miner left on the card (an earlier run did not put it back, or it was put back from a leftover); the offset put back while paused and on exit is the one from before the tuning: {}",
+                        c.label(), signed(c.orig), signed(o0)
+                    ));
+                    c.orig = o0;
+                }
                 cards.push(Arc::new(c));
             }
             Err(e) => lg(format!("GPU{dev}: cannot manage ({e:#}); left alone")),
@@ -884,11 +917,11 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
             let cur = c.cur.swap(c.orig, Ordering::Relaxed);
             if cur != c.orig {
                 lg(format!(
-                    "{} offset {} found, the HiveOS OC profile has {}: set to {} (the {} was left by another program; {} is also what goes back on exit)",
+                    "{} offset {} found, the owner's offset is {} ({}): set to it (the {} was left behind; {} is also what goes back on exit)",
                     c.label(),
                     signed(cur),
                     signed(c.orig),
-                    signed(c.orig),
+                    if crate::hiveoc::load().is_some() { "the HiveOS OC profile's" } else { "recorded before the tuning" },
                     signed(cur),
                     signed(c.orig)
                 ));
@@ -965,6 +998,8 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         check_need,
         main_more,
         no_mem: AtomicBool::new(false),
+        suspended: AtomicBool::new(false),
+        aside: AtomicBool::new(false),
     });
     // the OOM killer takes a check process before the miner (Rig05 1.7.2: it killed the miner, HiveOS did not restart it)
     crate::faults::oom_score_adj(None, -500);
@@ -1021,6 +1056,41 @@ fn map_card(nv: &Nvml, dev: i32, pos: usize, o: &Opts) -> Result<Card> {
         card.lock_hint = crate::hiveoc::load().and_then(|p| nv.index(h).and_then(|i| p.core_lock(i as usize)));
     }
     Ok(card)
+}
+
+/// `--gpu-state` (tests, 1.7.5): what each GPU has now: V/F offset, clocks, power.  A clock lock shows as the locked clock
+/// staying up while the GPU idles.
+pub fn print_state() {
+    let nv = match Nvml::load() {
+        Ok(n) => n,
+        Err(e) => {
+            println!("gpu-state: NVML not available ({e:#})");
+            return;
+        }
+    };
+    for dev in 0..gpu::device_count() as i32 {
+        let Ok(bus) = gpu::device_pci_bus_id(dev) else { continue };
+        let Ok(h) = nv.by_bus(&bus) else { continue };
+        let off = nv.probe_offset(h).map(|(_, cur, _, _)| signed(cur)).unwrap_or_else(|e| format!("? ({e:#})"));
+        println!(
+            "gpu-state: GPU{dev} bus {bus} offset {off} core {} MHz mem {} MHz {:.0} W",
+            nv.clock_mhz(h).unwrap_or(0),
+            nv.mem_clock_mhz(h).unwrap_or(0),
+            nv.power_w(h).unwrap_or(0.0)
+        );
+    }
+}
+
+/// 1.7.5 (PC_BOX): the offset on the card at the start is one of this card's saved tuned profiles and that profile was made
+/// from another offset: a leftover of our own (a run killed by a power cut whose restore file already held the tuned value,
+/// or the miner before FFG).  Taking it for the owner's offset put +270 back at every start and, unlocked (idle-mode light
+/// load), crashed the GPU.  Returns the offset recorded before the tuning.
+fn leftover_orig(db: &Value, uuid: &str, cur: i32) -> Option<i32> {
+    let prof = db["profiles"][uuid].as_object()?;
+    let es: Vec<Entry> = prof.values().filter_map(Entry::from_json).collect();
+    let hit = es.iter().find(|e| e.offset == cur && e.offset != 0 && e.orig != cur)?;
+    // only when every profile agrees on the owner's offset (no guessing between two different ones)
+    es.iter().all(|e| e.orig == hit.orig).then_some(hit.orig)
 }
 
 /// Core Clock offset of the HiveOS OC profile for this GPU (None: not HiveOS).
@@ -1169,6 +1239,58 @@ impl Manager {
         for l in lines.into_iter().flatten() {
             lg(l);
         }
+    }
+
+    /// Idle mode (1.7.5), the PC is in use: no new check starts.  `aside` (pause): once no check runs, every card gets the
+    /// owner's offset back (the tuned one stays in `cur` and comes back with `resume`); false = a check still runs (a check
+    /// is not cut short: it would read as a failed step), call again.  Without `aside` (light load: the GPUs keep mining)
+    /// the tuned offsets stay, or come back after a pause.
+    pub fn suspend(&self, aside: bool) -> bool {
+        let (m, _) = check_slots();
+        let running = m.lock().unwrap(); // held: no check can take a slot meanwhile
+        self.suspended.store(true, Ordering::SeqCst);
+        if !aside {
+            self.offsets_back();
+            return true;
+        }
+        if *running > 0 {
+            return false;
+        }
+        if !self.aside.swap(true, Ordering::SeqCst) {
+            for c in &self.cards {
+                let cur = c.cur.load(Ordering::Relaxed);
+                if c.owned.load(Ordering::SeqCst) && cur != c.orig && !self.stopped() {
+                    if let Err(e) = self.nv.set_offset(c.nv, c.mode, c.orig) {
+                        lg(format!("{} cannot put the offset {} back for the pause: {e:#}", c.label(), signed(c.orig)));
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// The tuned offsets back on the cards after a pause (caller holds the check-slot lock or no check can run).
+    fn offsets_back(&self) {
+        if self.aside.swap(false, Ordering::SeqCst) {
+            for c in &self.cards {
+                let cur = c.cur.load(Ordering::Relaxed);
+                if c.owned.load(Ordering::SeqCst) && cur != c.orig && !self.stopped() {
+                    if let Err(e) = self.nv.set_offset(c.nv, c.mode, cur) {
+                        lg(format!("{} cannot set the offset {} again after the pause: {e:#}", c.label(), signed(cur)));
+                    }
+                    *c.run_clk.lock().unwrap() = RunClk::default();
+                }
+            }
+        }
+    }
+
+    /// The PC is idle again: the tuned offsets back, checks may start.
+    pub fn resume(&self) {
+        let (m, cv) = check_slots();
+        let _g = m.lock().unwrap();
+        self.offsets_back();
+        self.suspended.store(false, Ordering::SeqCst);
+        cv.notify_all();
     }
 
     /// All saved profiles of this card (one per core clock lock / clock regime, 1.7.2).
@@ -2133,17 +2255,25 @@ impl Manager {
         let mut running = m.lock().unwrap();
         let mut said = false;
         loop {
-            // already-running checks may not have reached their peak yet: count each of them in full; never more at once than
-            // the start plan allows (the miner's own buffers were not there yet when the free RAM was read first)
-            let more = if self.started.elapsed() < Duration::from_secs(60) { self.main_more } else { a_matrix_mb(c.m) };
-            if self.stopped() || (*running < self.at_once.max(1) && check_fits(*running, need, mem_available_mb(), more)) {
+            // a running check counts with what it may still take up to its peak (its RSS so far is in the free RAM already);
+            // in the first minute never more at once than the start plan (the miner's own buffers were not there yet when the
+            // free RAM was read first), later the free RAM alone decides
+            let early = self.started.elapsed() < Duration::from_secs(60);
+            let more = if early { self.main_more } else { a_matrix_mb(c.m) };
+            let rss: Vec<Option<u64>> = check_pids().lock().unwrap().values().map(|&p| proc_rss_mb(p)).collect();
+            let reserved = checks_reserved_mb(*running, need, &rss);
+            let avail = mem_available_mb();
+            if self.stopped() || (!self.suspended.load(Ordering::SeqCst) && (!early || *running < self.at_once.max(1)) && check_fits(reserved, need, avail, more)) {
                 *running += 1;
                 SLOT_HELD.with(|h| h.set(true));
                 return Some(CheckSlot);
             }
-            if !said {
+            if !said && !self.suspended.load(Ordering::SeqCst) {
                 said = true;
-                lg(format!("{} waits for RAM: {} check(s) running, {} MB free, a check needs ~{} MB", c.label(), *running, mem_available_mb().unwrap_or(0), need));
+                lg(format!(
+                    "{} waits its turn for a check (mining meanwhile): {} check(s) running, {} MB free, of it {} % minus ~{} MB still to come for the running checks and ~{} MB for the miner may be used, a check needs ~{} MB",
+                    c.label(), *running, avail.unwrap_or(0), RAM_SHARE_PCT, reserved, more, need
+                ));
             }
             running = cv.wait_timeout(running, Duration::from_secs(1)).unwrap().0;
         }
@@ -2164,6 +2294,7 @@ impl Manager {
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("cannot start the check process")?;
+        check_pids().lock().unwrap().insert(std::thread::current().id(), child.id());
         crate::faults::oom_score_adj(Some(child.id()), 900);
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         let out = child.stdout.take().unwrap();
@@ -3028,6 +3159,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn leftover_tuned_offset_is_not_the_owners() {
+        // PC_BOX: profile 1560 made from +0 at +270; the card shows +270 at the start: +0 is the owner's
+        let mk = |offset: i32, orig: i32| Entry { offset, orig, cap: 360, driver: "595".into(), kernel: "k".into(), ..Default::default() }.to_json();
+        let db = json!({"profiles": {"GPU-a": {"1560/mem810": mk(270, 0)}}});
+        assert_eq!(leftover_orig(&db, "GPU-a", 270), Some(0));
+        assert_eq!(leftover_orig(&db, "GPU-a", 150), None); // the owner's own offset
+        assert_eq!(leftover_orig(&db, "GPU-b", 270), None);
+        // two profiles that disagree on the owner's offset: no guess
+        let db2 = json!({"profiles": {"GPU-a": {"1560/mem810": mk(270, 0), "1805/mem810": mk(240, 120)}}});
+        assert_eq!(leftover_orig(&db2, "GPU-a", 270), None);
+    }
+
+    #[test]
     fn checks_at_once_by_ram() {
         let a_matrix_mb_k8 = |m| a_matrix_mb_k(m, 8192);
         // Rig05: 5x CMP 50HX (m = 86016: A 672 MB, a proof ~1.4 GB), 3.8 GB (1.7.2 ran two checks and swapped for minutes): low on
@@ -3257,11 +3401,19 @@ mod tests {
         // the first check always runs; more only while the free RAM covers them (each running one counted in full)
         // 1.7.3: the first check needs its RAM too (1.7.2 started it on a 3.8 GB rig: Rig05 hung)
         assert!(!check_fits(0, 2400, Some(100), 0));
-        assert!(check_fits(1, 2400, None, 0));
+        assert!(check_fits(2400, 2400, None, 0));
         assert!(check_fits(0, 1200, Some(3000), 800)); // 70 % of 3000 = 2100 - 800 = 1300 >= 1200
         assert!(!check_fits(0, 1200, Some(3000), 1000));
-        assert!(check_fits(1, 1000, Some(4000), 500)); // 2800 - 500 - 1000 = 1300
-        assert!(!check_fits(2, 1000, Some(4000), 500));
+        assert!(check_fits(1000, 1000, Some(4000), 500)); // 2800 - 500 - 1000 = 1300
+        assert!(!check_fits(2000, 1000, Some(4000), 500));
+        // a running check counts with what it may still take: not started / RSS unknown in full, 1600 of 1795 MB taken: 195
+        assert_eq!(checks_reserved_mb(2, 1795, &[]), 3590);
+        assert_eq!(checks_reserved_mb(2, 1795, &[Some(1600), None]), 195 + 1795);
+        assert_eq!(checks_reserved_mb(3, 1795, &[Some(1700), Some(1900)]), 95 + 1795);
+        // 4 checks all at their peak, 12972 MB free, miner ~1545 MB more: the 5th fits (1.7.4 counted their peak twice: waited)
+        let r = checks_reserved_mb(4, 1795, &[Some(1650); 4]);
+        assert!(check_fits(r, 1795, Some(12972), 1545));
+        assert!(!check_fits(4 * 1795, 1795, Some(12972), 1545));
     }
 
     #[test]

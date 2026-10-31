@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.4):**
+**Installation URL (1.7.5):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -45,7 +45,8 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
 The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig
-efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version.
+efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.5 0.652 TH/W,
+new 1.7.6`; `--no-update-check` turns the check off).
 
 ### Overclocking (RTX 3070)
 
@@ -153,10 +154,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.4):**
+**Ссылка для установки (1.7.5):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.

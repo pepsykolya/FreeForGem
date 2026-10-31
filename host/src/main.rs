@@ -50,11 +50,13 @@ mod devfee;
 mod faults;
 mod gpu;
 mod hiveoc;
+mod idle;
 mod mining;
 mod noid;
 mod nvml;
 mod status;
 mod stratum;
+mod update;
 mod uv;
 mod wintune;
 mod worker;
@@ -280,6 +282,7 @@ struct Args {
     per_gpu_workers: bool,
     cmfd_skip_prepare: bool,
     noid_mode: String,
+    idle: idle::Opts,
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -333,6 +336,8 @@ fn mode_name(m: TargetMode) -> &'static str {
 }
 
 fn mine(a: Args) -> Result<()> {
+    // first: a session without a desktop refuses idle mode before any clock or offset is touched
+    idle::start(&a.idle)?;
     wintune::process(gpu::backend() == gpu::Backend::Amd);
     let stop = Arc::new(AtomicBool::new(false));
     {
@@ -511,6 +516,9 @@ fn mine(a: Args) -> Result<()> {
     let mut switched = false;
     let mut st = [SrcState::default(), SrcState::default()];
     let mut fee = DevFee::new(devfee::Params::from_env(), start);
+    // idle mode: the fee schedule runs on the mining time (a pause stops its clock); `aside` = the owner's clocks and offsets
+    // are back on the cards while the PC is in use
+    let (mut mined, mut last_loop, mut aside, mut was_active) = (Duration::ZERO, Instant::now(), false, false);
     println!("devfee: next slot in {:.1} min", fee.next_slot_in(start).as_secs_f64() / 60.0);
     let mut published: Option<Arc<Assignment>> = None;
     let mut last_attempts = vec![0u64; gstats.len()];
@@ -592,7 +600,44 @@ fn mine(a: Args) -> Result<()> {
                 faults::mined_ok(&fault_dir, &ok);
             }
         }
-        if let Some((m, _)) = &uv_state {
+        let im = idle::mode();
+        let in_use = im != idle::Mode::Full;
+        match im {
+            // pause: undervolt back first (a tuned offset at an unlocked clock = too high a clock), then the clock locks; a
+            // running auto-uv check finishes first (no new one starts)
+            idle::Mode::Pause => {
+                if !aside && uv_state.as_ref().is_none_or(|(m, _)| m.suspend(true)) {
+                    clocks::suspend();
+                    aside = true;
+                }
+            }
+            // light load: the GPUs keep mining, so on the verified clocks and offsets (PC_BOX 1.7.5 test: unlocked with the
+            // owner's +270 the GPU crashed); only no new check starts
+            idle::Mode::Light(_) => {
+                if aside {
+                    clocks::resume();
+                    aside = false;
+                }
+                if let Some((m, _)) = &uv_state {
+                    m.suspend(false);
+                }
+            }
+            idle::Mode::Full => {
+                if was_active {
+                    clocks::resume();
+                    if let Some((m, _)) = &uv_state {
+                        m.resume();
+                    }
+                    aside = false;
+                }
+            }
+        }
+        was_active = in_use;
+        if im != idle::Mode::Pause {
+            mined += last_loop.elapsed();
+        }
+        last_loop = Instant::now();
+        if let (Some((m, _)), false) = (&uv_state, in_use) {
             m.tick(&gstats, &stats[0]);
         }
         // pool events: jobs go to the prep thread, the GPUs keep mining the old job meanwhile
@@ -638,8 +683,8 @@ fn mine(a: Args) -> Result<()> {
             println!("!! low-difficulty rejects -> switching target mode to {}", mode_name(mode));
         }
 
-        // developer fee schedule
-        let now = Instant::now();
+        // developer fee schedule, on the mining time (idle mode: paused time does not count)
+        let now = start + mined;
         let want_conn = fee.conn_wanted(now);
         if fee_enabled.swap(want_conn, Ordering::Relaxed) && !want_conn {
             st[Src::Fee.idx()] = SrcState::default(); // slot over: forget the fee job
@@ -660,6 +705,7 @@ fn mine(a: Args) -> Result<()> {
         let src = if fee.active() { Src::Fee } else { Src::User };
         let s = &mut st[src.idx()];
         let desired = match &s.cur {
+            _ if im == idle::Mode::Pause => None, // idle mode, the PC is in use: the GPUs get no work
             Some((pj, job)) => match final_target(pj, s.pool_diff, mode) {
                 Ok(t) => {
                     if t != s.target {
@@ -732,7 +778,12 @@ fn mine(a: Args) -> Result<()> {
                 f.submitted.load(Ordering::Relaxed),
                 f.accepted.load(Ordering::Relaxed),
                 f.rejected.load(Ordering::Relaxed),
-                if fee.active() { "  [DEVFEE]" } else { "" },
+                match (fee.active(), im) {
+                    (_, idle::Mode::Pause) => "  [PAUSED: PC in use]".to_string(),
+                    (_, idle::Mode::Light(p)) => format!("  [LIGHT {p} %: PC in use]{}", if fee.active() { " [DEVFEE]" } else { "" }),
+                    (true, _) => "  [DEVFEE]".to_string(),
+                    _ => String::new(),
+                },
                 if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" }
             );
             win_start = Instant::now();
@@ -787,6 +838,21 @@ OPTIONS:
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
+    --idle               Windows, Pearl: mine only while nobody uses the PC (keyboard, mouse, gamepad, a fullscreen game,
+                         other programs at work on the CPU or GPU);
+                         a locked screen counts as idle. While the PC is in use the GPUs get the owner's clocks and
+                         offsets back and no undervolt check starts
+    --idle-minutes N     minutes without input before mining starts again (default 5)
+    --active MODE        while the PC is in use: pause (default) or light:PCT (mine PCT % of the time, 1-99; light = 30)
+    --idle-pause-for L   programs that pause mining while they run even with no input, e.g. cs2.exe,blender.exe
+    --idle-cpu PCT       other programs using more than PCT % of the CPU for 3 s = in use (default 25, 0 = off)
+    --idle-ignore L      programs whose CPU / GPU load does not count as use (other miners such as xmrig, SRBMiner,
+                         lolMiner, T-Rex, Rigel are ignored already), e.g. myminer.exe
+    --idle-gpu PCT       another program using a GPU engine over PCT % = in use (default 10, 0 = off); any video
+                         decoding (a film, a stream) counts too
+    --no-update-check    do not look for a newer FreeForGem release (default: a GitHub check ~1 min after the start,
+                         then every ~12 h; a newer one is only reported: in the log and in HiveOS next to the version)
+    --check-update       check for a newer release now, then exit
     --no-color           no colours in the log (also NO_COLOR=1 or FFG_COLOR=0; FFG_COLOR=1 forces them, e.g. through tee)
     --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load, and
                          the coin / NOID mode); the profiles of other locks stay (since 1.7.2)
@@ -1023,8 +1089,11 @@ fn main() -> Result<()> {
         per_gpu_workers: false,
         cmfd_skip_prepare: false,
         noid_mode: "eff".into(),
+        idle: idle::Opts::default(),
     };
     let mut test = false;
+    let mut gpu_state = false;
+    let mut update_check = true;
     let mut child: Option<uv::ChildArgs> = None;
     let mut uv_given = false;
     while let Some(arg) = args.next() {
@@ -1098,12 +1167,30 @@ fn main() -> Result<()> {
                     _ => c.expect_bus = v,
                 }
             }
+            "--gpu-state" => gpu_state = true,
+            "--no-update-check" => update_check = false,
+            "--check-update" => std::process::exit(update::check_now()),
+            "--idle" => a.idle.on = true,
+            "--idle-minutes" => {
+                let m: f64 = val()?.parse().map_err(|_| anyhow::anyhow!("--idle-minutes needs a number of minutes"))?;
+                ensure!(m > 0.0, "--idle-minutes must be positive");
+                a.idle.minutes = m;
+            }
+            "--active" => a.idle.active_pct = idle::parse_active(&val()?)?,
+            "--idle-pause-for" => a.idle.pause_for = idle::parse_list(&val()?),
+            "--idle-ignore" => a.idle.ignore = idle::parse_list(&val()?),
+            "--idle-cpu" => a.idle.cpu_pct = idle::parse_pct(&val()?, "--idle-cpu")?,
+            "--idle-gpu" => a.idle.gpu_pct = idle::parse_pct(&val()?, "--idle-gpu")?,
             "--backend" => a.backend = Some(val()?),
             "--target-mode" => a.mode = if val()? == "jackpot" { TargetMode::Jackpot } else { TargetMode::Base },
             _ => bail!("unknown argument {arg} (see --help)"),
         }
     }
     let _ = uv_given;
+    // a newer release -> a log line and update-available for HiveOS (update.rs); not for check processes / tests
+    if update_check && child.is_none() && !test && !gpu_state && !a.wallet.is_empty() {
+        update::start();
+    }
     if child.is_none() {
         import_legacy_uv(&uv::state_dir(&a.uv));
     }
@@ -1121,6 +1208,7 @@ fn main() -> Result<()> {
         None => a.pool_given && noid::looks_like_noid_pool(&a.pool),
     };
     if noid_algo && child.is_none() {
+        ensure!(!a.idle.on, "--idle: in 1.7.5 idle mode works with Pearl only (not NOID)");
         let mode = noid::mode_of(&a.noid_mode)?;
         if test {
             return noid::self_test(&a.devices);
@@ -1148,6 +1236,10 @@ fn main() -> Result<()> {
         unsafe { std::env::set_var("PEARL_AMD_SPIN", "1") };
     }
     gpu::select(a.backend.as_deref())?;
+    if gpu_state {
+        uv::print_state();
+        return Ok(());
+    }
     if let Some(mut c) = child {
         c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
         std::process::exit(uv::check_child(&c));
@@ -1184,6 +1276,7 @@ fn main() -> Result<()> {
             let state_dir = a.uv.dir.clone().or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into)).unwrap_or_else(|| std::path::PathBuf::from("."));
             return cmfd::self_test(&a.devices, &a.cmfd_dir, &a.cmfd_mode, &a.cmfd_model, &state_dir);
         }
+        ensure!(!a.idle.on, "--idle: in 1.7.5 idle mode works with Pearl only (not CMFD)");
         return mine_cmfd(a);
     }
     if test {
