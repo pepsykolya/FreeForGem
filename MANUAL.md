@@ -46,10 +46,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.7.3):**
+**Installation URL (1.7.4):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -80,8 +80,8 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
-cd freeforgem-1.7.3
+tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
+cd freeforgem-1.7.4
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -102,8 +102,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.3-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
+1. Download **`freeforgem-1.7.4-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -154,7 +154,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.3-windows-x64
+cd /d C:\Mining\freeforgem-1.7.4-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -208,6 +208,10 @@ AlphaPool `eu1.alphapool.tech:5571` (also `us1`, `us2`, `ru1`, `sg1`), HimPool `
 **Kryptex** (checked in 1.4.1): `--pool prl-eu.kryptex.network:7048` (also `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
 `prl-ae` `.kryptex.network`; port 7048 is plain TCP). Wallet: your `prl1...` address. Kryptex reads the worker name from the login,
 so since 1.4.3 the miner sends `prl1....WORKER` there (before 1.4.3 Kryptex showed every rig as `worker`).
+**Kryptex username** (since 1.7.4): instead of the `prl1...` address the wallet can be your Kryptex account username (payouts in
+BTC/USDT with auto-conversion, statistics in the Kryptex dashboard); the miner logs in as `username/WORKER`. Windows: put the
+username into `WALLET` of a `start-kryptex-*.bat`; HiveOS: the username as the wallet, template `%WAL%.%WORKER_NAME%` as usual.
+Before 1.7.4 the Windows start file refused it ("WALLET does not look like a PRL address").
 Big rigs on Kryptex (more than ~0.5 PH/s per worker) can set a custom share difficulty since 1.4.5: `--password d=VALUE`
 (HiveOS: Extra config arguments; Windows: `PASSWORD` in the `.bat`), `VALUE = hashrate (H/s) × seconds per share / 4294967296`;
 the default is 2097152 (a 100 TH/s worker finds a share every ~90 s).
@@ -287,9 +291,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -970,10 +974,10 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.7.3):**
+**Ссылка для установки (1.7.4):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1004,8 +1008,8 @@ HiveOS кэширует скачанный архив по имени файла
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
-cd freeforgem-1.7.3
+tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
+cd freeforgem-1.7.4
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1026,8 +1030,8 @@ cd freeforgem-1.7.3
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.3-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.4-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1078,7 +1082,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.3-windows-x64
+cd /d C:\Mining\freeforgem-1.7.4-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1131,6 +1135,10 @@ AlphaPool `eu1.alphapool.tech:5571` (также `us1`, `us2`, `ru1`, `sg1`), Him
 **Kryptex** (проверено в 1.4.1): `--pool prl-eu.kryptex.network:7048` (также `prl`, `prl-us`, `prl-br`, `prl-sg`, `prl-hk`, `prl-ru`,
 `prl-ae` `.kryptex.network`; порт 7048 — обычный TCP). Кошелёк — ваш адрес `prl1...`. Kryptex берёт имя воркера из логина, поэтому с 1.4.3
 майнер отправляет туда `prl1....ВОРКЕР` (до 1.4.3 Kryptex показывал любой риг как `worker`).
+**Имя пользователя Kryptex** (с 1.7.4): вместо адреса `prl1...` кошельком может быть имя пользователя вашего аккаунта Kryptex
+(выплаты в BTC/USDT с автоконвертацией, статистика в личном кабинете Kryptex); майнер входит как `имя/ВОРКЕР`. Windows: имя —
+в `WALLET` файла `start-kryptex-*.bat`; HiveOS: имя как кошелёк, шаблон `%WAL%.%WORKER_NAME%` как обычно. До 1.7.4 стартовый
+файл Windows его не пропускал («WALLET does not look like a PRL address»).
 Крупным ригам на Kryptex (больше ~0.5 PH/s на воркер) с 1.4.5 можно задать свою сложность шары: `--password d=ЗНАЧЕНИЕ`
 (HiveOS — Extra config arguments; Windows — `PASSWORD` в `.bat`), `ЗНАЧЕНИЕ = хэшрейт (H/s) × секунд на шару / 4294967296`;
 по умолчанию 2097152 (воркер на 100 TH/s находит шару примерно раз в 90 с).
@@ -1209,9 +1217,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1897,7 +1905,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.7.2)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -1928,8 +1936,8 @@ HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同�
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.3-linux-x86_64.tar.gz
-cd freeforgem-1.7.3
+tar xzf freeforgem-1.7.4-linux-x86_64.tar.gz
+cd freeforgem-1.7.4
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -1950,8 +1958,8 @@ cd freeforgem-1.7.3
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.3-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.4-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -1993,7 +2001,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.3-windows-x64
+cd /d C:\Mining\freeforgem-1.7.4-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2037,6 +2045,7 @@ HimPool 的 NACR 收益归矿池。端口：AlphaPool `eu1.alphapool.tech:5571`�
 
 **Kryptex**（1.4.1 已验证）：`--pool prl-eu.kryptex.network:7048`（另有 `prl`、`prl-us`、`prl-br`、`prl-sg`、`prl-hk`、`prl-ru`、
 `prl-ae` `.kryptex.network`；7048 端口为普通 TCP）。钱包填写你的 `prl1...` 地址。Kryptex 从登录名中读取矿工名，因此自 1.4.3 起矿工在该矿池发送 `prl1....矿工名`（1.4.3 之前 Kryptex 把所有矿机显示为 `worker`）。
+**Kryptex 用户名**（自 1.7.4 起）：钱包也可以填写你的 Kryptex 账户用户名代替 `prl1...` 地址（以 BTC/USDT 支付并自动兑换，统计在 Kryptex 个人面板中查看）；矿工以 `用户名/矿工名` 登录。Windows：把用户名填入 `start-kryptex-*.bat` 的 `WALLET`；HiveOS：钱包填用户名，模板照常 `%WAL%.%WORKER_NAME%`。1.7.4 之前 Windows 启动文件会拒绝它（"WALLET does not look like a PRL address"）。
 大型矿机在 Kryptex 上（每个矿工超过约 0.5 PH/s）自 1.4.5 起可设置自定义份额难度：`--password d=数值`（HiveOS：Extra config arguments；Windows：`.bat` 中的 `PASSWORD`），`数值 = 算力 (H/s) × 每个份额秒数 / 4294967296`；默认 2097152（100 TH/s 的矿工约每 90 秒一个份额）。
 
 **证明压缩。** 当矿池在登录时同意后，证明以 gzip 压缩发送（约 5 KB，而不是约 270 KB：流量更少、提交更快、过期份额更少）：自 1.4.4 起矿工遵循
@@ -2106,9 +2115,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.3-linux-x86_64.tar.gz freeforgem-1.7.3.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.3-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.4-linux-x86_64.tar.gz freeforgem-1.7.4.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.4-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 

@@ -8,6 +8,8 @@ rem  FreeForGem for Windows - pool: Kryptex Singapore - EDIT THESE VALUES
 rem ================================================================
 rem Your PRL wallet address (prl1...). REPLACE the address below with YOUR OWN:
 rem as shipped it is the developer's address, and everything you mine would go there.
+rem Kryptex also takes your Kryptex account username here instead (payouts in BTC/USDT with auto-conversion):
+rem e.g.  set "WALLET=krxAbCd1234"  - the miner logs in as username/WORKER.
 set "WALLET=prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr"
 rem Stratum pool HOST:PORT (see MANUAL.md, section "Pools")
 set "POOL=prl-sg.kryptex.network:7048"

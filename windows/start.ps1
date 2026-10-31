@@ -70,7 +70,9 @@ if ($Noid) {
     # the miner sets a positive core offset to 0 for CMFD by itself; UV_OFFSET forces a value (at the user's risk).
     # AUTO_UV with CMFD: NVIDIA - an offset tuned and checked on the CMFD load itself (separate from the Pearl result);
     # AMD Radeon - amduv with the CMFD check, profile UV_GOAL
-} elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS).' }
+} elseif ($Pool -match 'kryptex\.network' -and $Wallet -notmatch '^prl1' -and $Wallet -cmatch '^[0-9A-Za-z_-]{1,64}(/[0-9A-Za-z._-]{1,64})?$') {
+    # a Kryptex account username (payouts in BTC/USDT, auto-conversion): the miner sends username/WORKER
+} elseif ($Wallet -cnotmatch '^[0-9A-Za-z]{20,100}(\+[0-9A-Za-z]{20,100})?$') { Fail 'WALLET does not look like a PRL address (prl1...), or PRL+NOCK for LuckyPool (prl1...+NOCK_ADDRESS), or a Kryptex username on a Kryptex pool.' }
 if (-not $Cmfd -and -not $Noid -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr') {
     Write-Host '************************************************************************' -ForegroundColor Yellow
     Write-Host ' WALLET is still the developer address from the example: you are mining' -ForegroundColor Yellow

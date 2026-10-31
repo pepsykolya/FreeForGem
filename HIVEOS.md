@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.3):**
+**Installation URL (1.7.4):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -37,6 +37,7 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
    | Hash algorithm | `pearlhash` (or leave `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
    | Pool URL | `pearl-eu2.luckypool.io:3360`, or Kryptex `prl-eu.kryptex.network:7048` (or any other Pearl stratum pool) |
+   | | Kryptex: the wallet may also be your Kryptex username (payouts in BTC/USDT with auto-conversion, since 1.7.4) |
    | Pass | leave empty |
    | Extra config arguments | optional, for example `--devices 0,1`; `--auto-uv` enables the undervolt tuner (see below) |
 
@@ -152,10 +153,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.3):**
+**Ссылка для установки (1.7.4):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.3/freeforgem-1.7.3.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.4/freeforgem-1.7.4.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
@@ -178,6 +179,7 @@ HiveOS кэширует скачанный архив по имени файла
    | Hash algorithm | `pearlhash` (или оставить `----`) |
    | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
    | Pool URL | `pearl-eu2.luckypool.io:3360` или Kryptex `prl-eu.kryptex.network:7048` (или любой другой stratum-пул Pearl) |
+   | | Kryptex: кошельком может быть и имя пользователя Kryptex (выплаты в BTC/USDT с автоконвертацией, с 1.7.4) |
    | Pass | пусто |
    | Extra config arguments | по желанию, например `--devices 0,1`; `--auto-uv` включает подбор андервольта (см. ниже) |
 

@@ -145,6 +145,19 @@ pub fn is_merge_pool(pool: &str) -> bool {
     host_in(pool, "himpool.com") || is_alphapool(pool)
 }
 
+/// Kryptex (`*.kryptex.network`): also takes a Kryptex account username instead of a PRL address (payouts in BTC/USDT,
+/// auto-conversion); the worker then follows a slash: `username/rig1`.
+pub fn is_kryptex(pool: &str) -> bool {
+    host_in(pool, "kryptex.network")
+}
+
+/// A Kryptex account username (not a `prl1...` address): letters, digits, `_` and `-`.
+pub fn is_kryptex_username(wallet: &str) -> bool {
+    !wallet.is_empty()
+        && !wallet.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("prl1"))
+        && wallet.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// AlphaPool (`*.alphapool.tech`) wants mining.authorize first: a mining.subscribe gets error 24 and the connection is closed.
 pub fn is_alphapool(pool: &str) -> bool {
     host_in(pool, "alphapool.tech")
@@ -175,7 +188,7 @@ pub fn pool_addr(pool: &str) -> Result<String, String> {
 /// Wallet string sent in mining.authorize. LuckyPool: as given. HimPool/AlphaPool: the `+NACR` (`+NOCK`) parts are kept
 /// (merge mining). Other pools (Kryptex): a `+...` part is dropped (such a login is refused). Outside LuckyPool the worker
 /// is appended as `wallet.worker`, because those pools read the worker name from the login string, not from the `worker`
-/// field. Returns the wallet and a note for the log.
+/// field; a Kryptex account username gets it as `username/worker`. Returns the wallet and a note for the log.
 pub fn login_wallet(pool: &str, wallet: &str, worker: &str) -> (String, Option<String>) {
     if is_luckypool(pool) {
         return (wallet.to_string(), None);
@@ -190,7 +203,13 @@ pub fn login_wallet(pool: &str, wallet: &str, worker: &str) -> (String, Option<S
             w = prl;
         }
     }
-    if worker.is_empty() || w.contains('.') || w.contains('/') { (w.to_string(), note) } else { (format!("{w}.{worker}"), note) }
+    if worker.is_empty() || w.contains('.') || w.contains('/') {
+        (w.to_string(), note)
+    } else if is_kryptex(pool) && is_kryptex_username(w) {
+        (format!("{w}/{worker}"), note)
+    } else {
+        (format!("{w}.{worker}"), note)
+    }
 }
 
 fn wallet(l: &Login) -> &str {
@@ -427,6 +446,18 @@ mod login_tests {
         assert!(note.is_some());
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", &format!("{p}/own"), "rig1").0, format!("{p}/own"));
         assert_eq!(login_wallet("prl-eu.kryptex.network:7048", p, "").0, p);
+    }
+
+    #[test]
+    fn login_wallet_kryptex_username() {
+        let k = "prl-eu.kryptex.network:7048";
+        assert_eq!(login_wallet(k, "krxAbCd1234", "rig1").0, "krxAbCd1234/rig1");
+        assert_eq!(login_wallet(k, "krxAbCd1234/own", "rig1").0, "krxAbCd1234/own");
+        assert_eq!(login_wallet(k, "krxAbCd1234", "").0, "krxAbCd1234");
+        assert_eq!(login_wallet(k, "PRL1abcdefghijklmnopqrstuvwxyz", "rig1").0, "PRL1abcdefghijklmnopqrstuvwxyz.rig1");
+        // only Kryptex takes a username: other pools keep wallet.worker
+        assert_eq!(login_wallet("pearl.example.org:3333", "krxAbCd1234", "rig1").0, "krxAbCd1234.rig1");
+        assert!(is_kryptex_username("user_name-1") && !is_kryptex_username("prl1abc") && !is_kryptex_username("a.b"));
     }
 
     #[test]

@@ -27,7 +27,7 @@ amduv.exe (tunes once ~10-15 min, restores your settings on exit; run as Adminis
 Self-test (optional): open cmd in this folder and run  freeforgem.exe --self-test
 If the log says "embedded search kernel could not be loaded", update the NVIDIA driver (525+); the GPU must be Ampere (RTX 30xx) or newer.
 If Defender/SmartScreen blocks the start: "More info -> Run anyway", or add the folder to the exclusions.
-Check the archive SHA-256 against the release page:  certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256
+Check the archive SHA-256 against the release page:  certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256
 
 POOLS (POOL=HOST:PORT; ports 3360 / 3361 / 3362 = share difficulty 2M / 4M / 8M)
 pearl-eu2.luckypool.io:3360 (default, Europe); Kryptex prl-eu.kryptex.network:7048; see MANUAL.md for the other regions.
@@ -70,7 +70,7 @@ AMD Radeon RX 6000 (RDNA2, проверено на RX 6800 XT; с 1.6.0): нуж
 amduv.exe (подбор один раз ~10-15 мин, при выходе возвращает ваши настройки; запуск от администратора). MANUAL.md, раздел 14.
 Проверка (по желанию): в cmd в этой папке выполните  freeforgem.exe --self-test
 Если Defender/SmartScreen блокирует запуск: "Подробнее -> Выполнить в любом случае" или добавьте папку в исключения.
-Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256
+Сверьте SHA-256 архива со страницей релиза:  certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256
 
 АНДЕРВОЛЬТ (по желанию): в start.bat уберите "rem" перед  set "AUTO_UV=1"  и запустите start.bat от администратора.
 С 1.7.2 результат хранится для каждого лока ядра (LOCK_CCLOCK); --uv-reset в EXTRA забывает только текущий лок, --uv-reset-all - все.
@@ -99,7 +99,7 @@ FreeForGem Windows 10/11 (x64) 版
 
 只需要 NVIDIA 驱动 525 或更新版本（不需要 CUDA、Python 和 WSL）。一个进程驱动所有显卡。
 如果 Defender/SmartScreen 阻止运行：点击"更多信息 -> 仍要运行"，或将该文件夹加入排除项。
-请对照发布页面核对压缩包的 SHA-256：  certutil -hashfile freeforgem-1.7.3-windows-x64.zip SHA256
+请对照发布页面核对压缩包的 SHA-256：  certutil -hashfile freeforgem-1.7.4-windows-x64.zip SHA256
 
 可选降压：在 start.bat 中删除  set "AUTO_UV=1"  前面的 "rem"，并以管理员身份运行 start.bat。
 自 1.7.2 起结果按核心锁频（LOCK_CCLOCK）分别保存；在 EXTRA 中加 --uv-reset 只清除当前锁频，--uv-reset-all 清除全部。
