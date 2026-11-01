@@ -248,8 +248,15 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
         // idle mode, light load while the PC is in use (1.7.5): in every 200 ms mine PCT % of it, let the queue run dry, then
         // rest (light:30 = 60 ms of work, 140 ms idle: short enough not to stall a game's frames for long).  An RTX 4070 Laptop
         // stays at 150-500 MHz under such a load (its driver does not boost for bursts): ~5 % of the hashrate, not 30 %
-        if let crate::idle::Mode::Light(pct) = crate::idle::mode() {
-            if burst.elapsed() >= std::time::Duration::from_millis(2 * pct as u64) {
+        // --temp-limit (1.7.6) works the same way: the smaller of the two shares; 0 % = stopped
+        if let Some(pct) = crate::templimit::duty(gs.dev) {
+            if pct == 0 {
+                if let Some(p) = pending.take() {
+                    finish(p, &mut hit_buf, sh, gs, work_tx)?;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                burst = Instant::now();
+            } else if burst.elapsed() >= std::time::Duration::from_millis(2 * pct as u64) {
                 if let Some(p) = pending.take() {
                     finish(p, &mut hit_buf, sh, gs, work_tx)?;
                 }

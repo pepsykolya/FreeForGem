@@ -23,8 +23,11 @@
 //!     verdict, no 24 h pause, and the crash marker of the interrupted check is removed (a driver fault keeps its marker).
 //!   * the owner's offset is put back on exit by offset.rs (marker file for crashes).
 use super::{gpu, offset};
+use crate::climb;
 use crate::hiveoc::{self, ResetLimit};
+use crate::monitor::{self, RejectBurst, reval_interval};
 use crate::nvml::{Dev, Nvml};
+use crate::profiles::{self, Profile, Store};
 use crate::uv::{self, DISABLE_SECS, HARD_CAP, Saved, fmt_age, fmt_w, now, saved_vs_limit, short_bus, short_name, signed};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -36,7 +39,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const SECTION: &str = "noid";
-const TRYING: &str = "noid_trying";
 const START: i32 = 120; // default first step (RTX 3070: NOID edge +235..+250 at 1400..1650 MHz)
 const STEP_SECS: u32 = 40; // agent M: 40 s of stress per step (first silent errors after ~12 s at the edge)
 const BASE_SECS: u32 = 20; // the base is measured once, for the efficiency comparison of the result
@@ -119,11 +121,23 @@ impl Entry {
     }
 }
 
-/// uv.json, shared with the Pearl tuner and the CMFD one (other sections are kept as they are).
+impl Profile for Entry {
+    fn from_json(v: &Value) -> Option<Entry> {
+        Entry::from_json(v)
+    }
+    fn to_json(&self) -> Value {
+        Entry::to_json(self)
+    }
+    fn same_clocks(&self, other: &Entry) -> bool {
+        same_clocks(self, other)
+    }
+}
+
+/// uv.json, shared with the Pearl tuner and the CMFD one (other sections are kept as they are): the shared store (profiles.rs)
+/// with this tuner's sections ("noid", "noid_trying"); the profile key is "eff@1400" / "eff@~1815" (the mode is the scope).
 struct Db {
     dir: PathBuf,
-    v: Mutex<Value>,
-    keys: Mutex<std::collections::HashMap<String, String>>, // uuid -> profile key in use ("eff@1400", "eff@~1815")
+    s: Store,
 }
 
 /// Key of a NOID profile (1.7.2): the mode and the core lock set by the miner ("eff@1400"), else the clock under load at the base
@@ -160,43 +174,40 @@ fn fits(e: &Entry, lock: Option<u32>, clk: Option<u32>) -> bool {
     }
 }
 
-impl Db {
-    fn load(dir: &Path) -> Db {
-        let v = std::fs::read_to_string(uv::results_path(dir))
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .filter(Value::is_object)
-            .unwrap_or_else(|| json!({"version": 1, "gpus": {}}));
-        let mut v = v;
-        // before 1.7.2: one result per card and mode ("eff"); kept as the profile of its --lock-cclock, dropped without one (the
-        // clock it was found at is unknown)
-        let mut moved = 0;
-        if let Some(sec) = v[SECTION].as_object_mut() {
-            for (_, card) in sec.iter_mut() {
-                let Some(m) = card.as_object_mut() else { continue };
-                let old: Vec<String> = m.keys().filter(|k| !k.contains('@')).cloned().collect();
-                for k in old {
-                    let e = m.remove(&k).and_then(|x| Entry::from_json(&x));
-                    if let Some(e) = e.filter(|e| e.core_lock != 0) {
-                        m.insert(pkey(&k, &e), e.to_json());
-                        moved += 1;
-                    }
+/// Before 1.7.2: one result per card and mode ("eff"); kept as the profile of its --lock-cclock, dropped without one (the clock it
+/// was found at is unknown).  Returns how many were kept.
+fn migrate(v: &mut Value) -> usize {
+    let mut moved = 0;
+    if let Some(sec) = v[SECTION].as_object_mut() {
+        for (_, card) in sec.iter_mut() {
+            let Some(m) = card.as_object_mut() else { continue };
+            let old: Vec<String> = m.keys().filter(|k| !k.contains('@')).cloned().collect();
+            for k in old {
+                let e = m.remove(&k).and_then(|x| Entry::from_json(&x));
+                if let Some(e) = e.filter(|e| e.core_lock != 0) {
+                    m.insert(pkey(&k, &e), e.to_json());
+                    moved += 1;
                 }
             }
         }
-        if moved > 0 {
-            lg(format!("{moved} NOID result(s) from before 1.7.2 kept as the profiles of their --lock-cclock"));
-            let _ = uv::write_atomic(&uv::results_path(dir), &serde_json::to_string_pretty(&v).unwrap());
-        }
-        Db { dir: dir.to_path_buf(), v: Mutex::new(v), keys: Mutex::new(Default::default()) }
+    }
+    if moved > 0 {
+        lg(format!("{moved} NOID result(s) from before 1.7.2 kept as the profiles of their --lock-cclock"));
+    }
+    moved
+}
+
+fn log_line(m: &str) {
+    lg(m);
+}
+
+impl Db {
+    fn load(dir: &Path) -> Db {
+        Db { dir: dir.to_path_buf(), s: Store::load(dir, profiles::NOID, log_line, migrate) }
     }
     /// All profiles of this card and mode.
     fn profiles(&self, uuid: &str, mode: &str) -> Vec<(String, Entry)> {
-        let pre = format!("{mode}@");
-        let v = self.v.lock().unwrap();
-        let mut out: Vec<(String, Entry)> = v[SECTION][uuid].as_object().map(|m| m.iter().filter(|(k, _)| k.starts_with(&pre)).filter_map(|(k, x)| Entry::from_json(x).map(|e| (k.clone(), e))).collect()).unwrap_or_default();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
+        self.s.list(uuid, &format!("{mode}@"))
     }
     fn line(&self, uuid: &str, mode: &str) -> String {
         let p = self.profiles(uuid, mode);
@@ -206,64 +217,27 @@ impl Db {
         p.iter().map(|(k, e)| format!("{}:{}{}", k.split_once('@').map_or(k.as_str(), |x| x.1), signed(e.offset), if e.disabled_until > now() { " (paused)" } else { "" })).collect::<Vec<_>>().join(", ")
     }
     fn use_key(&self, uuid: &str, key: &str) {
-        self.keys.lock().unwrap().insert(uuid.into(), key.into());
+        self.s.use_key(uuid, key);
     }
     fn forget(&self, uuid: &str, key: &str) {
-        let mut v = self.v.lock().unwrap();
-        if v[SECTION][uuid].as_object_mut().is_some_and(|m| m.remove(key).is_some()) {
-            self.write(&v);
-        }
-        self.keys.lock().unwrap().remove(uuid);
-    }
-    fn write(&self, v: &Value) {
-        if let Err(e) = uv::write_atomic(&uv::results_path(&self.dir), &serde_json::to_string_pretty(v).unwrap()) {
-            lg(format!("cannot save {}: {e:#}", uv::results_path(&self.dir).display()));
-        }
+        self.s.forget(uuid, &[key.to_string()]);
     }
     /// The profile in use on this card (chosen at start), if any.
     fn entry(&self, uuid: &str, _mode: &str) -> Option<Entry> {
-        let k = self.keys.lock().unwrap().get(uuid).cloned()?;
-        self.v.lock().unwrap()[SECTION].get(uuid).and_then(|c| c.get(&k)).and_then(Entry::from_json)
+        self.s.current(uuid)
     }
     /// Saves `e` as the profile of its mode and clocks; the profile of the same clocks is replaced, the others stay.
     fn save(&self, uuid: &str, mode: &str, e: &Entry) {
-        let key = pkey(mode, e);
-        let mut v = self.v.lock().unwrap();
-        if !v[SECTION].is_object() {
-            v[SECTION] = json!({});
-        }
-        if !v[SECTION][uuid].is_object() {
-            v[SECTION][uuid] = json!({});
-        }
-        let pre = format!("{mode}@");
-        let same: Vec<String> = v[SECTION][uuid].as_object().unwrap().iter().filter(|(k, x)| k.starts_with(&pre) && **k != key && Entry::from_json(x).is_some_and(|o| same_clocks(&o, e))).map(|(k, _)| k.clone()).collect();
-        let m = v[SECTION][uuid].as_object_mut().unwrap();
-        for k in same {
-            m.remove(&k);
-        }
-        m.insert(key.clone(), e.to_json());
-        self.write(&v);
-        drop(v);
-        self.use_key(uuid, &key);
+        self.s.save(uuid, &format!("{mode}@"), &pkey(mode, e), e);
     }
     fn mark_trying(&self, uuid: &str, at: i32) {
-        let mut v = self.v.lock().unwrap();
-        if !v[TRYING].is_object() {
-            v[TRYING] = json!({});
-        }
-        v[TRYING][uuid] = json!({"offset": at});
-        self.write(&v);
+        self.s.mark_trying(uuid, at);
     }
     fn clear_trying(&self, uuid: &str) {
-        let mut v = self.v.lock().unwrap();
-        if v[TRYING].as_object_mut().is_some_and(|t| t.remove(uuid).is_some()) {
-            self.write(&v);
-        }
+        self.s.clear_trying(uuid);
     }
-    fn take_trying(&self, uuid: &str) -> Option<i32> {
-        let t = self.v.lock().unwrap()[TRYING].get(uuid).cloned()?;
-        self.clear_trying(uuid);
-        Some(t["offset"].as_i64()? as i32)
+    fn take_trying(&self, uuid: &str) -> Option<profiles::Crash> {
+        self.s.take_trying(uuid)
     }
 }
 
@@ -281,7 +255,7 @@ pub fn forget_trying_on_stop() {
         (g.0.clone(), g.1.clone())
     };
     let Some(db) = db else { return };
-    let ids: Vec<String> = db.v.lock().unwrap()[TRYING].as_object().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+    let ids: Vec<String> = db.s.trying_ids();
     for id in ids.iter().filter(|id| !faulted.contains(id)) {
         db.clear_trying(id);
     }
@@ -304,6 +278,7 @@ struct LiveCard {
     owned: bool,
     busy: Arc<AtomicBool>, // a quick check after an OC apply runs
     next_read: Instant,
+    next_reval: Instant, // 1.7.6: the next periodic re-validation of a tuned offset (--uv-reval-hours)
     resets: Arc<ResetLimit>,
     card: Option<Card>, // tuned cards: what the quick check after an OC apply needs
     pause: Option<(Arc<AtomicBool>, Arc<AtomicBool>)>, // (pause request, paused) of the mining thread of this GPU
@@ -319,6 +294,8 @@ pub struct Live {
     driver: String,
     stop: Arc<AtomicBool>,
     cards: Mutex<Vec<LiveCard>>,
+    rej: Mutex<RejectBurst>, // 1.7.6: a burst of rejected shares steps the tuned cards back
+    aside: AtomicBool,       // idle mode (1.7.6): the owner's offsets are on the cards while the PC is in use
 }
 
 #[derive(Clone)]
@@ -332,6 +309,9 @@ struct Card {
     max: i32,
     max_src: &'static str,
     start: i32,
+    start_src: &'static str,
+    min_given: bool,          // --uv-min (or a re-tune that goes on above a verified offset): no start from another profile
+    lock_hint: Option<u32>,   // the lock the card will have: --lock-cclock, else the HiveOS profile's
     kernel: String,
     pl: f64,
 }
@@ -348,6 +328,7 @@ struct Res {
     reason: String,
     fault: bool,
     infra: bool, // the check could not run at all (no executable / process start): says nothing about the GPU
+    unavail: bool, // the check process could not open the GPU (busy / unavailable): says nothing about the offset (1.7.6)
     launches: u64,
     mhs: f64,
     watts: Option<f64>,
@@ -405,9 +386,22 @@ impl Tuner<'_> {
 
     fn check_states(&self, c: &Card, at: i32, secs: u32) -> Res {
         let mut r = Res::default();
-        for attempt in 0..3 {
+        let mut unavail = 0u32;
+        let mut attempt = 0;
+        while attempt < 3 {
             r = self.check_once(c, at, secs);
-            if r.fault || r.infra || self.stopped() {
+            if r.unavail && !self.stopped() {
+                // a GPU that cannot be opened: wait and repeat the same check (1.7.6, ffgs)
+                monitor::wait_unavailable(unavail, &|| self.stopped(), &c.label(), &signed(at), &r.reason, c.r.dev);
+                unavail += 1;
+                continue;
+            }
+            if unavail > 0 && r.ok {
+                lg(format!("{} can be opened again after {unavail} attempt(s): the check at {} went on", c.label(), signed(at)));
+            }
+            attempt += 1;
+            let attempt = attempt - 1;
+            if r.fault || r.infra || r.unavail || self.stopped() {
                 break;
             }
             let Some(v) = changed_during(c, at) else { break };
@@ -568,6 +562,11 @@ impl Tuner<'_> {
         }
         let Some(line) = result else {
             res.reason = format!("the check process ended without a result{}", if tail.is_empty() { String::new() } else { format!(": {}", tail.join(" | ")) });
+            if monitor::gpu_unavailable(&res.reason) {
+                res.unavail = true; // not a crash at this offset: no marker, no fault
+                self.db.clear_trying(&c.uuid);
+                return res;
+            }
             res.fault = true;
             return res;
         };
@@ -617,7 +616,7 @@ impl Tuner<'_> {
     /// pause, nothing above the base, a GPU left out); None = a check or a tuning, run once mining has started (start_jobs).
     fn quick(&self, c: &Card) -> Option<i32> {
         let mode = super::mode_name(self.mode);
-        if self.db.v.lock().unwrap()[TRYING].get(&c.uuid).is_some() || self.o.reset {
+        if self.db.s.has_trying(&c.uuid) || self.o.reset {
             return None;
         }
         if let Some(r) = crate::faults::get(&self.db.dir, &c.uuid) {
@@ -656,9 +655,11 @@ impl Tuner<'_> {
         // a crash at an offset (during a check, or while mining: faults.rs): with a profile of these clocks the card steps back from
         // it (to the verified offset, or one step below the crash) after a quick check; without one it is tuned below it (1.7.2)
         let mut crash_at: Option<i32> = None;
-        if let Some(at) = self.db.take_trying(&c.uuid) {
-            lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): that offset counts as failed", c.label(), signed(at)));
-            crash_at = Some(at);
+        let mut crash_good: Option<i32> = None; // the highest step that had passed before it (1.7.6: in the marker)
+        if let Some(k) = self.db.take_trying(&c.uuid) {
+            lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): that offset counts as failed", c.label(), signed(k.at)));
+            crash_at = Some(k.at);
+            crash_good = k.good;
         }
         // a crash while mining at a tuned NOID offset (faults.rs, 1.7.2): that offset counts as failed
         if let Some(mut r) = crate::faults::get(&self.db.dir, &c.uuid) {
@@ -700,9 +701,10 @@ impl Tuner<'_> {
             lg(format!("{} --uv-reset: {} forgotten; the other NOID profiles are kept (--uv-reset-all forgets all)", c.label(), sel.as_deref().unwrap_or("no profile")));
             return self.tune(c, None);
         }
-        let Some(key) = sel else { return self.tune(c, crash_at) };
+        let crash = crash_at.map(|at| profiles::Crash { at, good: crash_good });
+        let Some(key) = sel else { return self.tune(c, crash) };
         self.db.use_key(&c.uuid, &key);
-        let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash_at) };
+        let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash) };
         if let Some(at) = crash_at {
             let want = if e.offset < at { e.offset } else { at - uv::crash_back(self.o.step.max(1)) };
             lg(format!("{} NOID profile {key}: {} {} after a quick check (no tuning from scratch)", c.label(), if e.offset < at { "back to the verified" } else { "30 MHz below the crash:" }, signed(want)));
@@ -742,6 +744,7 @@ impl Tuner<'_> {
                 lg(format!("{} the limit was raised to {} ({}): tuning on above the verified {}", c.label(), signed(c.max), c.max_src, signed(e.offset)));
                 let mut from = c.clone();
                 from.start = e.offset;
+                from.min_given = true;
                 return self.tune(&from, None);
             }
         };
@@ -833,8 +836,15 @@ impl Tuner<'_> {
         c.base
     }
 
-    /// Full tune; `below`: an offset known to fail (search stays under it).
-    fn tune(&self, c: &Card, below: Option<i32>) -> i32 {
+    /// Full tune; `below`: a crash (an offset known to fail, and the highest step that had passed before it): the search stays
+    /// 30 MHz under it and does not climb the steps that passed again.
+    fn tune(&self, c: &Card, below: Option<profiles::Crash>) -> i32 {
+        let r = self.tune_inner(c, below);
+        self.db.s.set_good(&c.uuid, None);
+        r
+    }
+
+    fn tune_inner(&self, c: &Card, below: Option<profiles::Crash>) -> i32 {
         let mode = super::mode_name(self.mode);
         let _status = crate::status::Guard(c.r.dev);
         {
@@ -845,8 +855,9 @@ impl Tuner<'_> {
         let step = self.o.step.max(1);
         let mut max = c.max;
         if let Some(b) = below {
-            max = max.min(b - step);
+            max = max.min(b.at - uv::crash_back(step));
         }
+        self.db.s.set_good(&c.uuid, None);
         lg(format!(
             "{} tuning the NOID offset ({mode} kernel {}): base {}, start {}, limit {} ({}), step {step}, {} s of stress per step",
             c.label(),
@@ -890,7 +901,30 @@ impl Tuner<'_> {
             let _ = offset::set(&c.r.bus, c.base);
             return c.base;
         }
-        let mut o = c.start.min(max).max(c.base + step);
+        let mut start = c.start;
+        // 1.7.6: a new clock lock that has a verified profile of a higher clock starts below that profile's offset (not with
+        // --uv-min, not after a crash)
+        if !c.min_given && below.is_none() {
+            let hints: Vec<climb::HintProfile> = self
+                .db
+                .profiles(&c.uuid, mode)
+                .iter()
+                .map(|(k, e)| climb::HintProfile {
+                    clk: if e.core_lock != 0 { e.core_lock } else { e.clk },
+                    mlock: 0,
+                    offset: e.offset,
+                    usable: e.verified_at > 0 && e.disabled_until <= now() && e.offset > e.base,
+                    label: k.split_once('@').map_or(k.clone(), |x| x.1.to_string()),
+                    verified_at: e.verified_at,
+                })
+                .collect();
+            let my = c.r.core_lock.or(c.lock_hint).unwrap_or(0);
+            if let Some((h, from)) = climb::hint_start(&hints, my, 0, start, max, self.o.coarse_step()) {
+                lg(format!("{} {}", c.label(), climb::hint_line(&from, self.o.coarse_step(), h, start)));
+                start = h;
+            }
+        }
+        let mut o = start.min(max).max(c.base + step);
         // the start step itself must hold; else one step lower until one does (or the base)
         while o > c.base && !self.stopped() {
             let r = self.check(c, o, self.step_secs());
@@ -907,64 +941,62 @@ impl Tuner<'_> {
             edge = o;
             o -= step.max(30); // a failing start: 30 MHz lower (1.7.2)
         }
+        if edge == 0 && last_ok > c.base {
+            // after a crash: the steps up to the last good one already passed in the previous run
+            if let Some(g) = below.and_then(|b| b.good).filter(|&g| g > last_ok && g <= max) {
+                lg(format!("{} steps up to {} passed before the crash: not climbing them again", c.label(), signed(g)));
+                last_ok = g;
+                good = (0.0, 0.0);
+            }
+        }
         let mut plateau = false;
         if last_ok > c.base && edge == 0 {
-            // upwards to the first failure, or to the voltage floor: two steps in a row that save < 0.5 W (agent M's rule:
-            // below ~1400 MHz an RTX 3070 already sits at its minimum voltage, a higher offset only adds risk)
-            // 30 MHz steps below the edge, then the step (15) between the last good one and the first failure (beta5: Rig01
-            // speed edges +315..+435 took ~20 min per lock in 15 MHz steps)
-            let mut st = if step < 30 { 30 } else { step };
-            let mut coarse_fail = 0;
-            let mut o = last_ok + st;
-            let mut flat = 0;
-            let mut plateau_at = None;
-            let mut hist: Vec<(i32, f64, f64)> = vec![(last_ok, good.0, good.1)];
-            while o <= max && !self.stopped() {
+            // upwards to the first failure, or to the voltage floor (climb.rs, shared with Pearl and CMFD): coarse steps (30 MHz) below
+            // the edge, then the fine step inside the interval of the first failing one (beta5: Rig01 speed edges +315..+435
+            // took ~20 min per lock in 15 MHz steps); two passed steps in a row that save little power = the voltage floor
+            // (agent M's rule: below ~1400 MHz an RTX 3070 already sits at its minimum voltage, a higher offset only adds risk)
+            let coarse = self.o.coarse_step();
+            let mut seen: Vec<(i32, f64, f64)> = vec![(last_ok, good.0, good.1)]; // (offset, MH/s, W) of every passed step
+            let mut infra: Option<Res> = None;
+            let s = climb::climb(last_ok, Some(good.1).filter(|&w| w > 0.0), max, step, coarse, |o, g, mhz, refine| {
+                self.db.s.set_good(&c.uuid, Some(g)); // the crash marker of this check remembers it
                 let r = self.check(c, o, self.step_secs());
                 if r.infra {
-                    return self.abort(c, &r);
+                    infra = Some(Res { reason: r.reason.clone(), infra: true, ..Default::default() });
+                    return climb::StepOut { abort: true, ..Default::default() };
                 }
-                if !r.ok && st > step && o - st + step < o && last_ok + step < o {
-                    lg(format!("{} {}: FAILED ({}): {step} MHz steps from {} below it", c.label(), signed(o), r.reason, signed(last_ok + step)));
-                    coarse_fail = o;
-                    max = max.min(o - step);
-                    st = step;
-                    o = last_ok + step;
-                    continue;
+                if self.stopped() {
+                    return climb::StepOut { abort: true, ..Default::default() };
                 }
-                if !r.ok {
-                    lg(format!("{} {}: FAILED ({}): edge found", c.label(), signed(o), r.reason));
-                    edge = o;
-                    break;
+                if r.ok {
+                    lg(format!("{} {}{}: ok ({})", c.label(), signed(o), if refine { " (refining)" } else { "" }, r.brief()));
+                    seen.push((o, r.mhs, r.watts.unwrap_or(0.0)));
+                } else {
+                    let note = if refine {
+                        ": edge found".to_string()
+                    } else if r.fault && mhz > step {
+                        format!(": driver fault on a {mhz} MHz step, not refined (one step below {})", signed(g))
+                    } else if mhz > step && g + step <= o - step {
+                        format!(": {step} MHz steps from {} below it", signed(g + step))
+                    } else {
+                        ": edge found".to_string()
+                    };
+                    lg(format!("{} {}: FAILED ({}){note}", c.label(), signed(o), r.reason));
                 }
-                lg(format!("{} {}: ok ({})", c.label(), signed(o), r.brief()));
-                let w = r.watts.unwrap_or(0.0);
-                let prev_w = hist.last().map_or(0.0, |h| h.2);
-                flat = if w > 0.0 && prev_w > 0.0 && prev_w - w < 0.5 { flat + 1 } else { 0 };
-                last_ok = o;
-                good = (r.mhs, w);
-                hist.push((o, r.mhs, w));
-                if flat >= 2 {
-                    plateau_at = Some(hist[hist.len() - 3]);
-                    break;
-                }
-                o += st;
+                climb::StepOut { ok: r.ok, fault: r.fault, w: r.watts, abort: false }
+            });
+            if let Some(r) = infra {
+                return self.abort(c, &r);
             }
-            if edge == 0 && coarse_fail != 0 && plateau_at.is_none() && !self.stopped() {
-                // every fine step below the coarse failure passed: that failure is the edge
-                lg(format!("{} edge at {} (the 30 MHz step that failed)", c.label(), signed(coarse_fail)));
-                edge = coarse_fail;
+            if s.failed {
+                edge = s.fail_at;
             }
-            if let Some((p, m, w)) = plateau_at {
-                lg(format!(
-                    "{} power no longer drops above {} (voltage floor: {} and {} saved < 0.5 W each): stopping here, no edge searched beyond",
-                    c.label(),
-                    signed(p),
-                    signed(hist[hist.len() - 2].0),
-                    signed(hist[hist.len() - 1].0)
-                ));
-                last_ok = p;
+            last_ok = s.good;
+            if let Some(&(_, m, w)) = seen.iter().rev().find(|x| x.0 == last_ok) {
                 good = (m, w);
+            }
+            if s.plateau {
+                lg(format!("{} power no longer drops above {} (voltage floor: the two steps above it, up to {}, saved < 0.5 W per 15 MHz each): stopping here, no edge searched beyond", c.label(), signed(last_ok), signed(s.flat_top)));
                 plateau = true;
             }
         }
@@ -1013,7 +1045,7 @@ impl Tuner<'_> {
             good = (e.mhs_base, e.w_base);
         }
         e.offset = res;
-        e.cap = max;
+        e.cap = c.max;
         e.edge = edge;
         e.clk_ok = conf_clk.unwrap_or(0);
         (e.mhs, e.w) = good;
@@ -1047,6 +1079,8 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         driver: String::new(),
         stop: stop.clone(),
         cards: Mutex::new(Vec::new()),
+        rej: Mutex::new(RejectBurst::new(Instant::now())),
+        aside: AtomicBool::new(false),
     };
     let Some(nv) = nv else {
         if o.auto || o.fixed.is_set() {
@@ -1056,10 +1090,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
     };
     live.driver = nv.driver_version();
     if o.reset_all {
-        let db = Db::load(dir);
-        let mut v = db.v.lock().unwrap();
-        if v.as_object_mut().is_some_and(|m| m.remove(SECTION).is_some()) {
-            db.write(&v);
+        if Db::load(dir).s.forget_all() {
             lg("saved NOID results forgotten (--uv-reset-all)");
         }
     }
@@ -1075,7 +1106,8 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
         // +120..+195), else +120
         let lock_hint = r.core_lock.or_else(|| crate::hiveoc::load().and_then(|p| nv.index(d).and_then(|i| p.core_lock(i as usize))));
         let coin = if mode == super::gpu::MODE_SPEED { uv::Coin::NoidSpeed } else { uv::Coin::Noid };
-        let start = o.min_offset.get(r.pos).or_else(|| uv::arch_start(&r.name, coin, lock_hint).map(|x| x.0)).unwrap_or(START).max(lo);
+        let (start, start_src) = uv::search_start(coin, &r.name, &def, lock_hint, o.min_offset.get(r.pos), max, (START, "default"));
+        let start = start.max(lo);
         list.push(Card {
             r: r.clone(),
             nv: d,
@@ -1086,6 +1118,9 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
             max,
             max_src,
             start,
+            start_src,
+            min_given: o.min_offset.get(r.pos).is_some(),
+            lock_hint,
             kernel: gpu::kernel_label_for(r.dev, mode),
             pl: nv.power_limit_w(d).unwrap_or(0.0),
         });
@@ -1131,7 +1166,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
     } else {
         if o.auto {
             for c in &list {
-                lg(format!("{} dry run: would tune the NOID offset from {} (base {}, start {}, limit {} {}); offset now {}", c.label(), signed(c.base), signed(c.base), signed(c.start), signed(c.max), c.max_src, signed(c.orig)));
+                lg(format!("{} dry run: would tune the NOID offset from {} (base {}, start {} ({}), limit {} {}); offset now {}", c.label(), signed(c.base), signed(c.base), signed(c.start), c.start_src, signed(c.max), c.max_src, signed(c.orig)));
             }
         }
         set_base(&list);
@@ -1163,6 +1198,7 @@ pub fn prepare(nv: Option<&'static Nvml>, cards: &[CardRef], o: &uv::Opts, mode:
             owned: true,
             busy: Arc::new(AtomicBool::new(job)),
             next_read: Instant::now() + Duration::from_secs(30),
+            next_reval: Instant::now() + reval_interval(o.reval_hours),
             resets: Arc::new(ResetLimit::default()),
             card: (tuned || job).then_some(c),
             pause: None,
@@ -1222,6 +1258,7 @@ pub fn start_jobs(live: &Arc<Live>) {
                 c.want = v;
                 c.tuned = v > card.base;
                 c.next_read = Instant::now() + Duration::from_secs(30);
+                c.next_reval = Instant::now() + reval_interval(l2.o.reval_hours);
                 c.busy.store(false, Ordering::SeqCst);
             }
             if let Some((p, _)) = &pause {
@@ -1231,30 +1268,75 @@ pub fn start_jobs(live: &Arc<Live>) {
     }
 }
 
+/// Idle mode (1.7.6), the PC is in use and mining is paused: the owner's offsets go back on the cards (a tuned offset at an unlocked
+/// clock is too high a clock).  Returns false while a check or a tuning of a card still runs (it finishes first: cut short it would
+/// read as a failed step); call again.  Without `aside` (light load: the GPUs keep mining) nothing changes here.
+pub fn suspend(live: &Live, aside: bool) -> bool {
+    if !aside || live.nv.is_none() {
+        return true;
+    }
+    let mut g = live.cards.lock().unwrap();
+    if g.iter().any(|c| c.busy.load(Ordering::SeqCst) || c.job) {
+        return false;
+    }
+    if !live.aside.swap(true, Ordering::SeqCst) {
+        for c in g.iter_mut().filter(|c| c.owned) {
+            if offset::current(&c.bus).is_some_and(|v| v != c.orig) {
+                if let Err(e) = offset::set(&c.bus, c.orig) {
+                    lg(format!("GPU{} cannot put the offset {} back for the pause: {e:#}", c.dev, signed(c.orig)));
+                }
+            }
+        }
+    }
+    true
+}
+
+/// The PC is idle again: the offsets of this run (tuned / base) go back on the cards.
+pub fn resume(live: &Live) {
+    if !live.aside.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let mut g = live.cards.lock().unwrap();
+    for c in g.iter_mut().filter(|c| c.owned) {
+        if offset::current(&c.bus) != Some(c.want) {
+            if let Err(e) = offset::set(&c.bus, c.want) {
+                lg(format!("GPU{} cannot set the offset {} again after the pause: {e:#}", c.dev, signed(c.want)));
+            }
+        }
+        c.next_read = Instant::now() + Duration::from_secs(30);
+    }
+}
+
 /// A hit of card `pos` failed the CPU check: one step back (saved for a tuned card), at most once per 20 s.
-pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
+pub fn on_bad_hit(live: &Live, pos: usize, _bus: &str, dev: i32) {
     let mut g = live.cards.lock().unwrap();
     let Some(c) = g.iter_mut().find(|c| c.pos == pos && c.owned) else {
         eprintln!("GPU{dev}: wrong GPU results (CPU check of a hit / watchdog) at the card's own offset (no undervolt by this miner): check clocks/temperature");
         return;
     };
+    step_back_card(live, c, "wrong GPU results (CPU check of a hit / watchdog)");
+}
+
+/// One step back of a tuned card (saved), never below the base; at most once per 20 s; not while a check of the card runs.
+fn step_back_card(live: &Live, c: &mut LiveCard, why: &str) {
+    let (bus, dev) = (c.bus.clone(), c.dev);
     if c.busy.load(Ordering::SeqCst) {
-        return; // the quick check after an OC apply decides
+        return; // the quick check after an OC apply / the re-validation decides
     }
     if c.last.is_some_and(|t| t.elapsed() < Duration::from_secs(20)) {
         return;
     }
     c.last = Some(Instant::now());
-    let cur = offset::current(bus).unwrap_or(c.base);
+    let cur = offset::current(&bus).unwrap_or(c.base);
     if cur <= c.base {
-        eprintln!("GPU{dev}: wrong GPU results (CPU check of a hit / watchdog) at the base offset {}: check clocks/temperature", signed(cur));
+        eprintln!("GPU{dev}: {why} at the base offset {}: check clocks/temperature", signed(cur));
         return;
     }
     let new = (cur - c.step).max(c.base);
-    match offset::set(bus, new) {
+    match offset::set(&bus, new) {
         Ok(()) => {
             c.want = new;
-            lg(format!("GPU{dev}: wrong GPU results at offset {} (CPU check of a hit / watchdog): stepped back to {} and mining on", signed(cur), signed(new)))
+            lg(format!("GPU{dev}: {why} at offset {}: stepped back to {} and mining on", signed(cur), signed(new)))
         }
         Err(e) => lg(format!("GPU{dev}: cannot step the offset back ({e:#})")),
     }
@@ -1263,10 +1345,12 @@ pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
             if let Some(mut e) = db.entry(&c.uuid, live.mode) {
                 e.offset = new;
                 e.stepped_back += 1;
+                e.verified_at = 0; // not checked at this offset yet; the next start checks it before use
                 db.save(&c.uuid, live.mode, &e);
             }
         }
     }
+    c.next_reval = Instant::now() + Duration::from_secs(60); // a re-check of the new offset soon
 }
 
 /// While mining (called from the main loop; reads every card's offset every 30 s): an offset that is no longer the one this
@@ -1274,12 +1358,45 @@ pub fn on_bad_hit(live: &Live, pos: usize, bus: &str, dev: i32) {
 /// field is empty; or the owner's offset from before) gets the verified NOID offset back after a quick check with mining on
 /// that GPU paused; a base / --uv-offset value is set again at once.  At most 4 times per hour; any other value is the
 /// owner's own choice: the miner stands down on that GPU and leaves it as it is.
-pub fn watch(live: &Arc<Live>) {
+pub fn watch(live: &Arc<Live>, user: &crate::stratum::Stats) {
     let Some(nv) = live.nv else { return };
-    if live.stop.load(Ordering::Relaxed) {
-        return;
+    if live.stop.load(Ordering::Relaxed) || live.aside.load(Ordering::SeqCst) {
+        return; // idle mode: the owner's offsets are on the cards, nothing to watch
     }
     let mut g = live.cards.lock().unwrap();
+    // 1.7.6: a burst of rejected shares (low-difficulty rejects are a target-mode matter, not an undervolt one) = wrong results
+    // somewhere: every tuned card steps back one step
+    let (rej, acc, low) = (user.rejected.load(Ordering::Relaxed), user.accepted.load(Ordering::Relaxed), user.low_diff.load(Ordering::Relaxed));
+    let burst = live.rej.lock().unwrap().tick(Instant::now(), rej, acc, low);
+    if let Some((drej, dacc)) = burst {
+        for c in g.iter_mut().filter(|c| c.owned && c.tuned && c.want > c.base) {
+            step_back_card(live, c, &format!("burst of rejected shares ({drej} rejected vs {dacc} accepted in 5 min)"));
+        }
+    }
+    // 1.7.6: periodic re-validation of a tuned offset (--uv-reval-hours): mining on the GPU pauses for a quick check, a failure
+    // steps back (the same check as after an OC apply)
+    for c in g.iter_mut() {
+        if !c.owned || c.busy.load(Ordering::SeqCst) || !c.tuned || c.want <= c.base || Instant::now() < c.next_reval || live.o.reval_hours <= 0.0 || crate::idle::mode() != crate::idle::Mode::Full {
+            continue;
+        }
+        let (Some(card), Some((pause, paused))) = (c.card.clone(), c.pause.clone()) else { continue };
+        lg(format!("GPU{} periodic re-validation at {} (mining on this GPU pauses for ~{QUICK_SECS} s)", c.dev, signed(c.want)));
+        c.busy.store(true, Ordering::SeqCst);
+        c.next_reval = Instant::now() + reval_interval(live.o.reval_hours);
+        let (l2, want, pos) = (live.clone(), c.want, c.pos);
+        std::thread::spawn(move || {
+            let fin = reapply(&l2, &card, want, &pause, &paused, "re-validation");
+            let mut g = l2.cards.lock().unwrap();
+            if let Some(c) = g.iter_mut().find(|c| c.pos == pos) {
+                if let Some(f) = fin {
+                    c.want = f;
+                }
+                c.next_read = Instant::now() + Duration::from_secs(30);
+                c.next_reval = Instant::now() + reval_interval(l2.o.reval_hours);
+                c.busy.store(false, Ordering::SeqCst);
+            }
+        });
+    }
     for c in g.iter_mut() {
         if !c.owned || c.busy.load(Ordering::SeqCst) || Instant::now() < c.next_read {
             continue;
@@ -1290,6 +1407,7 @@ pub fn watch(live: &Arc<Live>) {
             continue;
         }
         let label = format!("GPU{} (bus {})", c.dev, short_bus(&c.bus));
+        crate::faults::note_foreign_change(&c.bus);
         let kind = c.nv.and_then(|d| hiveoc::reset_kind(nv, d, v, c.orig));
         match kind {
             Some(why) if c.resets.allow() => {
@@ -1303,7 +1421,7 @@ pub fn watch(live: &Arc<Live>) {
                     c.busy.store(true, Ordering::SeqCst);
                     let (l2, want, pos) = (live.clone(), c.want, c.pos);
                     std::thread::spawn(move || {
-                        let fin = reapply(&l2, &card, want, &pause, &paused);
+                        let fin = reapply(&l2, &card, want, &pause, &paused, "quick check after the OC apply");
                         let mut g = l2.cards.lock().unwrap();
                         if let Some(c) = g.iter_mut().find(|c| c.pos == pos) {
                             if let Some(f) = fin {
@@ -1358,7 +1476,7 @@ pub fn watch(live: &Arc<Live>) {
 /// The quick check after an OC apply reset the offset of a tuned card while mining: mining on the GPU pauses, `want` is
 /// checked (stress, QUICK_SECS); a failure steps back one step (saved) and checks again.  Returns the offset the card mines at
 /// (None: a stop, nothing decided).
-fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &AtomicBool) -> Option<i32> {
+fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &AtomicBool, what: &str) -> Option<i32> {
     let (Some(nv), Some(db)) = (live.nv, live.db.as_ref()) else { return None };
     let t = Tuner { nv, o: &live.o, mode: live.mode_id, db, driver: live.driver.clone(), stop: &live.stop };
     pause.store(true, Ordering::SeqCst);
@@ -1369,7 +1487,7 @@ fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &Atomic
     let fin = if t.stopped() {
         None
     } else if !paused.load(Ordering::SeqCst) {
-        lg(format!("{} quick check after the OC apply skipped (the mining thread did not pause): {} set again without it", c.label(), signed(want)));
+        lg(format!("{} {what} skipped (the mining thread did not pause): {} set again without it", c.label(), signed(want)));
         let _ = offset::set(&c.r.bus, want);
         Some(want)
     } else {
@@ -1381,12 +1499,12 @@ fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &Atomic
                 break None; // a stop is not a failure of the offset (the shutdown puts the owner's back)
             }
             if r.infra {
-                lg(format!("{} the quick check after the OC apply could not run ({}): mining at the base {}", c.label(), r.reason, signed(c.base)));
+                lg(format!("{} the {what} could not run ({}): mining at the base {}", c.label(), r.reason, signed(c.base)));
                 let _ = offset::set(&c.r.bus, c.base);
                 break Some(c.base);
             }
             if r.ok {
-                lg(format!("{} quick check after the OC apply at {}: ok ({})", c.label(), signed(at), r.brief()));
+                lg(format!("{} {what} at {}: ok ({})", c.label(), signed(at), r.brief()));
                 if let Some(mut e) = db.entry(&c.uuid, live.mode) {
                     if e.offset == at {
                         e.verified_at = now();
@@ -1396,7 +1514,7 @@ fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &Atomic
                 break Some(at);
             }
             let new = (at - step).max(c.base);
-            lg(format!("{} quick check after the OC apply at {} FAILED ({}): stepped back to {}", c.label(), signed(at), r.reason, signed(new)));
+            lg(format!("{} {what} at {} FAILED ({}): stepped back to {}", c.label(), signed(at), r.reason, signed(new)));
             if let Some(mut e) = db.entry(&c.uuid, live.mode) {
                 e.offset = new;
                 e.stepped_back += 1;
@@ -1411,4 +1529,76 @@ fn reapply(live: &Live, c: &Card, want: i32, pause: &AtomicBool, paused: &Atomic
     };
     pause.store(false, Ordering::SeqCst);
     fin
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RIG01: &str = include_str!("../../tests/data/uv-rig01-1.7.5.json");
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ffg-noid-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn golden_noid_profiles_load_and_keep_their_keys() {
+        let v: Value = serde_json::from_str(RIG01).unwrap();
+        let mut n = 0;
+        for (_, m) in v["noid"].as_object().unwrap() {
+            for (k, x) in m.as_object().unwrap() {
+                let e = Entry::from_json(x).unwrap_or_else(|| panic!("profile {k} is not read"));
+                assert_eq!(&e.to_json(), x, "profile {k}: a field is lost or changed by a round trip");
+                let mode = k.split_once('@').unwrap().0;
+                assert_eq!(&pkey(mode, &e), k, "the key of profile {k} changed");
+                n += 1;
+            }
+        }
+        assert!(n >= 8);
+    }
+
+    #[test]
+    fn golden_noid_store_roundtrip_and_markers() {
+        let dir = tmp("golden");
+        std::fs::write(uv::results_path(&dir), RIG01).unwrap();
+        let before: Value = serde_json::from_str(RIG01).unwrap();
+        let db = Db::load(&dir); // nothing to migrate in a 1.7.5 file: not rewritten
+        let uuid = before["noid"].as_object().unwrap().keys().next().unwrap().clone();
+        let (key, mut e) = db.profiles(&uuid, "eff").into_iter().next().unwrap();
+        e.stepped_back += 1;
+        db.save(&uuid, "eff", &e);
+        let mut want = before.clone();
+        want["noid"][&uuid][&key]["stepped_back_in_mining"] = json!(e.stepped_back);
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(uv::results_path(&dir)).unwrap()).unwrap();
+        assert_eq!(after, want);
+        // 1.7.5 wrote {"offset"} only: a marker like that is still a crash point without a "good"
+        db.mark_trying(&uuid, 255);
+        assert_eq!(db.take_trying(&uuid), Some(profiles::Crash { at: 255, good: None }));
+        db.s.set_good(&uuid, Some(240));
+        db.mark_trying(&uuid, 270);
+        assert_eq!(db.take_trying(&uuid), Some(profiles::Crash { at: 270, good: Some(240) }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn golden_noid_before_1_7_2_result_migrates() {
+        let dir = tmp("migrate");
+        let e = Entry { driver: "580".into(), kernel: "eff:t512va/sm86".into(), core_lock: 1400, base: 0, offset: 150, ..Default::default() };
+        let no_lock = Entry { core_lock: 0, clk: 1500, ..e.clone() };
+        std::fs::write(uv::results_path(&dir), serde_json::to_string(&json!({"noid": {"U1": {"eff": e.to_json()}, "U2": {"eff": no_lock.to_json()}}})).unwrap()).unwrap();
+        let db = Db::load(&dir);
+        assert_eq!(db.profiles("U1", "eff").iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["eff@1400"]);
+        assert!(db.profiles("U2", "eff").is_empty()); // no lock recorded: the clock it was found at is unknown
+        // and it was written back
+        assert!(Db::load(&dir).profiles("U1", "eff")[0].1.offset == 150);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The offset this run set on CUDA device `dev` (None: not changed by this run): a crash with another offset on the card is not ours.
+pub fn expected_offset(live: &Live, dev: i32) -> Option<i32> {
+    live.cards.lock().unwrap().iter().find(|c| c.dev == dev && c.owned).map(|c| c.want)
 }

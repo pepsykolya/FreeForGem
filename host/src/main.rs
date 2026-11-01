@@ -41,6 +41,7 @@ macro_rules! eprintln {
 }
 
 mod amd_uv;
+mod climb;
 mod clocks;
 mod cmfd;
 mod cmfd_offset;
@@ -52,10 +53,13 @@ mod gpu;
 mod hiveoc;
 mod idle;
 mod mining;
+mod monitor;
 mod noid;
+mod profiles;
 mod nvml;
 mod status;
 mod stratum;
+mod templimit;
 mod update;
 mod uv;
 mod wintune;
@@ -283,6 +287,7 @@ struct Args {
     cmfd_skip_prepare: bool,
     noid_mode: String,
     idle: idle::Opts,
+    temp: templimit::Opts,
 }
 
 type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
@@ -414,6 +419,7 @@ fn mine(a: Args) -> Result<()> {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
+        no_hive_mem: false,
     };
     let _clock_guard = if nv { clocks::apply(&devices, &clock_opts, &clock_dir) } else { None };
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
@@ -459,6 +465,9 @@ fn mine(a: Args) -> Result<()> {
     );
 
     let sh = Arc::new(Shared::new(stop.clone(), stats.clone()));
+    // --temp-limit (1.7.6): the workers read the work fraction the control thread sets
+    a.temp.validate(devices.len())?;
+    templimit::start(&a.temp, &devices.iter().enumerate().map(|(pos, &d)| (d, gpu::device_pci_bus_id(d).unwrap_or_default(), gpu::device_name(d), pos)).collect::<Vec<_>>(), &stop);
     // which GPU failed while mining (driver Xid events), remembered across restarts (faults.rs)
     let fault_dir = uv::state_dir(&a.uv);
     let watch = if nv { faults::Watch::new(&devices.iter().map(|&d| (d, gpu::device_pci_bus_id(d).unwrap_or_default(), gpu::device_name(d))).collect::<Vec<_>>()) } else { None };
@@ -544,7 +553,7 @@ fn mine(a: Args) -> Result<()> {
             }
             let alive_n = gstats.iter().filter(|g| g.alive.load(Ordering::Relaxed)).count();
             let injected = faults::test_fault().map(|f| f.0).filter(|d| dead.iter().any(|x| x.0 == *d));
-            let v = faults::attribute(watch.as_ref(), &dead, alive_n, injected);
+            let v = faults::attribute(watch.as_ref(), &dead, alive_n, injected, &uv::expected_offset);
             for (k, x) in &v.culprits {
                 let w = watch.as_ref().unwrap();
                 let c = &w.cards[*k];
@@ -757,7 +766,7 @@ fn mine(a: Args) -> Result<()> {
                         String::new()
                     }
                 };
-                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, ths, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, status::tag(g.dev)));
+                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, ths, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, format!("{}{}", status::tag(g.dev), templimit::tag(g.dev))));
             }
             let power_part = if all_w && total_w > 0.0 { format!(" | {:.0} W, {:.3} TH/W", total_w, total_ths / total_w) } else { String::new() };
             let (u, f) = (&stats[0], &stats[1]);
@@ -838,18 +847,25 @@ OPTIONS:
     --auto-uv            opt-in: find and apply a safe GPU undervolt (NVIDIA: V/F offset, needs root/admin; AMD: clock/voltage
                          via the amduv tool next to the binary, goal $FFGP_AMD_UV_GOAL Pearl eff|max, CMFD eff|bal|max); see MANUAL.md
     --uv-offset N        apply a fixed V/F offset of N MHz (after a quick check) instead of tuning
-    --idle               Windows, Pearl: mine only while nobody uses the PC (keyboard, mouse, gamepad, a fullscreen game,
-                         other programs at work on the CPU or GPU);
+    --idle               Windows, Pearl / NOID / CMFD: mine only while nobody uses the PC (keyboard, mouse, gamepad, a fullscreen
+                         game, other programs at work on the CPU or GPU);
                          a locked screen counts as idle. While the PC is in use the GPUs get the owner's clocks and
                          offsets back and no undervolt check starts
     --idle-minutes N     minutes without input before mining starts again (default 5)
-    --active MODE        while the PC is in use: pause (default) or light:PCT (mine PCT % of the time, 1-99; light = 30)
+    --active MODE        while the PC is in use: pause (default) or light:PCT (mine PCT % of the time, 1-99; light = 30; CMFD
+                         has no light load: its engine stops, as with pause)
     --idle-pause-for L   programs that pause mining while they run even with no input, e.g. cs2.exe,blender.exe
     --idle-cpu PCT       other programs using more than PCT % of the CPU for 3 s = in use (default 25, 0 = off)
     --idle-ignore L      programs whose CPU / GPU load does not count as use (other miners such as xmrig, SRBMiner,
                          lolMiner, T-Rex, Rigel are ignored already), e.g. myminer.exe
     --idle-gpu PCT       another program using a GPU engine over PCT % = in use (default 10, 0 = off); any video
                          decoding (a film, a stream) counts too
+    --temp-limit C[,C]   keep the GPU at or below C degrees (40..100; one value for all GPUs or a list in --devices order, '-' = off):
+                         a controller lowers the share of the time the GPU works (duty cycle) so the core temperature stays
+                         2 C below C; meant for laptops / mobile GPUs whose fans cannot be set. NVIDIA, Pearl and NOID
+                         (CMFD: not available). Mining starts soft (30 %) and ramps up; the hashrate shown is the real one
+    --temp-stop C2[,C2]  hard stop: at C2 the GPU stops mining until it has cooled to the limit - 6 (default: limit + 10, at
+                         most 90, at least limit + 3)
     --no-update-check    do not look for a newer FreeForGem release (default: a GitHub check ~1 min after the start,
                          then every ~12 h; a newer one is only reported: in the log and in HiveOS next to the version)
     --check-update       check for a newer release now, then exit
@@ -875,6 +891,10 @@ OPTIONS:
                          order (without --devices: GPU0, GPU1, ...), e.g. --uv-max 225,495,150; '-' = that GPU's default
     --uv-step N          MHz per tuning step (default 15)
     --uv-keep-last       after a failed step keep the last good step (default: last good step minus one step)
+    --uv-coarse N        climbing step in MHz (default: 2 x --uv-step = 30): the search climbs in N MHz steps and, at the first
+                         failing step, tries --uv-step steps inside that interval only (about half the steps, the same edge).
+                         A driver fault (Xid / hang) on a coarse step is not refined: the result is one step below the last
+                         good one. 0 (or <= --uv-step) = one step size, as before 1.7.6
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
@@ -983,6 +1003,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, n, "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, n, "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, n, "--moffset")?, None => vec![] },
+        no_hive_mem: true, // CMFD: the HiveOS profile's memory lock (Pearl's 810) would make it ~6x slower
     };
     cmfd::mine(
         cmfd::Opts {
@@ -1090,6 +1111,7 @@ fn main() -> Result<()> {
         cmfd_skip_prepare: false,
         noid_mode: "eff".into(),
         idle: idle::Opts::default(),
+        temp: templimit::Opts { limit: uv::PerGpu::Unset, stop: uv::PerGpu::Unset },
     };
     let mut test = false;
     let mut gpu_state = false;
@@ -1142,6 +1164,13 @@ fn main() -> Result<()> {
             "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,
             "--uv-step" => a.uv.step = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-step needs a positive integer (MHz)"))?,
             "--uv-keep-last" => a.uv.keep_last_good = true,
+            "--temp-limit" => a.temp.limit = uv::PerGpu::parse(&val()?, "--temp-limit")?,
+            "--temp-stop" => a.temp.stop = uv::PerGpu::parse(&val()?, "--temp-stop")?,
+            "--uv-coarse" => {
+                let c: i32 = val()?.trim().trim_start_matches('+').parse().map_err(|_| anyhow::anyhow!("--uv-coarse needs a non-negative integer (MHz, 0 = one step size as before 1.7.6)"))?;
+                ensure!((0..=uv::HARD_CAP).contains(&c), "--uv-coarse must be between 0 and {}", uv::HARD_CAP);
+                a.uv.coarse = Some(c);
+            }
             "--lock-cclock" => a.lock_cclock = Some(val()?),
             "--lock-mclock" => a.lock_mclock = Some(val()?),
             "--moffset" => a.moffset = Some(val()?),
@@ -1208,7 +1237,7 @@ fn main() -> Result<()> {
         None => a.pool_given && noid::looks_like_noid_pool(&a.pool),
     };
     if noid_algo && child.is_none() {
-        ensure!(!a.idle.on, "--idle: in 1.7.5 idle mode works with Pearl only (not NOID)");
+        idle::start(&a.idle)?; // a session without a desktop refuses before any clock or offset is touched
         let mode = noid::mode_of(&a.noid_mode)?;
         if test {
             return noid::self_test(&a.devices);
@@ -1226,6 +1255,7 @@ fn main() -> Result<()> {
             lock_cclock: a.lock_cclock,
             lock_mclock: a.lock_mclock,
             moffset: a.moffset,
+            temp: a.temp,
         });
     }
     // AMD (OpenCL) library: busy-wait for attempt completion unless the user chose otherwise.  Must be set before the
@@ -1276,7 +1306,8 @@ fn main() -> Result<()> {
             let state_dir = a.uv.dir.clone().or_else(|| std::env::var_os("FFGP_STATE_DIR").map(Into::into)).unwrap_or_else(|| std::path::PathBuf::from("."));
             return cmfd::self_test(&a.devices, &a.cmfd_dir, &a.cmfd_mode, &a.cmfd_model, &state_dir);
         }
-        ensure!(!a.idle.on, "--idle: in 1.7.5 idle mode works with Pearl only (not CMFD)");
+        idle::start(&a.idle)?; // a session without a desktop refuses before any clock or offset is touched
+        ensure!(!a.temp.on(), "--temp-limit: not available for CMFD (its engine is an external program that cannot be duty-cycled); use a power limit or --lock-cclock");
         return mine_cmfd(a);
     }
     if test {

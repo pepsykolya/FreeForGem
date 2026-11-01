@@ -260,7 +260,7 @@ pub struct Verdict {
 
 /// Called by the main loop when workers stopped: waits a moment for the driver's Xid events and for the other workers, then
 /// tells which GPU failed.  `dead`: (CUDA device, error text) of every stopped worker; `alive`: how many still mine.
-pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, injected: Option<i32>) -> Verdict {
+pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, injected: Option<i32>, expected: &dyn Fn(i32) -> Option<i32>) -> Verdict {
     let mut xids: Vec<(usize, Vec<u64>)> = w.map(|w| w.take()).unwrap_or_default();
     if let (Some(w), Some(d)) = (w, injected) {
         if let Some(i) = w.by_dev(d) {
@@ -269,8 +269,20 @@ pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, inject
             }
         }
     }
-    let mut lines = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
     let mut culprits: Vec<(usize, u64)> = xids.iter().map(|(i, x)| (*i, x[0])).collect();
+    // 1.7.6: an Xid that came with another tool's change of the card (its offset is not the one we set, or an OC apply was seen on it
+    // a moment ago) is not counted: it must not lower our offset at the next start
+    if let Some(w) = w {
+        culprits.retain(|&(i, x)| {
+            let c = &w.cards[i];
+            let foreign = foreign_offset(expected(c.dev), w.offset(i)) || foreign_near(&c.bus);
+            if foreign {
+                lines.push(format!("{} Xid {x}: another tool changed the clocks / offset of this GPU at the same time (HiveOS nvidia-oc, an OC tool): not counted as a failure of this miner's offset", c.label()));
+            }
+            !foreign
+        });
+    }
     let fatal = dead.iter().any(|(_, e)| sticky(e));
     if let Some(w) = w {
         for &(i, x) in &culprits {
@@ -301,6 +313,40 @@ pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, inject
         lines.push(format!("{alive} GPU worker(s) keep mining; the stopped one(s) come back at the next miner start"));
     }
     Verdict { culprits, lines }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// a clock / offset change by another tool is not a crash of our offset (ported from ffgs 0.5.4, Rig02: nvidia-oc LCLOCK 1680 over
+// our 1500 + 330: Xid 43 in the window of the OC apply, counted as a failure of +330)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// A crash of a card whose core offset is not the one this miner set is not the miner's: someone (HiveOS nvidia-oc, a tuning tool)
+/// changed the card's V/F state, and the crash belongs to that.  `expected`: the offset this miner set; `actual`: what NVML says now.
+pub fn foreign_offset(expected: Option<i32>, actual: Option<i32>) -> bool {
+    matches!((expected, actual), (Some(e), Some(a)) if e != a)
+}
+
+/// How near in time a detected OC apply must be to a crash to be blamed for it: on that card / on any card of the rig (nvidia-oc
+/// sets the cards one after another).
+pub const FOREIGN_CARD_SECS: u64 = 30;
+pub const FOREIGN_RIG_SECS: u64 = 15;
+
+static FOREIGN: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// The tuners call this when they see an OC apply / another tool change the offset of the card at `bus` (their 30 s read-back).
+pub fn note_foreign_change(bus: &str) {
+    let mut g = FOREIGN.lock().unwrap();
+    g.retain(|(_, t)| t.elapsed() < std::time::Duration::from_secs(600));
+    g.push((bus.to_ascii_lowercase(), std::time::Instant::now()));
+}
+
+/// Did another tool change the card's state within `FOREIGN_CARD_SECS` of now (or any card's within `FOREIGN_RIG_SECS`)?
+pub fn foreign_near(bus: &str) -> bool {
+    let b = bus.to_ascii_lowercase();
+    FOREIGN.lock().unwrap().iter().any(|(x, t)| {
+        let age = t.elapsed().as_secs();
+        age <= FOREIGN_RIG_SECS || (*x == b && age <= FOREIGN_CARD_SECS)
+    })
 }
 
 /// Restarts the miner in the same process (Linux: exec, same PID and log pipe, HiveOS does not count a restart) after the caller
@@ -418,5 +464,187 @@ mod tests {
         assert_eq!((r3.n, r3.safe), (0, Some(275))); // the count goes, the lowered offset stays
         assert_eq!(excluded(&d, "GPU-x"), None);
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// whose Xid is it (1.7.6)
+// ---------------------------------------------------------------------------------------------------------------------
+//
+// NVML's Xid event says which GPU, not which process.  On the Rig01 test of 28.10.2026 another miner (ffgs) on the same rig
+// crashed GPUs and 1.7.3 wrote `faults: GPU1 crash 1 in a row at offset +300` for them: false records that the next start would
+// have answered with -30 MHz.  The kernel log says it: `NVRM: Xid (PCI:0000:05:00): 43, pid=1234, name=ffgs, ...`.  Where it can be
+// read (Linux, `dmesg`), an Xid whose line names a process that is not this miner (nor a child of it) is not this miner's: it is
+// reported once and not counted (checks, crash records, step-backs).  Where it cannot be read, or the line has no pid
+// (Xid 79 "fallen off the bus"), the Xid counts as before: no evidence of a foreign process = ours.
+
+/// One `NVRM: Xid` line of the kernel log.
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub struct XidLine {
+    pub age_s: f64, // seconds before `uptime_s`
+    pub pci: String,
+    pub xid: u64,
+    pub pid: Option<u32>,
+    pub name: String,
+}
+
+/// Parses the `NVRM: Xid` lines of dmesg output (`[  1234.567890] NVRM: Xid (PCI:0000:05:00): 43, pid=1234, name=ffgs, ...`).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_xid_lines(text: &str, uptime_s: f64) -> Vec<XidLine> {
+    let mut out = Vec::new();
+    for l in text.lines() {
+        let Some(i) = l.find("NVRM: Xid (PCI:") else { continue };
+        let t = l.trim_start().strip_prefix('[').and_then(|r| r.split_once(']')).and_then(|(t, _)| t.trim().parse::<f64>().ok());
+        let rest = &l[i + "NVRM: Xid (PCI:".len()..];
+        let Some((pci, rest)) = rest.split_once("): ") else { continue };
+        let xid: u64 = rest.split(|c: char| !c.is_ascii_digit()).next().and_then(|x| x.parse().ok()).unwrap_or(0);
+        if xid == 0 {
+            continue;
+        }
+        let field = |k: &str| rest.find(k).map(|p| rest[p + k.len()..].split(',').next().unwrap_or("").trim().to_string());
+        let pid = field("pid=").and_then(|p| p.trim_matches('\'').parse::<u32>().ok());
+        let name = field("name=").unwrap_or_default();
+        out.push(XidLine { age_s: t.map_or(0.0, |t| (uptime_s - t).max(0.0)), pci: pci.to_ascii_lowercase(), xid, pid, name });
+    }
+    out
+}
+
+/// Is a process named `name` (pid `pid`) this miner or something it started?
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn ours(pid: u32, name: &str, own_pid: u32, own_comm: &str, parent_of: &dyn Fn(u32) -> Option<u32>) -> bool {
+    if pid == own_pid {
+        return true;
+    }
+    // our own binary under any copy (the check child is the same binary), by the kernel's 15-character process name
+    if !name.is_empty() && !own_comm.is_empty() && own_comm.starts_with(name.trim_matches('<').trim_matches('>')) && name.len() >= 4 {
+        return true;
+    }
+    // a descendant of ours (the CMFD engine and its GPU worker, check processes)
+    let mut p = pid;
+    for _ in 0..8 {
+        match parent_of(p) {
+            Some(pp) if pp == own_pid => return true,
+            Some(pp) if pp > 1 => p = pp,
+            _ => break,
+        }
+    }
+    false
+}
+
+/// For an Xid `xid` of the GPU at `pci` ("0000:05:00") seen just now: Some((pid, name)) when the kernel log says another process
+/// caused it; None: ours, or no evidence.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn foreign_cause(lines: &[XidLine], pci: &str, xid: u64, own_pid: u32, own_comm: &str, parent_of: &dyn Fn(u32) -> Option<u32>) -> Option<(u32, String)> {
+    let pci = pci.to_ascii_lowercase();
+    // the newest line of this GPU and Xid within the last two minutes
+    let l = lines.iter().filter(|l| l.pci == pci && l.xid == xid && l.age_s <= 120.0).min_by(|a, b| a.age_s.partial_cmp(&b.age_s).unwrap())?;
+    let pid = l.pid?;
+    if l.name.is_empty() || l.name.contains("unknown") {
+        return None;
+    }
+    (!ours(pid, &l.name, own_pid, own_comm, parent_of)).then(|| (pid, l.name.clone()))
+}
+
+#[cfg(target_os = "linux")]
+fn ppid(pid: u32) -> Option<u32> {
+    let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // pid (comm) state ppid ...: comm may contain spaces and ')'
+    let rest = &s[s.rfind(')')? + 2..];
+    rest.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Reads the kernel log and tells whether the Xid `xid` of the GPU at (domain, bus, device) was caused by another process.  Linux
+/// only (`dmesg`); anywhere else, or when the log cannot be read, None.
+pub fn foreign_xid(pci: (u32, u32, u32), xid: u64) -> Option<(u32, String)> {
+    #[cfg(target_os = "linux")]
+    {
+        let key = format!("{:04x}:{:02x}:{:02x}", pci.0, pci.1, pci.2);
+        let own_comm: String = std::env::current_exe().ok()?.file_name()?.to_string_lossy().chars().take(15).collect();
+        let up: f64 = std::fs::read_to_string("/proc/uptime").ok()?.split_whitespace().next()?.parse().ok()?;
+        // the driver prints the line a moment before or after the NVML event: look twice
+        for attempt in 0..2 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            let out = std::process::Command::new("dmesg").output().ok()?;
+            if !out.status.success() {
+                return None;
+            }
+            let lines = parse_xid_lines(&String::from_utf8_lossy(&out.stdout), up);
+            if lines.iter().any(|l| l.pci == key && l.xid == xid && l.age_s <= 120.0) {
+                return foreign_cause(&lines, &key, xid, std::process::id(), &own_comm, &ppid);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (pci, xid);
+        None
+    }
+}
+
+#[cfg(test)]
+mod xid_tests {
+    use super::*;
+
+    const LOG: &str = "\
+[ 1000.100000] NVRM: Xid (PCI:0000:02:00): 43, pid=4242, name=freeforgem, Ch 00000016
+[ 1000.200000] NVRM: Xid (PCI:0000:03:00): 43, pid=5555, name=ffgs, Ch 00000008
+[ 1000.300000] NVRM: Xid (PCI:0000:05:00): 13, pid=5555, name=ffgs, Graphics SM Warp Exception on (GPC 0, TPC 1, SM 0): Out Of Range Address
+[ 1000.400000] NVRM: Xid (PCI:0000:06:00): 79, pid='<unknown>', name=<unknown>, GPU has fallen off the bus.
+[  800.000000] NVRM: Xid (PCI:0000:07:00): 43, pid=5555, name=ffgs, Ch 00000008
+[ 1000.500000] some other line
+";
+
+    #[test]
+    fn parse() {
+        let v = parse_xid_lines(LOG, 1001.0);
+        assert_eq!(v.len(), 5);
+        assert_eq!((v[0].pci.as_str(), v[0].xid, v[0].pid, v[0].name.as_str()), ("0000:02:00", 43, Some(4242), "freeforgem"));
+        assert_eq!(v[2].xid, 13);
+        assert_eq!((v[3].xid, v[3].pid), (79, None));
+        assert!((v[0].age_s - 0.9).abs() < 1e-6);
+        assert!((v[4].age_s - 201.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn whose() {
+        let v = parse_xid_lines(LOG, 1001.0);
+        let no_parent = |_: u32| None;
+        let tree = |p: u32| if p == 7777 { Some(4242) } else { None };
+        // our own binary (same process name), as the kernel prints it (15 characters at most)
+        assert_eq!(foreign_cause(&v, "0000:02:00", 43, 4242, "freeforgem", &no_parent), None);
+        assert_eq!(foreign_cause(&v, "0000:02:00", 43, 1, "freeforgem", &no_parent), None); // our name, another copy of us: not "foreign"
+        // another miner on the same rig: not ours
+        assert_eq!(foreign_cause(&v, "0000:03:00", 43, 4242, "freeforgem", &no_parent), Some((5555, "ffgs".into())));
+        assert_eq!(foreign_cause(&v, "0000:05:00", 13, 4242, "freeforgem", &no_parent), Some((5555, "ffgs".into())));
+        // no pid (fallen off the bus): counts as ours
+        assert_eq!(foreign_cause(&v, "0000:06:00", 79, 4242, "freeforgem", &no_parent), None);
+        // older than two minutes, or another Xid number: no evidence
+        assert_eq!(foreign_cause(&v, "0000:07:00", 43, 4242, "freeforgem", &no_parent), None);
+        assert_eq!(foreign_cause(&v, "0000:03:00", 13, 4242, "freeforgem", &no_parent), None);
+        // a child of ours (the CMFD worker) is ours whatever its name
+        let w = parse_xid_lines("[ 10.0] NVRM: Xid (PCI:0000:0a:00): 13, pid=7777, name=cmfd-v4-replay, x\n", 11.0);
+        assert_eq!(foreign_cause(&w, "0000:0a:00", 13, 4242, "freeforgem", &tree), None);
+        assert_eq!(foreign_cause(&w, "0000:0a:00", 13, 9999, "freeforgem", &tree), Some((7777, "cmfd-v4-replay".into())));
+    }
+}
+
+#[cfg(test)]
+mod foreign_tests {
+    use super::*;
+
+    #[test]
+    fn foreign_changes_are_not_crashes() {
+        assert!(foreign_offset(Some(330), Some(0)));
+        assert!(!foreign_offset(Some(330), Some(330)));
+        assert!(!foreign_offset(None, Some(0)));
+        assert!(!foreign_offset(Some(330), None));
+        assert!(!foreign_near("0000:05:00.0"));
+        note_foreign_change("0000:05:00.0");
+        assert!(foreign_near("0000:05:00.0")); // that card
+        assert!(foreign_near("0000:06:00.0")); // any card of the rig within 15 s
     }
 }

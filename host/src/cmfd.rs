@@ -768,7 +768,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     // is set to 0 as without --auto-uv), then the CMFD tuner applies its saved result or tunes on the CMFD load (cmfd_uv.rs)
     let auto_uv = !amd() && o.uv.auto && !o.uv.dry_run;
     if !amd() && o.uv.auto && o.uv.dry_run {
-        crate::cmfd_uv::dry_run(&o.uv, &devs);
+        crate::cmfd_uv::dry_run(&o.uv, &devs, &o.clocks.core_mhz);
     }
     let (_offset_guard, bases) = if amd() {
         (None, vec![])
@@ -829,12 +829,58 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     for s in &slots {
         println!("GPU {}: {} ({})", s.dev, s.name, s.uuid);
     }
+    // 1.7.6 (--auto-uv): which GPU the driver reports an Xid for (NVML events; an Xid the kernel log pins on another process, e.g.
+    // another miner on the same rig, does not count), remembered in gpu-faults.json as for Pearl and NOID: the next start does not
+    // climb back into an offset that crashed; a burst of rejected shares of one engine steps its offset back
+    let fwatch = if auto_uv {
+        crate::faults::Watch::new(&slots.iter().map(|s| (s.dev, gpu::device_pci_bus_id(s.dev).unwrap_or_default(), s.name.clone())).collect::<Vec<_>>())
+    } else {
+        None
+    };
+    let mut bursts: Vec<crate::monitor::RejectBurst> = slots.iter().map(|_| crate::monitor::RejectBurst::new(Instant::now())).collect();
+    let mut mined_ok_done = false;
     let (tx, rx) = mpsc::channel::<(usize, String)>();
     let start = Instant::now();
     let deadline = o.minutes.map(|m| Duration::from_secs_f64(m * 60.0));
     let mut last_report = Instant::now();
 
+    // idle mode (1.7.6): while the PC is in use the engines are stopped (the external CMFD engine has no light load: `--active light`
+    // pauses too), the owner's offsets and clocks are on the cards; the engine's dev fee runs on its own mining time, so a pause
+    // does not count
+    let (mut paused, mut idle_logged) = (false, false);
     while !stop.load(Ordering::Relaxed) && deadline.is_none_or(|d| start.elapsed() < d) {
+        let in_use = crate::idle::mode() != crate::idle::Mode::Full;
+        if in_use && !paused && crate::cmfd_uv::idle_ready() {
+            println!("idle: the PC is in use: the CMFD engines stop, the owner's clocks and offsets are put back");
+            stop_children(&mut slots);
+            for s in slots.iter_mut() {
+                if s.child.take().is_some() {
+                    s.base = s.totals();
+                    s.last = None;
+                    s.fee = false;
+                    s.uv_restart = false;
+                }
+                s.restart_at = None;
+            }
+            crate::cmfd_offset::suspend();
+            clocks::suspend();
+            paused = true;
+            idle_logged = false;
+        } else if in_use && !paused && !idle_logged {
+            idle_logged = true;
+            println!("idle: the PC is in use; waiting for the running auto-uv check / tuning to finish before the engines stop");
+        } else if !in_use && paused {
+            println!("idle: the PC is idle again: clocks and offsets back, the CMFD engines start");
+            clocks::resume();
+            crate::cmfd_offset::resume();
+            for (k, s) in slots.iter_mut().enumerate() {
+                if !s.disabled {
+                    s.restart_at = Some(Instant::now() + Duration::from_millis(k as u64 * stagger));
+                    s.restarts = 0;
+                }
+            }
+            paused = false;
+        }
         // (re)start engine processes
         for (i, s) in slots.iter_mut().enumerate() {
             if let Some(c) = &mut s.child {
@@ -872,7 +918,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     }
                 }
             }
-            if s.child.is_none() && s.restart_at.is_some_and(|t| Instant::now() >= t) && !crate::cmfd_uv::busy(s.dev) {
+            if s.child.is_none() && s.restart_at.is_some_and(|t| Instant::now() >= t) && !crate::cmfd_uv::busy(s.dev) && !paused && !in_use {
                 let scratch = work_root.join(&s.uuid);
                 std::fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
                 let mut c = engine_cmd(&engine, "cmfd-miner", Some(&s.uuid), &o.mode);
@@ -961,6 +1007,62 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                 }
             }
         }
+        if let Some(w) = &fwatch {
+            for (k, xids) in w.take() {
+                let c = &w.cards[k];
+                let Some(s) = slots.iter_mut().find(|s| s.dev == c.dev) else { continue };
+                if crate::cmfd_uv::busy(s.dev) {
+                    continue; // a check of this GPU runs: its Xid is the check's verdict (cmfd_uv), not a crash while mining
+                }
+                let cur = crate::cmfd_offset::current(&c.bus);
+                // another tool changed the card's offset (an OC apply): not a crash of the offset this miner set
+                if crate::faults::foreign_offset(cur, crate::cmfd_offset::read(&c.bus)) || crate::faults::foreign_near(&c.bus) {
+                    println!("faults: {} Xid {}: another tool changed the clocks / offset of this GPU at the same time: not counted as a failure of this miner's offset", c.label(), xids[0]);
+                    continue;
+                }
+                // one fault often reports several Xids (13, then 43) within a second: one crash
+                if crate::faults::get(&o.state_dir, &c.uuid).is_some_and(|p| p.n > 0 && crate::uv::now().saturating_sub(p.last) < 60) {
+                    continue;
+                }
+                let r = crate::faults::record_crash(&o.state_dir, &c.uuid, &c.bus, &c.name, xids[0], cur);
+                println!("faults: {} FAILED: Xid {} reported by the driver at the core offset {} (crash {} in a row); remembered in gpu-faults.json", c.label(), xids[0], cur.map_or("?".into(), |v| format!("{v:+}")), r.n);
+                if crate::cmfd_uv::on_fault(s.dev, &format!("Xid {} reported by the driver", xids[0])) {
+                    s.uv_restart = true;
+                    if let Some(ch) = s.child.as_ref() {
+                        let workers = worker_children(ch.id());
+                        kill_pid(ch.id());
+                        for wk in workers {
+                            kill_pid(wk);
+                        }
+                    }
+                }
+            }
+            // 30 minutes of mining without a fault clear the count of crashes in a row
+            if !mined_ok_done && start.elapsed() >= Duration::from_secs(crate::faults::OK_SECS) {
+                mined_ok_done = true;
+                let ok: Vec<String> = slots.iter().filter(|s| s.child.is_some()).map(|s| s.uuid.clone()).collect();
+                crate::faults::mined_ok(&o.state_dir, &ok);
+            }
+            // a burst of rejected shares from one engine: the wrong results come from its GPU
+            for (i, s) in slots.iter_mut().enumerate() {
+                if s.last.is_none() || s.uv_restart || crate::cmfd_uv::busy(s.dev) {
+                    continue;
+                }
+                let t = s.totals();
+                if let Some((drej, dacc)) = bursts[i].tick(Instant::now(), t.rejected, t.accepted, 0) {
+                    if crate::cmfd_uv::on_fault(s.dev, &format!("burst of rejected shares ({drej} rejected vs {dacc} accepted in 5 min)")) {
+                        s.uv_restart = true;
+                        if let Some(ch) = s.child.as_ref() {
+                            let workers = worker_children(ch.id());
+                            kill_pid(ch.id());
+                            for wk in workers {
+                                kill_pid(wk);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // --auto-uv: an OC apply (HiveOS) reset a tuned card's CMFD offset: its engine stops, the saved offset gets a quick check
         // (cmfd_uv), then the engine restarts at it
         for dev in crate::cmfd_uv::poll_oc() {
@@ -1043,6 +1145,8 @@ fn report_line(slots: &[Slot], nv: Option<&nvml::Nvml>, up: Duration) -> String 
         };
         let state = if s.disabled {
             " DISABLED"
+        } else if s.child.is_none() && crate::idle::mode() != crate::idle::Mode::Full {
+            " PAUSED: PC in use"
         } else if s.child.is_none() {
             " RESTARTING"
         } else if fresh.is_none() {

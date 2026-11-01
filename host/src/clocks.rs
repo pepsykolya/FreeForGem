@@ -17,6 +17,8 @@ pub struct ClockOpts {
     pub core_mhz: Vec<Option<u32>>,
     pub mem_mhz: Vec<Option<u32>>,
     pub mem_off: Vec<Option<i32>>,
+    /// CMFD (1.7.6): do not take the memory lock from the HiveOS OC profile (an explicit `mem_mhz` still applies).
+    pub no_hive_mem: bool,
 }
 
 impl ClockOpts {
@@ -225,6 +227,12 @@ pub fn recover(dir: &Path) {
     let _ = std::fs::remove_file(&p);
 }
 
+/// The HiveOS profile's memory lock to apply, and the one skipped: CMFD (`no_hive_mem`) skips it, because the 810 MHz that Pearl
+/// wants makes CMFD about 6x slower (Rig01: 3.7 FW/s instead of ~21).  The core lock still comes from the profile (Rig05, 1.7.3).
+fn hive_mem_choice(hive_mem: Option<u32>, no_hive_mem: bool) -> (Option<u32>, Option<u32>) {
+    if no_hive_mem { (None, hive_mem) } else { (hive_mem, None) }
+}
+
 /// Applies the requested clock locks / memory offset to `devices`.  Returns a guard that restores them on drop;
 /// `None` if nothing was requested, NVML is missing, or no device could be changed (then mining goes on as is).
 /// The lock each clock had before is noted first (HiveOS OC profile / $FFG_RESTORE_* or $FFGP_RESTORE_*) and put back on exit.
@@ -269,7 +277,13 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
         // the HiveOS profile's locks for the clocks without a --lock-* value (the same lock nvidia-oc sets; put back on exit)
         let idx = nv.index(d).map(|x| x as usize);
         let core_hive = core_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.core_lock(x))).flatten();
-        let mem_hive = mem_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.mem_lock(x))).flatten();
+        let hive_mem = mem_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.mem_lock(x))).flatten();
+        let (mem_hive, mem_skipped) = hive_mem_choice(hive_mem, o.no_hive_mem);
+        if let Some(m) = mem_skipped {
+            lg(format!(
+                "GPU{dev} (bus {bus}): CMFD: the HiveOS profile's memory lock {m} MHz is not applied (CMFD needs the full memory clock); give --lock-mclock to force one"
+            ));
+        }
         let (core, mem) = (core_opt.or(core_hive), mem_opt.or(mem_hive));
         if core.is_none() && mem.is_none() && moff.is_none() {
             continue;
@@ -477,6 +491,14 @@ fn expand<T: Copy>(raw: &str, n: usize, flag: &str, parse: impl Fn(&str) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cmfd_skips_the_hiveos_memory_lock() {
+        assert_eq!(hive_mem_choice(Some(810), true), (None, Some(810)));
+        assert_eq!(hive_mem_choice(None, true), (None, None));
+        assert_eq!(hive_mem_choice(Some(810), false), (Some(810), None)); // Pearl / NOID keep it
+        assert!(!ClockOpts { no_hive_mem: true, ..Default::default() }.any());
+    }
 
     #[test]
     fn restore_env_values() {

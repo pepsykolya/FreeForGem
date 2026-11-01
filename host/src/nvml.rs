@@ -423,6 +423,19 @@ impl Nvml {
                 true
             }
         });
+        drop(g);
+        // 1.7.6: an Xid that the kernel log pins on another process (another miner on the same rig) is not this miner's
+        if mine.is_empty() {
+            return mine;
+        }
+        let pci = self.pci(d).ok();
+        mine.retain(|&x| match pci.and_then(|p| crate::faults::foreign_xid(p, x)) {
+            Some((pid, name)) => {
+                println!("faults: Xid {x} on GPU bus {:02x} was caused by another process (pid {pid}, {name}), not by this miner: not counted", pci.map_or(0, |p| p.1));
+                false
+            }
+            None => true,
+        });
         mine
     }
 }

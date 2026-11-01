@@ -28,6 +28,7 @@ struct State {
     nv: Nvml,
     marker: PathBuf,
     items: Vec<Item>,
+    aside: bool, // idle mode (1.7.6): the owner's offsets are on the cards
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -54,7 +55,7 @@ pub fn recover(dir: &Path) {
             if let Ok(d) = nv.by_bus(bus) {
                 if let Ok((mode, cur, lo, hi)) = nv.probe_offset(d) {
                     // on HiveOS the profile's Core Clock value (1.7.2), not a value another program may have left
-                    let orig = crate::hiveoc::owner_offset(&nv, d, orig as i32, lo, hi);
+                    let orig = crate::profiles::owner_offset(&nv, d, dir, orig as i32, lo, hi, "cmfd offset");
                     let _ = cur;
                     match nv.set_offset(d, mode, orig) {
                         Ok(()) => lg(format!("GPU bus {bus}: offset {orig:+} MHz put back (left changed by an earlier CMFD run)")),
@@ -110,7 +111,7 @@ pub fn apply(devices: &[i32], fixed_all: &crate::uv::PerGpu, dir: &Path) -> Opti
                         "GPU{dev}: core offset {cur:+} -> 0 MHz (an undervolt offset makes CMFD compute wrong results; --uv-offset N overrides); put back on exit"
                     ));
                 }
-                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::hiveoc::owner_offset(&nv, d, cur, -1000, 1000), cur: target });
+                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::profiles::owner_offset(&nv, d, dir, cur, -1000, 1000, "cmfd offset"), cur: target });
             }
             Err(e) => lg(format!(
                 "GPU{dev}: cannot change core offset {cur:+} ({e:#}); run as root/Administrator or set the offset to 0 yourself, otherwise CMFD will likely fail on this GPU"
@@ -126,7 +127,7 @@ pub fn apply(devices: &[i32], fixed_all: &crate::uv::PerGpu, dir: &Path) -> Opti
         "gpus": items.iter().map(|it| json!({"bus": it.bus, "orig": it.orig})).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
-    *state().lock().unwrap() = Some(State { nv, marker, items });
+    *state().lock().unwrap() = Some(State { nv, marker, items, aside: false });
     Some(Guard)
 }
 
@@ -160,7 +161,7 @@ pub fn apply_managed(devices: &[i32], dir: &Path) -> (Option<Guard>, Vec<Option<
                 if target != cur {
                     lg(format!("GPU{dev}: core offset {cur:+} -> 0 MHz (CMFD base; --auto-uv tunes the CMFD offset from here); put back on exit"));
                 }
-                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::hiveoc::owner_offset(&nv, d, cur, -1000, 1000), cur: target });
+                items.push(Item { dev: d, bus: bus.clone(), mode, orig: crate::profiles::owner_offset(&nv, d, dir, cur, -1000, 1000, "cmfd offset"), cur: target });
                 bases[pos] = Some(target);
             }
             Err(e) => lg(format!(
@@ -185,7 +186,7 @@ pub fn apply_managed(devices: &[i32], dir: &Path) -> (Option<Guard>, Vec<Option<
         }
         return (None, vec![None; devices.len()]);
     }
-    *state().lock().unwrap() = Some(State { nv, marker, items });
+    *state().lock().unwrap() = Some(State { nv, marker, items, aside: false });
     (Some(Guard), bases)
 }
 
@@ -257,4 +258,44 @@ impl Drop for Guard {
     fn drop(&mut self) {
         restore_all();
     }
+}
+
+/// Idle mode (1.7.6), the PC is in use and the engines are stopped: the owner's offsets go back on the cards (the offsets this run
+/// set stay in the records and come back with `resume`).
+pub fn suspend() {
+    let mut g = state().lock().unwrap();
+    let Some(st) = g.as_mut() else { return };
+    if st.aside {
+        return;
+    }
+    st.aside = true;
+    for it in &st.items {
+        if it.cur != it.orig {
+            if let Err(e) = st.nv.set_offset(it.dev, it.mode, it.orig) {
+                lg(format!("GPU bus {}: cannot put the offset {:+} back for the pause: {e:#}", it.bus, it.orig));
+            }
+        }
+    }
+}
+
+/// The PC is idle again: the offsets this run set go back on the cards.
+pub fn resume() {
+    let mut g = state().lock().unwrap();
+    let Some(st) = g.as_mut() else { return };
+    if !st.aside {
+        return;
+    }
+    st.aside = false;
+    for it in &st.items {
+        if it.cur != it.orig {
+            if let Err(e) = st.nv.set_offset(it.dev, it.mode, it.cur) {
+                lg(format!("GPU bus {}: cannot set the offset {:+} again after the pause: {e:#}", it.bus, it.cur));
+            }
+        }
+    }
+}
+
+/// Is the owner's offset on the cards for an idle pause (nothing reads or sets offsets meanwhile)?
+pub fn aside() -> bool {
+    state().lock().ok().and_then(|g| g.as_ref().map(|s| s.aside)).unwrap_or(false)
 }

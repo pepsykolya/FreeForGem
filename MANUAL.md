@@ -335,7 +335,7 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
 
 **What it does**
 1. Reads the V/F offset the card has now (HiveOS OC, your own script, ...) and writes it to a restore file *before* changing anything.
-2. Warms the GPU up for 3 minutes, then raises the offset in steps of **15 MHz**. Every step is checked for about 30 s in a
+2. Warms the GPU up for 3 minutes, then raises the offset in steps: **30 MHz** (`--uv-coarse`) up to the first failing step, then **15 MHz** (`--uv-step`) inside that one interval only (since 1.7.6, for Pearl, NOID and CMFD: about half the steps, the same edge). Every step is checked for about 30 s in a
    separate process: the same job is computed thousands of times and every tile of every result is compared bit for bit,
    the hit counts of normal mining attempts are compared, and found results are verified on the CPU with the official verifier.
    Wrong results without any driver error do happen near the limit, which is why the checks are done on the GPU *and* the CPU.
@@ -473,8 +473,10 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--no-color` | no colours in the log (also `NO_COLOR=1` or `FFG_COLOR=0`; `FFG_COLOR=1` forces them) |
 | `--uv-max N` | highest offset the tuner tries (at most 600; default per card: RTX 20xx / GTX 16xx / CMP 50HX 225, CMP 30HX/40HX 150, all others 495; on Windows: `set "UV_MAX=480"` in `start.bat`) |
 | `--uv-min N` | offset the tuner starts from; a start that fails steps down (default: RTX 3070 / 3060 Ti by the core lock, RTX 3080/3090 +180 (section 17); else the HiveOS/driver offset or 120; RTX 40: at least 200, RTX 50: at least 300; Windows: `UV_MIN`) |
-| `--uv-step N` | MHz per tuning step (default 15; NOID climbs in 30 MHz steps and uses it below the first failure; a failing start / a crash steps down 30 MHz; Windows: `UV_STEP`) |
+| `--uv-step N` | MHz per fine tuning step (default 15; the result, the margin and the step backs; a failing start / a crash steps down 30 MHz; Windows: `UV_STEP`) |
+| `--uv-coarse N` | climbing step in MHz (default: 2 x `--uv-step` = 30; since 1.7.6 for Pearl, NOID and CMFD): the first failing step is searched again in `--uv-step` steps inside its own interval only. `0` (or <= `--uv-step`) = one step size, as before 1.7.6. A driver fault (Xid, hang) on a coarse step is not refined: the result is one step below the last good one |
 | `--uv-keep-last` | after a failed step keep the last good step (default: the last good step minus one step) |
+| `--temp-limit C[,C]` / `--temp-stop C2[,C2]` | temperature limit, section 19 (since 1.7.6) |
 | `--uv-reval-hours H` | re-validation interval while mining (default 6, `0` = never) |
 | `--uv-dir DIR` | where `uv.json` and `uv-restore.json` are kept (also `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id) and their ranges; changes nothing |
@@ -592,7 +594,7 @@ Safe settings: stock clocks, a power limit, or a core lock (`--lock-cclock`).
 `start-cmfd.bat`, run as Administrator) the miner finds an undervolt **for CMFD itself**, separate from the Pearl result.
 After the model is prepared and before the engine starts, per card: the engine's own GPU worker (`cmfd-v4-replay`, unchanged)
 loads the model once and runs two fixed batches again and again; at the base offset (0, stock) it takes their final digests as
-the reference and runs the official Common Foundry 1.0.16 test vector; then the core offset goes up in `--uv-step` steps
+the reference and runs the official Common Foundry 1.0.16 test vector; then the core offset goes up in `--uv-coarse` (30 MHz) steps, `--uv-step` inside the first failing one
 (15 MHz) from `--uv-min` (default: one step above 0) up to `--uv-max` (default: the per-card limit of section 12: 495,
 RTX 20xx / CMP 50HX 225, CMP 30HX/40HX 150); every step runs 30 s + 10 s of measurement and **every digest must be
 bit-identical** to the reference (a single wrong bit anywhere in the 384 layers changes it). The first failing step is the
@@ -623,6 +625,8 @@ rig with 4× RTX 3070 one card gave **3.7 FW/s** with the memory locked at 810 M
 240 W) with the memory free. Use a **separate OC profile for CMFD**: no memory lock, core offset 0, a power limit as you
 like. Since 1.6.1 the miner checks this once per GPU after 30 s of mining and warns
 (`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`); it never changes your OC itself.
+
+**Since 1.7.6** CMFD does **not apply** the memory lock of the HiveOS OC profile (e.g. the 810 MHz that Pearl wants) and says so in the log (`CMFD: the HiveOS profile's memory lock 810 MHz is not applied`); a lock that `nvidia-oc` has already set on the card is not removed, so a separate profile without the memory lock is still advised. The core lock from the profile is applied as before. An explicit `--lock-mclock` still applies.
 
 **Log.** The engine's lines are shown with a `[GPUn]` prefix (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` = harmless, a new
 block arrived in flight; `SHARE REJECTED` = wrong result, lower clocks). Every 10 s FreeForGem prints
@@ -955,8 +959,45 @@ A locked screen or the screensaver counts as idle at once. While the PC is in us
 The log says why: `idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`, and
 the 10 s line ends with `[PAUSED: PC in use]` or `[LIGHT 30 %: PC in use]`. The dev fee counts the mining time only (a pause
 stops its clock). Idle mode needs the miner in the user's own session: start.bat, or a scheduled task "at log on" of that
-user — not a service or a task "run whether the user is logged on or not" (the miner refuses to start there). In 1.7.5 it
-works with Pearl (not CMFD / NOID); on Linux / HiveOS `--idle` is ignored.
+user — not a service or a task "run whether the user is logged on or not" (the miner refuses to start there). Since 1.7.6 it
+works with Pearl, NOID and CMFD (1.7.5: Pearl only). NOID: `pause` and `light:PCT` as for Pearl. CMFD: the engine is an external program
+without a light load, so `light` pauses too: the engines stop while the PC is in use (the model is loaded again when they start), the owner's
+clocks and offsets are back on the cards, the tuned offsets come back with the engines; its dev fee runs on the engine's own mining time.
+On Linux / HiveOS `--idle` is ignored.
+
+---
+
+### 19. Temperature limit `--temp-limit` and what 1.7.6 changed in `--auto-uv`
+
+**`--temp-limit C[,C...]` (new in 1.7.6, ported from ffgs).** Meant mainly for **laptops and mobile GPUs**: their cooling is shared with
+the CPU, the fans cannot be set, and a long run sits at the GPU's own throttle point (~87 C). Desktop rigs keep their temperatures with
+fans (HiveOS autofan) and need none of this. The miner keeps the GPU's core temperature (NVML, no admin rights needed) at or below `C`
+(40..100; one value for all GPUs or a list in `--devices` order, `-` or `0` = off) by working only a share of the time: a controller reads the
+temperature every second and sets the share `u` (10..100 %, changing by +5 % / -20 % per second at most) so that the temperature stays 1-2 C
+below `C`; the worker mines one launch and then rests (the same duty cycle as `light` in section 18). Mining starts softly at 30 % and
+ramps up; nothing is logged unless the GPU gets near its limit. The hashrate shown and reported is the real one (only finished launches
+count), the status line ends with `[temp-limit 72%]`. `--temp-stop C2[,C2]` is the hard stop (default: `C` + 10, at most 90, at least `C` + 3): at
+`C2` (3 readings in a row, or one 5 C above) the GPU stops mining until it has cooled to `C` - 6 (or to `C` - 3 after 60 s), then it restarts at
+30 %. Pearl and NOID, NVIDIA; **not for CMFD** (its engine is an external program that cannot be duty-cycled: use a power limit or
+`--lock-cclock`). Not ported from ffgs: memory/hotspot sensors, lowering the core clock lock before adding idle gaps, AMD. A duty cycle keeps
+the GPU at its boost clock during the launches, so it costs hashrate and efficiency: a lower `--lock-cclock` is the better cooling where
+the clocks can be set.
+
+**What changed in `--auto-uv` in 1.7.6** (one climb, one profile store, Pearl, NOID and CMFD alike):
+- *30 / 15 MHz climb* (`--uv-coarse`, section 12): about half the steps for the same edge, now also for Pearl and CMFD. The voltage-floor
+  stop (two steps in a row that save less than 0.5 W per 15 MHz, i.e. < 1 W per 30 MHz step) now applies to CMFD too and scales with the step.
+- *Start points:* RTX 40 starts at +200, RTX 50 at +300 for NOID and CMFD as for Pearl; a new core lock with a verified profile of a higher
+  lock starts 30 MHz below that profile's offset (all three; not with `--uv-min`, not after a crash). The CMFD dry run (`--auto-uv-dry-run`) prints the start the tuning would take.
+- *After a crash* the search stays 30 MHz below the crashed offset everywhere (CMFD: was 15), NOID remembers the last good step in its crash
+  marker and does not climb it again, CMFD steps back from a crash while mining as NOID does.
+- *NOID and CMFD got what Pearl had:* the periodic re-validation (`--uv-reval-hours`; CMFD: its engine stops for it), a step back on a burst of
+  rejected shares, detection of a leftover tuned offset on the card (a run killed before it put the owner's offset back: the offset from before the
+  tuning is put back, not the tuned one), crash records in `gpu-faults.json` for CMFD.
+- *Whose Xid:* an Xid that the kernel log (`dmesg`, Linux) pins on another process (another miner on the same rig) is not counted as this
+  miner's; a crash that came with another tool's change of the card's clocks / offset (HiveOS `nvidia-oc`) is not counted against the offset.
+- *A GPU that cannot be opened* (`busy or unavailable` after a fault of the previous miner) is not a failed offset: the check waits and
+  repeats after 1, 5, 15 min, then every 15 min; the other GPUs mine meanwhile.
+- The files `uv.json`, `gpu-faults.json` and the restore markers keep their 1.7.5 format: a 1.7.6 file is read by 1.7.5 and the other way round.
 
 ---
 
@@ -1285,7 +1326,7 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 **Что делает**
 1. Читает V/F offset, который стоит сейчас (разгон в HiveOS, ваш скрипт и т. п.), и записывает его в файл восстановления
    *до* любых изменений.
-2. Прогревает карту 3 минуты, затем поднимает offset шагами по **15 МГц**. Каждый шаг около 30 с проверяется в отдельном
+2. Прогревает карту 3 минуты, затем поднимает offset шагами: **30 МГц** (`--uv-coarse`) до первого неудачного шага, затем по **15 МГц** (`--uv-step`) только внутри этого одного интервала (с 1.7.6, для Pearl, NOID и CMFD: примерно вдвое меньше шагов, тот же край). Каждый шаг около 30 с проверяется в отдельном
    процессе: одна и та же задача считается тысячи раз, каждый тайл каждого результата сравнивается побитно, сравниваются
    счётчики попаданий обычных майнинговых попыток, а найденные результаты проверяются на CPU официальным верификатором.
    У предела бывают неверные результаты без всякой ошибки драйвера, поэтому проверка идёт и на GPU, и на CPU.
@@ -1429,8 +1470,10 @@ set "UV_MAX=495"
 | `--no-color` | лог без цвета (также `NO_COLOR=1` или `FFG_COLOR=0`; `FFG_COLOR=1` включает его принудительно) |
 | `--uv-max N` | наибольший offset, который пробует подбор (максимум 600; по умолчанию по карте: RTX 20xx / GTX 16xx / CMP 50HX 225, CMP 30HX/40HX 150, остальные 495; в Windows: `set "UV_MAX=480"` в `start.bat`) |
 | `--uv-min N` | offset, с которого начинается подбор; старт, не прошедший проверку, понижается (по умолчанию: RTX 3070 / 3060 Ti — по локу ядра, RTX 3080/3090 — +180 (раздел 17); иначе offset из HiveOS/драйвера или 120; RTX 40 — не ниже 200, RTX 50 — не ниже 300; Windows: `UV_MIN`) |
-| `--uv-step N` | шаг подбора в МГц (по умолчанию 15; NOID поднимается шагами по 30 МГц и использует его под первым провалом; старт, не прошедший проверку, / падение — шаг вниз на 30 МГц; Windows: `UV_STEP`) |
+| `--uv-step N` | мелкий шаг подбора в МГц (по умолчанию 15; результат, запас и откаты; старт, не прошедший проверку, / падение — шаг вниз на 30 МГц; Windows: `UV_STEP`) |
+| `--uv-coarse N` | шаг подъёма в МГц (по умолчанию 2 x `--uv-step` = 30; с 1.7.6 для Pearl, NOID и CMFD): первый неудачный шаг перепроверяется шагами `--uv-step` только внутри своего интервала. `0` (или <= `--uv-step`) — один размер шага, как до 1.7.6. Сбой драйвера (Xid, зависание) на крупном шаге не уточняется: результат — на шаг ниже последнего удачного |
 | `--uv-keep-last` | после неудачного шага оставить последний удачный шаг (по умолчанию — последний удачный минус один шаг) |
+| `--temp-limit C[,C]` / `--temp-stop C2[,C2]` | ограничение температуры, раздел 19 (с 1.7.6) |
 | `--uv-reval-hours H` | интервал перепроверки во время майнинга (по умолчанию 6, `0` — не перепроверять) |
 | `--uv-dir DIR` | где лежат `uv.json` и `uv-restore.json` (также `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | только пишет в лог, какие карты были бы изменены (устройство CUDA → устройство NVML, шина); ничего не меняет |
@@ -1549,7 +1592,7 @@ HiveOS показывает FW/s по каждой карте; первый за
 `start-cmfd.bat`, запуск от администратора) майнер подбирает андервольт **именно под CMFD**, отдельно от результата Pearl.
 После подготовки модели и до старта движка, на каждой карте: родной GPU-воркер движка (`cmfd-v4-replay`, без изменений)
 один раз грузит модель и гоняет две фиксированные пачки; на базовом смещении (0, сток) их финальные дайджесты берутся
-эталоном и прогоняется официальный тест-вектор Common Foundry 1.0.16; затем смещение ядра растёт шагами `--uv-step` (15 МГц)
+эталоном и прогоняется официальный тест-вектор Common Foundry 1.0.16; затем смещение ядра растёт шагами `--uv-coarse` (30 МГц), внутри первого неудачного — `--uv-step` (15 МГц)
 от `--uv-min` (по умолчанию — шаг над 0) до `--uv-max` (по умолчанию — лимит карты из раздела 12: 495, RTX 20xx / CMP 50HX
 225, CMP 30HX/40HX 150); каждый шаг — 30 с + 10 с замера, и **каждый дайджест должен совпасть побитно** с эталоном (один
 неверный бит где угодно в 384 слоях его меняет). Первый упавший шаг — край; результат — на шаг ниже (`--uv-keep-last`
@@ -1578,6 +1621,8 @@ HiveOS с 4× RTX 3070 карта с памятью, залоченной на 8
 при лимите 240 Вт). Сделайте для CMFD **отдельный профиль разгона**: без лока памяти, смещение ядра 0, лимит мощности по
 вкусу. С 1.6.1 майнер один раз на каждую GPU через 30 с майнинга проверяет это и предупреждает
 (`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`); сам ваш разгон он не меняет.
+
+**С 1.7.6:** CMFD **не применяет** лок памяти из профиля разгона HiveOS (например 810 МГц для Pearl) и пишет об этом в лог (`CMFD: the HiveOS profile's memory lock 810 MHz is not applied`); лок, который `nvidia-oc` уже выставил на карте, он не снимает, поэтому отдельный профиль без лока памяти по-прежнему нужен. Лок ядра из профиля применяется как раньше. Явный `--lock-mclock` действует.
 
 **Лог.** Строки движка идут с префиксом `[GPUn]` (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` — безвредно, пока шара
 летела, пришёл новый блок; `SHARE REJECTED` — неверный результат, снизьте частоты). Раз в 10 с FreeForGem печатает
@@ -1908,8 +1953,44 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 В логе видно почему: `idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`, строка
 каждые 10 с заканчивается `[PAUSED: PC in use]` или `[LIGHT 30 %: PC in use]`. Комиссия считается только по времени майнинга (пауза
 останавливает её часы). Майнер должен работать в сеансе пользователя: start.bat или задача планировщика «при входе» этого
-пользователя — не служба и не задача «выполнять для всех пользователей» (там майнер не запустится в этом режиме). В 1.7.5 режим
-работает с Pearl (не CMFD / NOID); в Linux / HiveOS `--idle` игнорируется.
+пользователя — не служба и не задача «выполнять для всех пользователей» (там майнер не запустится в этом режиме). С 1.7.6 режим
+работает с Pearl, NOID и CMFD (в 1.7.5 — только Pearl). NOID: `pause` и `light:PCT`, как у Pearl. CMFD: движок — внешняя программа без
+лёгкой нагрузки, поэтому `light` тоже ставит на паузу: пока ПК занят, движки останавливаются (модель загружается заново при запуске), ваши
+частоты и offset возвращаются на карты, подобранные offset возвращаются вместе с движками; комиссия считается по собственному времени майнинга движка.
+В Linux / HiveOS `--idle` игнорируется.
+
+---
+
+### 19. Ограничение температуры `--temp-limit` и что изменилось в `--auto-uv` в 1.7.6
+
+**`--temp-limit C[,C...]` (новое в 1.7.6, перенесено из ffgs).** Нужно в основном **ноутбукам и мобильным GPU**: охлаждение общее с
+процессором, вентиляторами не управлять, и долгий майнинг упирается в собственный порог троттлинга GPU (~87 C). Настольные риги держат
+температуру вентиляторами (autofan HiveOS) и в этом не нуждаются. Майнер удерживает температуру ядра (NVML, права администратора не нужны)
+не выше `C` (40..100; одно значение для всех GPU или список в порядке `--devices`, `-` или `0` — выкл.), работая лишь часть времени:
+регулятор каждую секунду читает температуру и задаёт долю работы `u` (10..100 %, меняется не быстрее +5 % / -20 % в секунду), чтобы температура
+держалась на 1-2 C ниже `C`; воркер делает один запуск и отдыхает (тот же цикл «работа / отдых», что у `light` в разделе 18). Майнинг стартует мягко с 30 %
+и наращивается; в лог ничего не пишется, пока GPU не подойдёт к пределу. Показываемый и отправляемый хешрейт — реальный (считаются только
+завершённые запуски), строка статуса заканчивается `[temp-limit 72%]`. `--temp-stop C2[,C2]` — жёсткий останов (по умолчанию `C` + 10, не больше 90, не меньше
+`C` + 3): при `C2` (3 показания подряд или одно на 5 C выше) GPU перестаёт майнить, пока не остынет до `C` - 6 (или до `C` - 3 через 60 с), затем
+снова стартует с 30 %. Pearl и NOID, NVIDIA; **не для CMFD** (его движок — внешняя программа, её нельзя гонять скважностью: используйте лимит
+мощности или `--lock-cclock`). Из ffgs не перенесено: датчики памяти/hotspot, снижение лока частоты ядра перед паузами, AMD. Такой цикл держит
+GPU на буст-частоте во время запусков, поэтому стоит хешрейта и эффективности: где частоты можно задать, лучше охлаждает пониженный `--lock-cclock`.
+
+**Что изменилось в `--auto-uv` в 1.7.6** (один подъём, одно хранилище профилей, Pearl, NOID и CMFD одинаково):
+- *Подъём 30 / 15 МГц* (`--uv-coarse`, раздел 12): примерно вдвое меньше шагов для того же края, теперь и у Pearl, и у CMFD. Останов по полу напряжения
+  (два шага подряд с экономией меньше 0,5 Вт на 15 МГц, т. е. < 1 Вт на шаг 30 МГц) теперь есть и у CMFD и масштабируется шагом.
+- *Старт:* RTX 40 стартует с +200, RTX 50 с +300 для NOID и CMFD, как у Pearl; новый лок ядра, у которого есть проверенный профиль более высокого
+  лока, стартует на 30 МГц ниже offset этого профиля (во всех трёх; не с `--uv-min`, не после падения). Сухой прогон CMFD (`--auto-uv-dry-run`) печатает тот старт, с которого пойдёт подбор.
+- *После падения* поиск везде остаётся на 30 МГц ниже упавшего offset (у CMFD было 15), NOID хранит в маркере падения последний удачный шаг и не поднимается
+  по нему заново, CMFD откатывается от падения в майнинге так же, как NOID.
+- *NOID и CMFD получили то, что было у Pearl:* периодическую перепроверку (`--uv-reval-hours`; у CMFD для неё останавливается движок), откат на шаг при всплеске
+  отклонённых шаров, обнаружение «хвоста» подобранного offset на карте (запуск оборвали до возврата вашего offset: возвращается offset до подбора,
+  а не подобранный), записи падений в `gpu-faults.json` для CMFD.
+- *Чей Xid:* Xid, который журнал ядра (`dmesg`, Linux) приписывает другому процессу (другой майнер на том же риге), не засчитывается этому майнеру;
+  падение, совпавшее со сменой частот / offset карты другим инструментом (HiveOS `nvidia-oc`), не засчитывается против offset.
+- *GPU, которую нельзя открыть* (`busy or unavailable` после сбоя прежнего майнера), — не неудачный offset: проверка ждёт и повторяется через 1, 5, 15 мин,
+  затем каждые 15 мин; остальные карты майнят.
+- Файлы `uv.json`, `gpu-faults.json` и маркеры восстановления сохраняют формат 1.7.5: файл 1.7.6 читает 1.7.5 и наоборот.
 
 ---
 
@@ -2204,7 +2285,7 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
 
 **它做什么**
 1. 读取显卡当前的 V/F 偏移（HiveOS 超频、你自己的脚本等），并在做任何改动*之前*把它写入恢复文件。
-2. 先让显卡预热 3 分钟，然后以 **15 MHz** 为步长提高偏移。每一步在单独的进程中检查约 30 秒：同一个任务计算数千次，
+2. 先让显卡预热 3 分钟，然后提高偏移：先以 **30 MHz**（`--uv-coarse`）为步长直到第一个失败的步，再仅在这一个区间内以 **15 MHz**（`--uv-step`）重试（1.7.6 起，Pearl、NOID、CMFD 均如此：步数约减半，边缘相同）。每一步在单独的进程中检查约 30 秒：同一个任务计算数千次，
    每个结果的每个 tile 逐位比较；比较正常挖矿尝试的命中计数；找到的结果由官方验证器在 CPU 上验证。接近极限时会出现
    驱动不报任何错误的错误结果，因此检查同时在 GPU 和 CPU 上进行。
 3. 第一次不一致、CUDA 错误、Xid 错误或卡死就结束爬升。结果为**最后一个正常步长再减一步（15 MHz 余量）**，并用更长的
@@ -2318,8 +2399,10 @@ set "UV_MAX=495"
 | `--no-color` | 日志不着色（也可 `NO_COLOR=1` 或 `FFG_COLOR=0`；`FFG_COLOR=1` 强制着色） |
 | `--uv-max N` | 调校尝试的最高偏移（最多 600；默认按显卡：RTX 20xx / GTX 16xx / CMP 50HX 225，CMP 30HX/40HX 150，其他 495；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
 | `--uv-min N` | 调校的起始偏移；起点检查失败时向下调整（默认：RTX 3070 / 3060 Ti 按核心锁频，RTX 3080/3090 为 +180（第 17 节）；否则为 HiveOS/驱动中的偏移或 120；RTX 40 至少 200，RTX 50 至少 300；Windows：`UV_MIN`） |
-| `--uv-step N` | 每步调校的 MHz（默认 15；NOID 以 30 MHz 步进上升，在首次失败附近使用该值；起点失败 / 崩溃时下调 30 MHz；Windows：`UV_STEP`） |
+| `--uv-step N` | 精细调校步长（MHz，默认 15；结果、余量和回退；起点失败 / 崩溃时下调 30 MHz；Windows：`UV_STEP`） |
+| `--uv-coarse N` | 爬升步长（MHz，默认 2 x `--uv-step` = 30；1.7.6 起适用于 Pearl、NOID、CMFD）：第一个失败的步仅在其自身区间内以 `--uv-step` 重试。`0`（或 <= `--uv-step`）= 只用一种步长，与 1.7.6 之前相同。粗步上的驱动故障（Xid、卡死）不再细化：结果为最后通过的步再低一步 |
 | `--uv-keep-last` | 某一步失败后保留最后一个通过的步（默认：最后通过的步再减一步） |
+| `--temp-limit C[,C]` / `--temp-stop C2[,C2]` | 温度限制，第 19 节（1.7.6 起） |
 | `--uv-reval-hours H` | 挖矿期间的复查间隔（默认 6，`0` 表示不复查） |
 | `--uv-dir DIR` | `uv.json` 和 `uv-restore.json` 的存放位置（也可用 `FFGP_STATE_DIR`） |
 | `--auto-uv-dry-run` | 只在日志中说明会改动哪些显卡（CUDA 设备 → NVML 设备、总线地址），不做任何改动 |
@@ -2424,7 +2507,7 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 **CMFD 的 `--auto-uv`（NVIDIA）。** 使用 `--auto-uv`（HiveOS：*Extra config arguments*；Windows：`start-cmfd.bat` 中
 `AUTO_UV=1`，以管理员身份运行）时，矿工会**专门为 CMFD** 寻找降压偏移，与 Pearl 的结果分开保存。模型准备好之后、引擎启动之前，
 对每张卡：引擎自带的 GPU 工作进程（`cmfd-v4-replay`，未修改）只加载一次模型，反复运行两批固定输入；在基准偏移（0，默认）下
-记录其最终摘要作为参考，并运行 Common Foundry 1.0.16 官方测试向量；然后核心偏移以 `--uv-step`（15 MHz）为步长，从 `--uv-min`
+记录其最终摘要作为参考，并运行 Common Foundry 1.0.16 官方测试向量；然后核心偏移以 `--uv-coarse`（30 MHz）为步长（第一个失败的步内用 `--uv-step`，15 MHz），从 `--uv-min`
 （默认：0 之上一步）升到 `--uv-max`（默认：第 12 节的每卡上限：495，RTX 20xx / CMP 50HX 225，CMP 30HX/40HX 150）；每一步
 运行 30 秒 + 10 秒测量，**每个摘要都必须与参考逐位一致**。第一个失败的步长即为边界；结果取低一步（`--uv-keep-last` 保留最后
 成功的一步），再做 2 分钟确认 + 测试向量（失败则再降一步）。结果保存在 `uv.json`（`cmfd` 部分，按显卡 UUID，含驱动与引擎/工作进程
@@ -2446,6 +2529,8 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 不锁显存，核心偏移 0，功耗限制随意。自 1.6.1 起，矿工在每块 GPU 挖矿 30 秒后检查一次并给出警告
 （`[GPU0] WARNING: memory clock 810 MHz of 7001 MHz while mining CMFD ...`）；它不会自行修改您的超频。
 
+
+**自 1.7.6 起：** CMFD **不再应用** HiveOS 超频配置中的显存锁定（例如 Pearl 用的 810 MHz），日志会写明（`CMFD: the HiveOS profile's memory lock 810 MHz is not applied`）；显卡上已由 `nvidia-oc` 设置的锁定不会被取消，因此仍应为 CMFD 使用不锁显存的配置。核心锁定仍取自该配置。明确给出的 `--lock-mclock` 照常生效。
 **日志。** 引擎输出带 `[GPUn]` 前缀（`MINER STATS`、`INTEGRITY | ok`、`SHARE STALE` = 份额传输途中出了新区块，无害；
 `SHARE REJECTED` = 结果错误，请降低频率）。FreeForGem 每 10 秒打印一行
 `[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
@@ -2722,4 +2807,25 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 
 日志会说明原因：`idle: the PC is in use (chrome.exe uses 20 % GPU): mining paused` / `idle: idle for 5 min: full load`，每 10 秒的行以
 `[PAUSED: PC in use]` 或 `[LIGHT 30 %: PC in use]` 结尾。开发者抽水只按挖矿时间计算（暂停时停止计时）。矿工必须在用户自己的会话中运行：start.bat 或该用户“登录时”的计划任务，
-不能是服务或“不管用户是否登录都运行”的任务（在那里该模式会拒绝启动）。1.7.5 中仅支持 Pearl（不支持 CMFD / NOID）；在 Linux / HiveOS 上 `--idle` 被忽略。
+不能是服务或“不管用户是否登录都运行”的任务（在那里该模式会拒绝启动）。1.7.6 起支持 Pearl、NOID 和 CMFD（1.7.5 仅支持 Pearl）。NOID：`pause` 和 `light:PCT` 与 Pearl 相同。CMFD：引擎是没有轻负载的外部程序，所以 `light` 同样暂停：电脑被使用时引擎停止（重新启动时重新加载模型），您的频率和偏移回到显卡上，调校出的偏移随引擎一起恢复；其开发者抽水按引擎自己的挖矿时间计算。在 Linux / HiveOS 上 `--idle` 被忽略。
+
+---
+
+### 19. 温度限制 `--temp-limit` 以及 1.7.6 中 `--auto-uv` 的变化
+
+**`--temp-limit C[,C...]`（1.7.6 新增，移植自 ffgs）。** 主要面向**笔记本和移动 GPU**：散热与 CPU 共用，风扇无法设置，长时间运行会停在 GPU 自身的降频点（约 87 C）。
+台式矿机用风扇（HiveOS autofan）控制温度，不需要它。矿工通过只工作一部分时间，使核心温度（NVML，无需管理员权限）不高于 `C`（40..100；所有 GPU 一个值，或按 `--devices` 顺序的列表，
+`-` 或 `0` = 关闭）：控制器每秒读取温度并设置工作比例 `u`（10..100 %，每秒最多 +5 % / -20 %），使温度保持在 `C` 以下 1-2 C；工作线程执行一次计算后休息（与第 18 节 `light` 相同的占空比）。
+挖矿从 30 % 平滑启动并逐步提高；GPU 未接近上限时不输出日志。显示和上报的算力是真实值（只计已完成的计算），状态行以 `[temp-limit 72%]` 结尾。
+`--temp-stop C2[,C2]` 为硬停止（默认 `C` + 10，不超过 90，至少 `C` + 3）：达到 `C2`（连续 3 次读数，或一次高出 5 C）时 GPU 停止挖矿，直到冷却到 `C` - 6（60 秒后降到 `C` - 3），然后从 30 % 重新开始。
+适用于 Pearl 和 NOID（NVIDIA）；**不适用于 CMFD**（其引擎是无法按占空比控制的外部程序：请用功率限制或 `--lock-cclock`）。ffgs 中未移植的部分：显存/热点传感器、先降低核心锁频再加空闲间隔、AMD。
+占空比使 GPU 在计算期间保持加速频率，会损失算力和效率：在可以设置频率的机器上，降低 `--lock-cclock` 是更好的降温办法。
+
+**1.7.6 中 `--auto-uv` 的变化**（统一的爬升、统一的配置存储，Pearl、NOID、CMFD 一致）：
+- *30 / 15 MHz 爬升*（`--uv-coarse`，第 12 节）：相同边缘下步数约减半，现在 Pearl 和 CMFD 也适用。电压下限停止（连续两步每 15 MHz 省电不足 0.5 W，即每 30 MHz 步 < 1 W）现在也适用于 CMFD，并随步长缩放。
+- *起点：* NOID 和 CMFD 在 RTX 40 上从 +200、RTX 50 上从 +300 开始，与 Pearl 相同；新的核心锁频如果有更高锁频的已验证配置，则从该配置的偏移再低 30 MHz 开始（三者皆然；不适用于 `--uv-min`，崩溃后也不适用）。CMFD 试运行（`--auto-uv-dry-run`）会打印调校实际采用的起点。
+- *崩溃之后*，搜索在所有模式中都保持在崩溃偏移以下 30 MHz（CMFD 原为 15）；NOID 在崩溃标记中记录最后通过的步，不再重复爬升；CMFD 对挖矿中的崩溃与 NOID 一样回退。
+- *NOID 和 CMFD 获得了 Pearl 原有的功能：* 定期重新验证（`--uv-reval-hours`；CMFD 为此停止其引擎）、被拒份额激增时回退一步、检测显卡上遗留的调校偏移（运行在恢复您的偏移前被中断：恢复的是调校之前的偏移，而不是调校出的偏移）、CMFD 的崩溃记录写入 `gpu-faults.json`。
+- *Xid 属于谁：* 内核日志（Linux 的 `dmesg`）指明属于其他进程（同一矿机上的其他矿工）的 Xid 不计入本矿工；与其他工具改动显卡频率/偏移（HiveOS `nvidia-oc`）同时发生的崩溃，不会算作该偏移的失败。
+- *无法打开的 GPU*（前一个矿工故障后的 `busy or unavailable`）不算偏移失败：检查会等待并在 1、5、15 分钟后重试，之后每 15 分钟一次；其他 GPU 照常挖矿。
+- `uv.json`、`gpu-faults.json` 和恢复标记保持 1.7.5 的格式：1.7.6 的文件可被 1.7.5 读取，反之亦然。

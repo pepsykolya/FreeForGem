@@ -1,0 +1,37 @@
+{
+  "profiles": {
+    "GPU-00000000-0000-0000-0000-000000000001": {
+      "1560/mem810": {
+        "bus": "0000:01:00.0",
+        "cap": 495,
+        "clk_mhz": 1560,
+        "clk_ok_mhz": 1560,
+        "core_lock": 1560,
+        "disabled_until": 0,
+        "driver": "591.59",
+        "edge": 0,
+        "kernel": "v1pb-k8192-amp9 855de89e",
+        "m": 81920,
+        "mem_lock": 810,
+        "migrated": false,
+        "name": "NVIDIA GeForce RTX 3080 Ti",
+        "offset": 495,
+        "orig_offset": 0,
+        "refs": [
+          "c9d6b38a8ac438412d9dd8e074922b84a547846de9ed8ea7590aebc67a641b1e",
+          "5c84981e4632e39d623b59292ecfbfa32ce561d58296ad5584e3e4072cb697d2",
+          "a8ab146c033df04795bfb7778ecf0b82c7a9e0e0acf8fec85a267ef3a4469c62",
+          "cf138af3ba050bac70ea77eabc861732d7e8c3cfc6c6cb9c14bcee60b104aa9e"
+        ],
+        "start_offset": null,
+        "tested_at": 1792703489,
+        "unlocked": false,
+        "verified_at": 1793162152,
+        "watts_after": 198.93945454545465,
+        "watts_before": 212.53793939393935
+      }
+    }
+  },
+  "trying": {},
+  "version": 2
+}

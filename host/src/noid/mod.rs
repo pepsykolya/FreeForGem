@@ -35,6 +35,7 @@ pub struct Opts {
     pub lock_cclock: Option<String>,
     pub lock_mclock: Option<String>,
     pub moffset: Option<String>,
+    pub temp: crate::templimit::Opts,
 }
 
 pub fn mode_of(s: &str) -> Result<i32> {
@@ -417,6 +418,7 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
     let wth = thresh(1500.0 / wn as f64);
     let wwant = if wsecs > 0 { cpu_candidates(&wf, wn, wth) } else { Vec::new() };
     let mut wlast = Instant::now();
+    let mut burst = Instant::now(); // idle mode, light load
     let mut staggered = false;
     // test hook (faults.rs): a fault of this GPU after N s of mining
     let inject = crate::faults::test_fault_for(gs.dev).map(|secs| Instant::now() + Duration::from_secs(secs));
@@ -477,6 +479,29 @@ fn worker_loop(pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
         }
         if gs.paused.swap(false, Ordering::SeqCst) {
             wlast = Instant::now();
+        }
+        // idle mode, light load while the PC is in use, and --temp-limit (1.7.6, as for Pearl): in every 200 ms mine PCT % of it, let the
+        // launches finish, then rest (light:30 = 60 ms of work, 140 ms idle); 0 % = stopped
+        if let Some(pct) = crate::templimit::duty(gs.dev) {
+            if pct == 0 {
+                if flight.iter().any(Option::is_some) {
+                    slot ^= 1;
+                    continue;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            if burst.elapsed() >= Duration::from_millis(2 * pct as u64) {
+                if flight.iter().any(Option::is_some) {
+                    slot ^= 1;
+                    continue;
+                }
+                let busy = burst.elapsed();
+                std::thread::sleep(busy * (100 - pct as u32) / pct as u32);
+                burst = Instant::now();
+            }
+        } else {
+            burst = Instant::now();
         }
         // newest assignment
         let newest = sh.cur.lock().unwrap().clone();
@@ -611,6 +636,7 @@ pub fn mine(o: Opts) -> Result<()> {
     o.uv.check_counts(devices.len())?;
     let dir = crate::uv::state_dir(&o.uv);
     let buses: Vec<String> = devices.iter().map(|&d| gpu::device_pci_bus_id(d)).collect::<Result<_>>()?;
+    o.temp.validate(devices.len())?;
     println!(
         "{} {} | NOID ({ALGO_NAME}) | pool {url} | worker {} | {} GPU(s) {:?} | mode {}",
         crate::PRODUCT,
@@ -626,6 +652,7 @@ pub fn mine(o: Opts) -> Result<()> {
         core_mhz: match &o.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &o.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &o.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
+        no_hive_mem: false,
     };
     let _clock_guard = clocks::apply(&devices, &clock_opts, &dir);
     offset::recover(&dir);
@@ -719,6 +746,7 @@ pub fn mine(o: Opts) -> Result<()> {
         println!("GPU {dev}: {} (bus {}), kernel {}, core offset {}", gs.name, crate::uv::short_bus(&gs.bus), gs.label.lock().unwrap(), offset::current(&gs.bus).map_or("?".into(), crate::uv::signed));
         gstats.push(gs);
     }
+    crate::templimit::start(&o.temp, &devices.iter().enumerate().map(|(pos, &d)| (d, buses[pos].clone(), gpu::device_name(d), pos)).collect::<Vec<_>>(), &stop);
     let power: Option<(&Nvml, Vec<Option<crate::nvml::Dev>>)> = nv.map(|n| (n, buses.iter().map(|b| n.by_bus(b).ok()).collect()));
 
     let (start, deadline) = (Instant::now(), o.minutes.map(|m| Duration::from_secs_f64(m * 60.0)));
@@ -747,7 +775,40 @@ pub fn mine(o: Opts) -> Result<()> {
     tune::start_jobs(&live);
     let mut dead_seen = excluded.clone();
     let mut ok_cleared = false;
+    // idle mode (1.7.6): `mined` is the mining time (a pause does not count: the fee schedule runs on it), `aside` the owner's offsets
+    // and clocks are on the cards while the PC is in use
+    let (mut mined, mut last_loop, mut aside, mut was_active) = (Duration::ZERO, Instant::now(), false, false);
     while !stop.load(Ordering::Relaxed) && deadline.map_or(true, |d| start.elapsed() < d) {
+        let im = crate::idle::mode();
+        let in_use = im != crate::idle::Mode::Full;
+        match im {
+            crate::idle::Mode::Pause => {
+                if !aside && tune::suspend(&live, true) {
+                    clocks::suspend();
+                    aside = true;
+                }
+            }
+            // light load: the GPUs keep mining on the verified clocks and offsets; no new check starts
+            crate::idle::Mode::Light(_) => {
+                if aside {
+                    clocks::resume();
+                    tune::resume(&live);
+                    aside = false;
+                }
+            }
+            crate::idle::Mode::Full => {
+                if was_active {
+                    clocks::resume();
+                    tune::resume(&live);
+                    aside = false;
+                }
+            }
+        }
+        was_active = in_use;
+        if im != crate::idle::Mode::Pause {
+            mined += last_loop.elapsed();
+        }
+        last_loop = Instant::now();
         if (0..gstats.len()).any(|i| !dead_seen[i] && !gstats[i].alive.load(Ordering::Relaxed)) {
             // which GPU failed (driver Xid events), remembered for the next start (faults.rs); a CUDA fault stops every worker
             std::thread::sleep(Duration::from_millis(1500));
@@ -760,7 +821,7 @@ pub fn mine(o: Opts) -> Result<()> {
             }
             let alive_n = gstats.iter().filter(|g| g.alive.load(Ordering::Relaxed)).count();
             let injected = crate::faults::test_fault().map(|f| f.0).filter(|d| dead.iter().any(|x| x.0 == *d));
-            let v = crate::faults::attribute(watch.as_ref(), &dead, alive_n, injected);
+            let v = crate::faults::attribute(watch.as_ref(), &dead, alive_n, injected, &|d| tune::expected_offset(&live, d));
             for (k, x) in &v.culprits {
                 let w = watch.as_ref().unwrap();
                 let c = &w.cards[*k];
@@ -850,8 +911,8 @@ pub fn mine(o: Opts) -> Result<()> {
                 sh.jgen[i].fetch_add(1, Ordering::Relaxed);
             }
         }
-        // developer fee schedule (the Pearl schedule, devfee.rs)
-        let now = Instant::now();
+        // developer fee schedule (the Pearl schedule, devfee.rs), on the mining time
+        let now = start + mined;
         let want_conn = fee.conn_wanted(now);
         if fee_enabled.swap(want_conn, Ordering::Relaxed) && !want_conn {
             st[Src::Fee.idx()].job = None;
@@ -866,7 +927,7 @@ pub fn mine(o: Opts) -> Result<()> {
             Change::None => {}
         }
         let src = if fee.active() { Src::Fee } else { Src::User };
-        let want = st[src.idx()].job.clone().map(|j| (src, Arc::as_ptr(&j) as usize, j));
+        let want = st[src.idx()].job.clone().filter(|_| im != crate::idle::Mode::Pause).map(|j| (src, Arc::as_ptr(&j) as usize, j));
         if want.as_ref().map(|w| (w.0, w.1)) != published {
             published = want.as_ref().map(|w| (w.0, w.1));
             *sh.cur.lock().unwrap() = want.map(|(s, _, j)| Arc::new(Assign { src: s, job: j, jgen: sh.jgen[s.idx()].load(Ordering::Relaxed) }));
@@ -879,7 +940,7 @@ pub fn mine(o: Opts) -> Result<()> {
             }
         }
         // an OC apply (HiveOS) that reset an offset this run set: set again (tuned: after a quick check); 30 s per card
-        tune::watch(&live);
+        tune::watch(&live, &stats[0]);
         let el = win.elapsed();
         if el >= Duration::from_secs(10) {
             let mut parts = Vec::new();
@@ -900,7 +961,7 @@ pub fn mine(o: Opts) -> Result<()> {
                         String::new()
                     }
                 };
-                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, mhs, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, crate::status::tag(g.dev)));
+                parts.push(format!("GPU{} {:.3}{}{}{}", g.dev, mhs, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, format!("{}{}", crate::status::tag(g.dev), crate::templimit::tag(g.dev))));
             }
             hashrate[0].store((tot * 1e6) as u64, Ordering::Relaxed);
             hashrate[1].store(if fee.active() { (tot * 1e6) as u64 } else { 0 }, Ordering::Relaxed);
@@ -924,9 +985,14 @@ pub fn mine(o: Opts) -> Result<()> {
                 f.submitted.load(Ordering::Relaxed),
                 f.accepted.load(Ordering::Relaxed),
                 f.rejected.load(Ordering::Relaxed),
-                if fee.active() { "  [DEVFEE]" } else { "" },
+                match (fee.active(), im) {
+                    (_, crate::idle::Mode::Pause) => "  [PAUSED: PC in use]".to_string(),
+                    (_, crate::idle::Mode::Light(p)) => format!("  [LIGHT {p} %: PC in use]{}", if fee.active() { " [DEVFEE]" } else { "" }),
+                    (true, _) => "  [DEVFEE]".to_string(),
+                    _ => String::new(),
+                },
                 if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" },
-                if st[0].job.is_none() && !fee.active() { "  [NO JOB]" } else { "" }
+                if st[0].job.is_none() && !fee.active() && im == crate::idle::Mode::Full { "  [NO JOB]" } else { "" }
             );
             if bad > last_bad {
                 last_bad = bad;

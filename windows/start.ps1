@@ -140,9 +140,8 @@ if ($UvOffset -match '^[+-]?[0-9]+$' -or ($UvOffset -match '^([+-]?[0-9]+|-)?(,(
 # AMD undervolt profile (amduv): CMFD eff|bal|max, Pearl eff|max (used when it tunes)
 if ($AutoUv -eq '1' -and $UvGoal -match '^(eff|bal|max)$') { $env:FFGP_AMD_UV_GOAL = $UvGoal }
 if (($UvOffset -or $AutoUv -eq '1') -and $UvRevalHours -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --uv-reval-hours $UvRevalHours" }
-# idle mode (Pearl): mine only while the PC is not in use
+# idle mode (Pearl, NOID, CMFD): mine only while the PC is not in use
 if ($Idle -eq '1') {
-    if ($Cmfd -or $Algo -eq 'noid') { Fail 'IDLE=1 works with Pearl only in this version (not CMFD / NOID)' }
     $cmdLine += ' --idle'
     if ($IdleMinutes -match '^[0-9]+([.][0-9]+)?$') { $cmdLine += " --idle-minutes $IdleMinutes" }
     if ($Active) {

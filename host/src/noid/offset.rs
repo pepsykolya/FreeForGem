@@ -55,7 +55,7 @@ pub fn recover(dir: &Path) {
             if let Ok(d) = nv.by_bus(bus) {
                 if let Ok((mode, cur, lo, hi)) = nv.probe_offset(d) {
                     // on HiveOS the profile's Core Clock value (1.7.2), not a value another program may have left
-                    let orig = crate::hiveoc::owner_offset(&nv, d, orig as i32, lo, hi);
+                    let orig = crate::profiles::owner_offset(nv, d, dir, orig as i32, lo, hi, "noid offset");
                     let _ = cur;
                     match nv.set_offset(d, mode, orig) {
                         Ok(()) => lg(format!("GPU bus {bus}: offset {orig:+} MHz put back (left changed by an earlier NOID run)")),
@@ -82,7 +82,7 @@ pub fn begin(buses: &[String], dir: &Path) -> Option<&'static Nvml> {
     for bus in buses {
         let Ok(d) = nv.by_bus(bus) else { continue };
         match nv.probe_offset(d) {
-            Ok((mode, cur, lo, hi)) => cards.push(Card { bus: bus.clone(), dev: d, mode, orig: crate::hiveoc::owner_offset(nv, d, cur, lo, hi), lo, hi }),
+            Ok((mode, cur, lo, hi)) => cards.push(Card { bus: bus.clone(), dev: d, mode, orig: crate::profiles::owner_offset(nv, d, dir, cur, lo, hi, "noid offset"), lo, hi }),
             Err(e) => lg(format!("GPU bus {bus}: offset not readable ({e:#}); left as is")),
         }
     }
