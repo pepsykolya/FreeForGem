@@ -11,32 +11,29 @@
 // Ctrl+C ends the PowerShell pipeline of start.ps1 that reads the miner's output.  A panic in the shutdown path killed
 // the miner after the first GPU's undervolt was put back and left the others changed (1.5.x, 1.6.0).  These macros shadow
 // the std ones in the whole crate (every module below) and drop write errors; SIGPIPE is ignored by the Rust runtime on
-// unix, so a write to a closed pipe only returns EPIPE.
+// unix, so a write to a closed pipe only returns EPIPE.  Since 1.7.7 the lines go through a bounded queue and one writer
+// thread (conout.rs): a console that stops reading (Windows QuickEdit selection, a full pipe) blocks only that thread,
+// further lines are dropped and counted.
 macro_rules! println {
     () => {{
-        use std::io::Write as _;
-        let _ = writeln!(std::io::stdout());
+        crate::conout::emit(false, b"\n".to_vec());
     }};
     ($($t:tt)*) => {{
-        use std::io::Write as _;
         // coloured by the kind of line (color.rs); the stats line never
-        let _ = writeln!(std::io::stdout(), "{}", crate::color::paint(format!($($t)*)));
+        crate::conout::emit(false, format!("{}\n", crate::color::paint(format!($($t)*))).into_bytes());
     }};
 }
 macro_rules! print {
     ($($t:tt)*) => {{
-        use std::io::Write as _;
-        let _ = write!(std::io::stdout(), $($t)*);
+        crate::conout::emit(false, format!($($t)*).into_bytes());
     }};
 }
 macro_rules! eprintln {
     () => {{
-        use std::io::Write as _;
-        let _ = writeln!(std::io::stderr());
+        crate::conout::emit(true, b"\n".to_vec());
     }};
     ($($t:tt)*) => {{
-        use std::io::Write as _;
-        let _ = writeln!(std::io::stderr(), "{}", crate::color::paint(format!($($t)*)));
+        crate::conout::emit(true, format!("{}\n", crate::color::paint(format!($($t)*))).into_bytes());
     }};
 }
 
@@ -46,7 +43,9 @@ mod clocks;
 mod cmfd;
 mod cmfd_offset;
 mod cmfd_uv;
+mod cmpdrv;
 mod color;
+mod conout;
 mod devfee;
 mod faults;
 mod gpu;
@@ -104,7 +103,10 @@ enum TargetMode {
     Jackpot, // pool already sends the final jackpot threshold
 }
 
-fn final_target(job: &PoolJob, pool_diff: Option<f64>, mode: TargetMode) -> Result<U256> {
+/// Jackpot target for a kernel whose tile has `tile_rows` rows.  In `Base` mode the pool's per-unit base target is scaled by the tile size of
+/// that kernel (penalized_target_bound of its configuration: a 256-element tile gets twice the 128-element one).  In `Jackpot` mode the pool
+/// already sends the final threshold, which is used as is for every tile.
+fn final_target(job: &PoolJob, pool_diff: Option<f64>, mode: TargetMode, tile_rows: usize) -> Result<U256> {
     let base = match (&job.target, job.difficulty.or(pool_diff)) {
         (Some(t), _) => U256::from_str_radix(t, 16)?,
         (None, Some(d)) if d > 0.0 => U256::MAX / U256::from(d.max(1.0) as u128),
@@ -112,7 +114,7 @@ fn final_target(job: &PoolJob, pool_diff: Option<f64>, mode: TargetMode) -> Resu
     };
     Ok(match mode {
         TargetMode::Jackpot => base,
-        TargetMode::Base => penalized_target_bound(base, &mining_config()).unwrap_or(U256::MAX),
+        TargetMode::Base => penalized_target_bound(base, &mining_config(tile_rows)).unwrap_or(U256::MAX),
     })
 }
 
@@ -147,7 +149,7 @@ fn set_job_gpu(job: &Job) -> Result<()> {
 fn self_test(devices: Option<&[i32]>) -> Result<()> {
     println!("== self-test ==");
     let t0 = Instant::now();
-    let job = Job::new(&test_header(7), 3, m())?;
+    let job = Job::new(&test_header(7), 3, m(), mining::TILE_ROWS_DEFAULT)?;
     println!("[ok] public_params_sanity_check for m={} n={N} k={} rank={RANK}; job built in {:?}", m(), k(), t0.elapsed());
     println!("     job_key={}", hex(&job.job_key));
 
@@ -208,8 +210,33 @@ fn self_test(devices: Option<&[i32]>) -> Result<()> {
 
 /// GPU part of the self-test on one device (runs in its own thread).
 fn gpu_self_test(device: i32, job: &Job, row0: &[u8], seed: &[u8; 32]) -> Result<()> {
+    let tile = gpu::tile_rows_for(device);
     gpu::init(device)?;
-    println!("GPU{device}: backend {} ({}), kernel {}", gpu::backend().name(), gpu::device_name(device), gpu::kernel_label());
+    ensure!(gpu::tile_rows() == tile, "library tile rows: {} after init, {tile} before", gpu::tile_rows());
+    gpu_self_test_tile(device, tile, job, row0, seed)?;
+    // a device whose default kernel has the 16x16 tile (sm_86) also carries the 8x16 kernel: jackpot mode mines on it, test it as well
+    if tile != mining::TILE_ROWS_DEFAULT {
+        gpu::set_tile_rows(mining::TILE_ROWS_DEFAULT)?;
+        ensure!(gpu::tile_rows() == mining::TILE_ROWS_DEFAULT, "library tile rows: {} after switching to 8x16", gpu::tile_rows());
+        println!("GPU{device}: jackpot-mode kernel");
+        gpu_self_test_tile(device, mining::TILE_ROWS_DEFAULT, job, row0, seed)?;
+    }
+    Ok(())
+}
+
+fn gpu_self_test_tile(device: i32, tile: usize, job: &Job, row0: &[u8], seed: &[u8; 32]) -> Result<()> {
+    println!("GPU{device}: backend {} ({}), kernel {}, jackpot tile {tile}x16", gpu::backend().name(), gpu::device_name(device), gpu::kernel_label());
+    // the kernel of this device mines its own tile shape: its Job (job key, proofs) and noise seed are those of that configuration
+    let (own_job, own_row0, own_seed);
+    let (job, row0, seed) = if tile == job.tile_rows {
+        (job, row0, seed)
+    } else {
+        own_job = Job::new(&test_header(7), 3, m(), tile)?;
+        own_row0 = own_job.nonce_row(0);
+        own_seed = own_job.a_noise_seed(&own_row0);
+        println!("     job_key={} (tile {tile}x16)", hex(&own_job.job_key));
+        (&own_job, &own_row0[..], &own_seed)
+    };
     // item 5: GPU A_L == reference
     for first in [0usize, m() - 4] {
         let g = gpu::debug_al(seed, m(), first, 4)?;
@@ -290,11 +317,11 @@ struct Args {
     temp: templimit::Opts,
 }
 
-type Prepared = (Src, PoolJob, Result<BTreeMap<usize, Arc<Job>>>, Duration);
+type Prepared = (Src, PoolJob, Result<BTreeMap<JobKey, Arc<Job>>>, Duration);
 
-/// Job preparation worker: builds one `Job` per distinct device `m` (SM group) for the newest pool job of each
+/// Job preparation worker: builds one `Job` per distinct device (`m`, tile rows) for the newest pool job of each
 /// login; obsolete queued jobs are dropped. The fee login's job is prepared here too, ahead of its slot.
-fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>, ms: Arc<Vec<usize>>) {
+fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>, ms: Arc<Vec<JobKey>>, jackpot: Arc<AtomicBool>) {
     let mut queue: [Option<PoolJob>; 2] = [None, None];
     loop {
         if queue.iter().all(Option::is_none) {
@@ -312,8 +339,10 @@ fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>, ms:
         let s = if queue[Src::Fee.idx()].is_some() { Src::Fee } else { Src::User };
         let Some(pj) = queue[s.idx()].take() else { continue };
         let t = Instant::now();
-        let res: Result<BTreeMap<usize, Arc<Job>>> =
-            ms.iter().map(|&mm| Ok((mm, Arc::new(Job::new(&pj.header, pj.cert_version, mm)?)))).collect();
+        // the Jobs are built for the kernels of the target mode in force now (jackpot: 8x16 everywhere); `ms` holds the default tiles
+        let keys = mode_keys(&ms, jackpot.load(Ordering::Relaxed));
+        let res: Result<BTreeMap<JobKey, Arc<Job>>> =
+            keys.iter().map(|&key| Ok((key, Arc::new(Job::new(&pj.header, pj.cert_version, key.0, key.1)?)))).collect();
         let el = t.elapsed();
         // a newer job of the same login arrived while this one was being built: this one is obsolete
         while let Ok((s2, n)) = rx.try_recv() {
@@ -329,11 +358,20 @@ fn prep_loop(rx: mpsc::Receiver<(Src, PoolJob)>, tx: mpsc::Sender<Prepared>, ms:
     }
 }
 
+/// Job keys (m, tile) of the kernels that mine in a target mode, from the keys of the default kernels.
+fn mode_keys(native: &[JobKey], jackpot: bool) -> Vec<JobKey> {
+    let mut v: Vec<JobKey> = native.iter().map(|&(m, t)| (m, mining::tile_for_mode(t, jackpot))).collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 #[derive(Default)]
 struct SrcState {
+    reprep: Option<bool>, // the mode (jackpot?) for which the current job was sent to the prep thread again
     pool_diff: Option<f64>,
-    cur: Option<(PoolJob, Arc<BTreeMap<usize, Arc<Job>>>)>,
-    target: U256,
+    cur: Option<(PoolJob, Arc<BTreeMap<JobKey, Arc<Job>>>)>,
+    targets: BTreeMap<usize, U256>, // by tile rows
 }
 
 fn mode_name(m: TargetMode) -> &'static str {
@@ -352,7 +390,7 @@ fn mine(a: Args) -> Result<()> {
                 uv::restore_all();
                 clocks::restore_all();
                 eprintln!("second interrupt: exiting at once");
-                std::process::exit(130);
+                crate::conout::exit(130);
             }
             eprintln!("shutting down (finishing in-flight work)...");
         })?;
@@ -376,17 +414,34 @@ fn mine(a: Args) -> Result<()> {
     // rows of A per device from its SM count (even persistent-grid split, no wave tail); FFGP_M overrides all
     let sms: Vec<usize> = devices.iter().map(|&d| gpu::sm_count(d)).collect();
     let device_ms: Vec<usize> = sms.iter().map(|&s| mining::device_m(s)).collect();
-    let distinct_ms: Arc<Vec<usize>> = Arc::new({
-        let mut v = device_ms.clone();
+    // jackpot tile rows of the kernel each device will run (the library knows: 8 everywhere, 16 on sm_86 with the A9h256 kernel); the Job,
+    // the job key and the target of a device must be those of its own kernel.  Checked again after the worker's pg_init.
+    let device_tiles: Vec<usize> = devices.iter().map(|&d| gpu::tile_rows_for(d)).collect();
+    let distinct_ms: Arc<Vec<JobKey>> = Arc::new({
+        let mut v: Vec<JobKey> = device_ms.iter().copied().zip(device_tiles.iter().copied()).collect();
         v.sort_unstable();
         v.dedup();
         v
     });
+    // tiles of the default kernels; the tiles that mine follow the target mode (mode_tiles)
+    let distinct_tiles: Vec<usize> = {
+        let mut v = device_tiles.clone();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    let mode_tiles = |jackpot: bool| -> Vec<usize> {
+        let mut v: Vec<usize> = distinct_tiles.iter().map(|&t| mining::tile_for_mode(t, jackpot)).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
     a.uv.check_counts(devices.len())?; // --uv-max/--uv-min/--uv-offset lists: one value per mining GPU
+    let tile_desc = if distinct_tiles.iter().any(|&t| t != mining::TILE_ROWS_DEFAULT) { format!(" tile {device_tiles:?}x16") } else { String::new() };
     let m_desc = if distinct_ms.len() == 1 {
-        format!("m={}", distinct_ms[0])
+        format!("m={}{tile_desc}", distinct_ms[0].0)
     } else {
-        format!("m per device {device_ms:?} (SM {sms:?})")
+        format!("m per device {device_ms:?} (SM {sms:?}){tile_desc}")
     };
     println!("{PRODUCT} {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), gpu::backend().name(), k());
     // optional clock control (lock core/memory clock, memory offset): applied now, restored on any exit
@@ -422,6 +477,9 @@ fn mine(a: Args) -> Result<()> {
         no_hive_mem: false,
     };
     let _clock_guard = if nv { clocks::apply(&devices, &clock_opts, &clock_dir) } else { None };
+    if nv {
+        clocks::hint_ampere(&devices, &clocks::core_locks(devices.len()));
+    }
     // undervolt (opt-in): first put back what a crashed run left behind, then map/tune/apply; the guard restores the owner's offsets on any exit
     if nv {
         uv::recover(&a.uv);
@@ -488,7 +546,7 @@ fn mine(a: Args) -> Result<()> {
             }
         }
         let (rtx, rrx) = mpsc::channel();
-        handles.push(worker::spawn(dev, device_ms[i], sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
+        handles.push(worker::spawn(dev, (device_ms[i], device_tiles[i]), sh.clone(), gs.clone(), [user_sub_tx.clone(), fee_sub_tx.clone()], rtx)?);
         rrx.recv()??; // GPU initialised (or the error that stopped it)
         println!("GPU {dev}: {} ({} backend, kernel {})", gs.name, gpu::backend().name(), gpu::kernel_label_for(dev));
         gstats.push(gs);
@@ -518,11 +576,14 @@ fn mine(a: Args) -> Result<()> {
     let (prep_tx, prep_rx) = mpsc::channel::<(Src, PoolJob)>();
     let (ready_tx, ready_rx) = mpsc::channel::<Prepared>();
     let prep_ms = distinct_ms.clone();
-    std::thread::Builder::new().name("jobprep".into()).spawn(move || prep_loop(prep_rx, ready_tx, prep_ms))?;
+    let jackpot_flag = Arc::new(AtomicBool::new(a.mode == TargetMode::Jackpot));
+    let prep_flag = jackpot_flag.clone();
+    std::thread::Builder::new().name("jobprep".into()).spawn(move || prep_loop(prep_rx, ready_tx, prep_ms, prep_flag))?;
 
     let (start, deadline) = (Instant::now(), a.minutes.map(|m| Duration::from_secs_f64(m * 60.0)));
     let mut mode = a.mode;
     let mut switched = false;
+    let test_switch = std::env::var("FFG_TEST_SWITCH_MODE_SECS").ok().and_then(|v| v.parse::<u64>().ok()).map(Duration::from_secs);
     let mut st = [SrcState::default(), SrcState::default()];
     let mut fee = DevFee::new(devfee::Params::from_env(), start);
     // idle mode: the fee schedule runs on the mining time (a pause stops its clock); `aside` = the owner's clocks and offsets
@@ -679,6 +740,7 @@ fn mine(a: Args) -> Result<()> {
                 Ok(job) => {
                     println!("new job {} [{}] (cert {}): prepared in {:?} (off-thread)", pj.job_id, worker::src_name(src), pj.cert_version, prep_t);
                     st[src.idx()].cur = Some((pj, Arc::new(job)));
+                    st[src.idx()].reprep = None;
                 }
                 Err(e) => eprintln!("job {} rejected locally: {e:#}", pj.job_id),
             }
@@ -686,11 +748,18 @@ fn mine(a: Args) -> Result<()> {
         // "low difficulty" rejections with no accepts: try the other target interpretation once
         let low: u64 = stats.iter().map(|s| s.low_diff.load(Ordering::Relaxed)).sum();
         let acc: u64 = stats.iter().map(|s| s.accepted.load(Ordering::Relaxed)).sum();
-        if !switched && low >= 2 && acc == 0 {
+        // test hook: FFG_TEST_SWITCH_MODE_SECS=N flips the target mode once after N s (the switch the low-difficulty rule makes), to test the
+        // kernel change on the fly on a pool that never answers "low difficulty"
+        let forced = test_switch.is_some_and(|t| start.elapsed() >= t);
+        if !switched && ((low >= 2 && acc == 0) || forced) {
             switched = true;
             mode = if mode == TargetMode::Base { TargetMode::Jackpot } else { TargetMode::Base };
             println!("!! low-difficulty rejects -> switching target mode to {}", mode_name(mode));
+            // the kernel follows the mode (jackpot: 8x16, base: default tile): new Jobs are prepared for the tiles of the new mode, the
+            // workers switch kernel when they see the new Assignment (job key, target and kernel stay consistent: see worker::run)
+            jackpot_flag.store(mode == TargetMode::Jackpot, Ordering::Relaxed);
         }
+        let tiles_now = mode_tiles(mode == TargetMode::Jackpot);
 
         // developer fee schedule, on the mining time (idle mode: paused time does not count)
         let now = start + mined;
@@ -700,7 +769,7 @@ fn mine(a: Args) -> Result<()> {
         }
         let fee_ready = want_conn
             && stats[1].connected.load(Ordering::Relaxed) == 1
-            && st[1].cur.as_ref().is_some_and(|(pj, _)| final_target(pj, st[1].pool_diff, mode).is_ok());
+            && st[1].cur.as_ref().is_some_and(|(pj, _)| tiles_now.iter().all(|&t| final_target(pj, st[1].pool_diff, mode, t).is_ok()));
         match fee.tick(now, fee_ready) {
             Change::Started => println!("devfee: mining {}s for FreeForGem dev ({}%)", devfee::Params::from_env().slot.as_secs(), devfee::FEE_PERCENT),
             Change::Finished => println!("devfee: back to user"),
@@ -715,14 +784,27 @@ fn mine(a: Args) -> Result<()> {
         let s = &mut st[src.idx()];
         let desired = match &s.cur {
             _ if im == idle::Mode::Pause => None, // idle mode, the PC is in use: the GPUs get no work
-            Some((pj, job)) => match final_target(pj, s.pool_diff, mode) {
+            // the Jobs were prepared for the other mode (the mode changed meanwhile): prepare them again, mine nothing until then
+            Some((pj, job)) if !mode_keys(&distinct_ms, mode == TargetMode::Jackpot).iter().all(|k| job.contains_key(k)) => {
+                if s.reprep != Some(mode == TargetMode::Jackpot) {
+                    s.reprep = Some(mode == TargetMode::Jackpot);
+                    println!("job {}: preparing for the {} kernels", pj.job_id, mode_name(mode));
+                    if prep_tx.send((src, pj.clone())).is_err() {
+                        anyhow::bail!("job prep thread died");
+                    }
+                }
+                None
+            }
+            Some((pj, job)) => match tiles_now.iter().map(|&t| Ok((t, final_target(pj, s.pool_diff, mode, t)?))).collect::<Result<BTreeMap<usize, U256>>>() {
                 Ok(t) => {
-                    if t != s.target {
-                        println!(
-                            "target [{}] (job {}, mode {}): {:#066x} (raw target {:?}, diff {:?}, pool diff {:?})",
-                            worker::src_name(src), pj.job_id, mode_name(mode), t, pj.target, pj.difficulty, s.pool_diff
-                        );
-                        s.target = t;
+                    if t != s.targets {
+                        for (tile, tg) in &t {
+                            println!(
+                                "target [{}] (job {}, mode {}, tile {tile}x16): {:#066x} (raw target {:?}, diff {:?}, pool diff {:?})",
+                                worker::src_name(src), pj.job_id, mode_name(mode), tg, pj.target, pj.difficulty, s.pool_diff
+                            );
+                        }
+                        s.targets = t.clone();
                     }
                     Some((pj.clone(), job.clone(), t))
                 }
@@ -735,11 +817,11 @@ fn mine(a: Args) -> Result<()> {
         };
         let same = match (&published, &desired) {
             (None, None) => true,
-            (Some(p), Some((pj, job, t))) => p.src == src && Arc::ptr_eq(&p.jobs, job) && p.target == *t && p.pj.job_id == pj.job_id,
+            (Some(p), Some((pj, job, t))) => p.src == src && p.jackpot == (mode == TargetMode::Jackpot) && Arc::ptr_eq(&p.jobs, job) && p.targets == *t && p.pj.job_id == pj.job_id,
             _ => false,
         };
         if !same {
-            published = desired.map(|(pj, job, target)| Arc::new(Assignment { src, pj, jobs: job, target }));
+            published = desired.map(|(pj, job, targets)| Arc::new(Assignment { src, pj, jobs: job, targets, jackpot: mode == TargetMode::Jackpot }));
             sh.publish(published.clone());
         }
 
@@ -869,6 +951,14 @@ OPTIONS:
     --no-update-check    do not look for a newer FreeForGem release (default: a GitHub check ~1 min after the start,
                          then every ~12 h; a newer one is only reported: in the log and in HiveOS next to the version)
     --check-update       check for a newer release now, then exit
+    --cmp-driver         cmp: NVIDIA CMP cards (50HX and the like), HiveOS only: one-time, opt-in install of an unlocked NVIDIA
+                         driver, then exit. Under the stock driver these cards compute about 10 times slower. It REPLACES THE
+                         KERNEL DRIVER of the whole rig and REBOOTS it: run as root, when you can reach the rig. Checks HiveOS,
+                         root and a CMP card, downloads the pinned driver, checks its SHA-256, installs it with
+                         nvidia-driver-update --force. A rig that already has it, or has no CMP card, is left alone. Off by
+                         default, never run while mining. In the HiveOS flight sheet: cmp-unlock-driver in Extra config
+                         arguments. FFG_CMP_DRIVER_DRY_RUN=1 only checks and reports, FFG_CMP_DRIVER_NO_REBOOT=1 skips the
+                         reboot, FFG_CMP_DRIVER_FORCE=1 installs again. See MANUAL.md
     --no-color           no colours in the log (also NO_COLOR=1 or FFG_COLOR=0; FFG_COLOR=1 forces them, e.g. through tee)
     --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load, and
                          the coin / NOID mode); the profiles of other locks stay (since 1.7.2)
@@ -882,7 +972,7 @@ OPTIONS:
                          A GPU that crashes while mining (Xid) is named in the log and remembered in gpu-faults.json: a
                          crashed undervolt offset is tuned below, a crash at your own offset twice in a row lowers it
                          (HiveOS profile value, then 60 MHz steps), a GPU with nothing left to lower is left out for 1 h
-    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx, CMP 50HX 225,
+    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx 225, CMP 50HX 330,
                          CMP 30HX/40HX 150, all others 495
     --uv-min N           offset the tuner starts from; a start that fails steps down 30 MHz (default: RTX 3070/3060 Ti by
                          the core lock, RTX 3080/3090 +180; else the HiveOS/driver offset or 120; RTX 40: at least 200,
@@ -899,6 +989,8 @@ OPTIONS:
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
     --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
+                         Pearl on RTX 30: about 1530 gives the best TMAC/J (+3.6% for -1.9% speed against 1560); the log hints at it
+                         when an RTX 30 runs without a lock or above 1530. auto-uv profiles are per lock: a new lock is tuned anew
     --lock-mclock N      lock the memory clock to N MHz (same syntax)
     --moffset N          memory clock offset in MHz, may be negative (same syntax; needs driver 555+)
                          on exit a lock that was there before is put back: the HiveOS OC profile lock, or
@@ -979,7 +1071,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
                 clocks::restore_all();
                 cmfd_uv::forget_trying_on_stop();
                 eprintln!("second interrupt: exiting at once");
-                std::process::exit(130);
+                crate::conout::exit(130);
             }
             eprintln!("shutting down (stopping the CMFD engine)...");
         })?;
@@ -1038,7 +1130,7 @@ fn noid_check_main() -> ! {
     let dev = get("--devices").and_then(|s| s.split(',').next().and_then(|x| x.trim().parse().ok())).unwrap_or(0);
     let mode = get("--noid-mode").and_then(|m| noid::mode_of(&m).ok()).unwrap_or(0);
     let secs = get("--uv-secs").and_then(|s| s.parse().ok()).unwrap_or(40.0);
-    std::process::exit(noid::check_child(&noid::CheckArgs { dev, mode, secs }));
+    crate::conout::exit(noid::check_child(&noid::CheckArgs { dev, mode, secs }));
 }
 
 /// The multi-coin miner was FreeForGemPear before 1.7.0: on the first start take over its saved undervolt results (uv.json with
@@ -1078,7 +1170,18 @@ fn import_legacy_uv(dir: &std::path::Path) {
     }
 }
 
-fn main() -> Result<()> {
+fn main() {
+    let r = real_main();
+    if let Err(e) = &r {
+        eprintln!("Error: {e:?}");
+    }
+    conout::flush();
+    if r.is_err() {
+        std::process::exit(1);
+    }
+}
+
+fn real_main() -> Result<()> {
     std::hint::black_box(&BUILD_LAYOUT_ID);
     // colours: never in the check child processes (the parent parses their lines), not with --no-color / NO_COLOR
     if std::env::args().any(|x| x == "--uv-check" || x == "--noid-uv-check" || x == "--no-color") {
@@ -1130,6 +1233,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "--self-test" => test = true,
+            "--cmp-driver" => crate::conout::exit(cmpdrv::install()),
             "--pool" => {
                 a.pool = val()?;
                 a.pool_given = true;
@@ -1198,7 +1302,7 @@ fn main() -> Result<()> {
             }
             "--gpu-state" => gpu_state = true,
             "--no-update-check" => update_check = false,
-            "--check-update" => std::process::exit(update::check_now()),
+            "--check-update" => crate::conout::exit(update::check_now()),
             "--idle" => a.idle.on = true,
             "--idle-minutes" => {
                 let m: f64 = val()?.parse().map_err(|_| anyhow::anyhow!("--idle-minutes needs a number of minutes"))?;
@@ -1272,7 +1376,7 @@ fn main() -> Result<()> {
     }
     if let Some(mut c) = child {
         c.dev = a.devices.as_ref().map_or(0, |d| d[0]);
-        std::process::exit(uv::check_child(&c));
+        crate::conout::exit(uv::check_child(&c));
     }
     ensure!(a.uv.reval_hours >= 0.0, "--uv-reval-hours must not be negative");
     if a.uv.reset || a.uv.reset_all {

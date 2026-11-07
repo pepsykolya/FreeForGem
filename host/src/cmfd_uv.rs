@@ -74,6 +74,7 @@ struct Entry {
     base: i32,      // offset the references were taken at (0, or the owner's negative offset)
     offset: i32,
     cap: i32,
+    floor: bool, // 1.7.7: the climb stopped at the voltage floor: a higher limit does not re-tune it
     step: i32,
     refs: Vec<String>,
     fws_before: f64,
@@ -92,11 +93,15 @@ struct Entry {
 
 impl Entry {
     fn to_json(&self) -> Value {
-        json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
+        let mut v = json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
                "base_offset": self.base, "offset": self.offset, "cap": self.cap, "step": self.step, "refs": self.refs,
                "fws_before": self.fws_before, "fws_after": self.fws_after, "watts_before": self.w_before, "watts_after": self.w_after,
                "clk_before": self.clk_before, "clk_after": self.clk_after, "power_limit": self.pl, "tested_at": self.tested_at,
-               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "core_lock": self.lock, "migrated": self.migrated})
+               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "core_lock": self.lock, "migrated": self.migrated});
+        if self.floor {
+            v["floor"] = json!(true); // written only when set: other versions' files stay as they were
+        }
+        v
     }
 
     fn from_json(v: &Value) -> Option<Entry> {
@@ -111,6 +116,7 @@ impl Entry {
             base: v["base_offset"].as_i64()? as i32,
             offset: v["offset"].as_i64()? as i32,
             cap: v["cap"].as_i64().unwrap_or(0) as i32,
+            floor: v["floor"].as_bool().unwrap_or(false),
             step: v["step"].as_i64().unwrap_or(0) as i32,
             refs: v["refs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
             fws_before: f("fws_before"),
@@ -250,6 +256,18 @@ impl Db {
                 verified_at: e.verified_at,
             })
         })
+    }
+
+    /// The saved results of the card for `climb::prior_start` (1.7.7): any driver / kernel, checked ones and those from before 1.7.2.
+    fn priors(&self, uuid: &str, base: i32) -> Vec<climb::PriorProfile> {
+        self.s.list::<Entry>(uuid, "").into_iter().map(|(_, e)| climb::PriorProfile {
+            clk: clk_of(&e),
+            mlock: 0,
+            offset: e.offset,
+            at: e.verified_at.max(e.tested_at),
+            who: format!("driver {}, kernel {}", e.driver, e.kernel),
+            usable: (e.verified_at > 0 || e.migrated) && e.disabled_until <= now() && e.offset > base,
+        }).collect()
     }
 
     fn forget(&self, uuid: &str, key: &str) {
@@ -950,8 +968,8 @@ impl Tuner<'_> {
                 lg(format!("{} no safe CMFD offset above {} was found when tuned; mining at it (--uv-reset to tune again)", c.label(), signed(c.base)));
                 return Ok(());
             } else {
-                match saved_vs_limit(e.offset, e.cap, c.max) {
-                    Saved::Retune => lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning again", c.label(), signed(e.cap), signed(c.max), signed(e.offset))),
+                match saved_vs_limit(e.offset, e.cap, e.floor, c.max, c.max_src) {
+                    Saved::Retune => lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning on from it", c.label(), signed(uv::eff_cap(e.offset, e.cap, c.max_src)), signed(c.max), signed(e.offset))),
                     Saved::Clamp => return self.apply_saved(c, e, c.max, mined_crash),
                     Saved::Apply => return self.apply_saved(c, e, e.offset, mined_crash),
                 }
@@ -1078,9 +1096,19 @@ impl Tuner<'_> {
         // as for Pearl), else one step above the base; a start that fails is stepped down in 30 MHz steps
         let (start0, start_src) = c.start_offset(step);
         let mut start = start0.max(c.base + step);
+        // 1.7.7: the last result of this card at these clocks (any driver / kernel), else of the nearest clock, minus one coarse
+        // step (climb::prior_start; never below `start` = --uv-min / default, never above `cap`); not after a crash
+        let retune_from = prev.as_ref().filter(|p| crashed.is_none() && uv::saved_vs_limit(p.offset, p.cap, p.floor, c.max, c.max_src) == uv::Saved::Retune).map(|p| p.offset);
+        if let Some(from) = retune_from.filter(|&f| f > start && f <= cap) {
+            // the limit was raised and the saved result is the old limit: the search goes on from it (not one step below it)
+            start = from;
+        } else if let Some((h, line)) = crashed.is_none().then(|| climb::prior_start(&self.sh.db.priors(&c.uuid, c.base), c.lock_hint.unwrap_or(0), 0, start, cap, self.o.coarse_step())).flatten() {
+            lg(format!("{} {line}", c.label()));
+            start = h;
+        }
         // 1.7.6: a new clock lock that has a verified profile of a higher clock starts below that profile's offset (not with
         // --uv-min, not after a crash, not on a re-tune of a saved profile)
-        if c.min.is_none() && crashed.is_none() && prev.is_none() {
+        else if c.min.is_none() && crashed.is_none() && prev.is_none() {
             let hints = self.sh.db.hints(&c.uuid, c.base);
             if let Some((h, from)) = climb::hint_start(&hints, c.lock_hint.unwrap_or(0), 0, start, cap, self.o.coarse_step()) {
                 lg(format!("{} {}", c.label(), climb::hint_line(&from, self.o.coarse_step(), h, start)));
@@ -1187,7 +1215,7 @@ impl Tuner<'_> {
         if failed.is_none() && good > c.base {
             // coarse steps, the failing interval in fine steps, the voltage floor (climb.rs, shared with Pearl and NOID)
             let mut aborted = false;
-            let s = climb::climb(good, good_w, cap, step, coarse, |o, g, mhz, refine| {
+            let s = climb::climb(good, good_w, None, cap, step, coarse, |o, g, mhz, refine| {
                 if let Err(e) = self.set(c, o) {
                     lg(format!("{} cannot set {} ({e:#}); stopping the search", c.label(), signed(o)));
                     aborted = true;
@@ -1213,7 +1241,7 @@ impl Tuner<'_> {
                     };
                     lg(format!("{} step {}{}: FAILED ({}){note}", c.label(), signed(o), if refine { " (refining)" } else { "" }, r.reason));
                 }
-                climb::StepOut { ok: r.ok, fault: r.driver_fault, w: same_work(&r), abort: false }
+                climb::StepOut { ok: r.ok, fault: r.driver_fault, w: same_work(&r), t: None, abort: false }
             });
             if self.stopped() {
                 return Ok(());
@@ -1269,6 +1297,7 @@ impl Tuner<'_> {
         let mut e = self.new_entry(c);
         e.offset = fin;
         e.cap = c.max;
+        e.floor = plateau;
         e.pl = c.pl;
         e.refs = refs;
         e.fws_before = base.fws.unwrap_or(0.0);
@@ -1350,12 +1379,13 @@ pub fn dry_run(o: &uv::Opts, devices: &[i32], locks: &[Option<u32>]) {
             let (v, src) = start_of(&name, &def, lock_hint, min, max, base, o.step);
             let mut start = v;
             let mut from = String::new();
-            if min.is_none() {
-                let db = Db { dir: dir.clone(), s: Store::load(&dir, profiles::CMFD, log_line, |_| 0) }; // read only: a dry run migrates nothing
-                if let Some((hs, f)) = climb::hint_start(&db.hints(&uuid, base), lock_hint.unwrap_or(0), 0, start, max, o.coarse_step()) {
-                    from = format!("; profile {f} of a higher clock: starts {} MHz below it", o.coarse_step());
-                    start = hs;
-                }
+            let db = Db { dir: dir.clone(), s: Store::load(&dir, profiles::CMFD, log_line, |_| 0) }; // read only: a dry run migrates nothing
+            if let Some((hs, line)) = climb::prior_start(&db.priors(&uuid, base), lock_hint.unwrap_or(0), 0, start, max, o.coarse_step()) {
+                from = format!("; {line}");
+                start = hs;
+            } else if let Some((hs, f)) = climb::hint_start(&db.hints(&uuid, base), lock_hint.unwrap_or(0), 0, start, max, o.coarse_step()).filter(|_| min.is_none()) {
+                from = format!("; profile {f} of a higher clock: starts {} MHz below it", o.coarse_step());
+                start = hs;
             }
             Ok(format!(
                 "DRY RUN: GPU{dev} ({}): offset {} now; CMFD base {}, start {} ({src}{from}), limit {}, +{} MHz steps (+{} inside the interval of a failing step); nothing is changed",

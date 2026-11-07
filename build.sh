@@ -37,7 +37,8 @@ rm -rf "$D"; mkdir -p "$D"
 cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
-# HiveOS custom miner package: freeforgem-<version>.tar.gz with a top-level freeforgem/ folder.
+# HiveOS custom miner package: freeforgem-<version>_hiveos.tar.gz with a top-level freeforgem/ folder ("_hiveos" has no -,
+# so HiveOS still reads the miner name freeforgem and the version <version>_hiveos; the shown version comes from h-manifest).
 # HiveOS splits the file name at its LAST '-' into miner name / version, so <version> must contain no '-'
 # (1.7.0beta, not 1.7.0-beta: the '-' is dropped here) and the folder must be exactly the miner name.
 HV=${VERSION//-/}
@@ -47,6 +48,6 @@ cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS
 sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"
 chmod +x "$H"/h-*.sh "$H/freeforgem"
-tar -C dist/hive -czf "dist/freeforgem-$HV.tar.gz" freeforgem
+tar -C dist/hive -czf "dist/freeforgem-${HV}_hiveos.tar.gz" freeforgem
 
-(cd dist && sha256sum "freeforgem-$VERSION-linux-x86_64.tar.gz" "freeforgem-$HV.tar.gz" | tee SHA256SUMS)
+(cd dist && sha256sum "freeforgem-$VERSION-linux-x86_64.tar.gz" "freeforgem-${HV}_hiveos.tar.gz" | tee SHA256SUMS)

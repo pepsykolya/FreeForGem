@@ -1,6 +1,6 @@
 // FreeForGemPear — see LICENSE
 //! Safe wrappers around the C ABI of libpearlgpu (see gpu/pearlgpu.h).
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use std::ffi::CStr;
 
 #[repr(C)]
@@ -94,12 +94,19 @@ macro_rules! pg_api {
         struct Api {
             kind: Backend,
             _lib: dl::Lib,
+            // optional symbols (libraries older than the tile-256 kernel and the AMD library do not export them: the tile is then 8 rows)
+            opt_tile_rows: Option<unsafe extern "C" fn() -> i32>,
+            opt_tile_rows_for: Option<unsafe extern "C" fn(i32) -> i32>,
+            opt_set_tile_rows: Option<unsafe extern "C" fn(i32) -> i32>,
             $($f: unsafe extern "C" fn($($at),*) -> $r,)*
         }
         impl Api {
             fn load(kind: Backend, lib: dl::Lib) -> Result<Api, String> {
                 Ok(Api {
                     kind,
+                    opt_tile_rows: lib.sym("pg_tile_rows").map(|p| unsafe { std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "C" fn() -> i32>(p) }),
+                    opt_tile_rows_for: lib.sym("pg_tile_rows_for").map(|p| unsafe { std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "C" fn(i32) -> i32>(p) }),
+                    opt_set_tile_rows: lib.sym("pg_set_tile_rows").map(|p| unsafe { std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "C" fn(i32) -> i32>(p) }),
                     $($f: {
                         let p = lib.sym(stringify!($f)).ok_or_else(|| format!("{} has no {}", kind.lib_file(), stringify!($f)))?;
                         unsafe { std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "C" fn($($at),*) -> $r>(p) }
@@ -311,6 +318,43 @@ pub fn device_uuid(device: i32) -> Result<String> {
 /// valid after `init` on this thread; an `m` that is not a multiple of it silently runs on gen13 (slower on Ada).
 pub fn row_align() -> usize {
     unsafe { pg_row_align().max(128) as usize }
+}
+
+/// Rows of the jackpot `rows_pattern` of the kernel that mines on `device`, without initialising it: 8 (the 8x16 tile; every kernel except
+/// one) or 16 (the 16x16 = 256-element tile of the sm_86 kernel A9h256).  A library that does not export `pg_tile_rows_for` (older
+/// builds, the AMD library) mines 8x16.  The `MiningConfiguration` of this device's Job must use this value.
+pub fn tile_rows_for(device: i32) -> usize {
+    match api().opt_tile_rows_for {
+        Some(f) => (unsafe { f(device) }) as usize,
+        None => 8,
+    }
+}
+
+/// Rows of the tile of the kernel loaded on the calling thread (after `init`); must equal `tile_rows_for(device)`.
+pub fn tile_rows() -> usize {
+    match api().opt_tile_rows {
+        Some(f) => (unsafe { f() }) as usize,
+        None => 8,
+    }
+}
+
+/// Chooses the kernel of the calling thread (after `init`) by its jackpot tile rows: the library holds the 8x16 kernel (A9) next to the
+/// 16x16 one (A9h256) on sm_86; `tile_rows_for(device)` is the default (base mode), 8 is always the pool-threshold kernel (jackpot mode).
+/// Takes effect with the next launch; attempts already enqueued finish on the kernel they were launched with.  A library without the
+/// symbol has one kernel: only its own tile is accepted.
+pub fn set_tile_rows(rows: usize) -> Result<()> {
+    match api().opt_set_tile_rows {
+        Some(f) => {
+            if unsafe { f(rows as i32) } != 0 {
+                bail!("pg_set_tile_rows({rows}): {}", last_error());
+            }
+            Ok(())
+        }
+        None => {
+            ensure!(tile_rows() == rows, "this library mines a {}x16 jackpot tile only (asked for {rows}x16)", tile_rows());
+            Ok(())
+        }
+    }
 }
 
 /// Identifier of the embedded search kernel build.

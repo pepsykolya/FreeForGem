@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -34,7 +34,10 @@ pub const HARD_CAP: i32 = 600; // never above this, whatever --uv-max / --uv-off
 pub const DEFAULT_MAX: i32 = 495; // default --uv-max (RTX 30 / 40 / 50 and everything not listed in card_defaults)
 const TURING_MAX: i32 = 225; // default --uv-max on Turing (RTX 20 / GTX 16, sm_75): +200..260 measured, 225 keeps a margin
 const CMP_MAX: i32 = 150; // default --uv-max on CMP 30HX / 40HX (TU116 / TU106): a CMP 40HX hit Xid at +255, rigs run +150
-const CMP_50HX_PCI_ID: u16 = 0x1e09; // TU102 of the CMP 50HX: holds +220 and more (owner's rigs), so it gets the Turing limit
+const CMP_50HX_PCI_ID: u16 = 0x1e09; // TU102 of the CMP 50HX: holds +220 and more (owner's rigs), gets its own limit CMP50_MAX
+// default --uv-max on the CMP 50HX (1.7.7; was 225): Rig04 1.6.2 at a 1650 lock found the Pearl edge at +195..+240 and every card
+// held +225 at 1470 without an edge searched above it; the edge rises ~0.15 MHz per MHz of lower clock, and every step is checked
+const CMP50_MAX: i32 = 330;
 pub(crate) const DISABLE_SECS: u64 = 24 * 3600;
 const OC_RESETS_MAX: usize = 4; // OC applies per hour that get the verified offset back; more: auto-uv stands down on that GPU
 // a check process peaks at ~2.3 GB of RAM (measured on an 8x RTX 3070 HiveOS rig); checks of several GPUs only start
@@ -199,8 +202,8 @@ pub struct Defaults {
 
 /// Card type from the NVML name, compute capability (`cc`) and PCI device id (`pci_id`); None when NVML does not report it.
 ///  * CMP 30HX / 40HX (Turing, sm_75): max +150 (a CMP 40HX hit Xid at +255; user rigs run +150)
-///  * CMP 50HX (TU102, PCI id 0x1e09, or "50HX" in the name) and Turing RTX 20xx / GTX 16xx: max +225 (+200..260 measured
-///    on a 2060 SUPER; CMP 50HX rigs hold +220 and more)
+///  * CMP 50HX (TU102, PCI id 0x1e09, or "50HX" in the name): max +330 (rigs hold +225 at 1470 with no edge searched above)
+///  * Turing RTX 20xx / GTX 16xx: max +225 (+200..260 measured on a 2060 SUPER)
 ///  * RTX 50 (Blackwell, sm_120): search starts at +300 at least (they hold +390..480; a shorter search)
 ///  * RTX 40 (Ada, sm_89): search starts at +200 at least
 ///  * everything else (RTX 30, Ampere CMP 70HX / 90HX): max +495, start at the current offset or +120
@@ -218,7 +221,7 @@ pub fn card_defaults(name: &str, cc: Option<(i32, i32)>, pci_id: Option<u16>) ->
     let cmp50 = pci_id == Some(CMP_50HX_PCI_ID) || (cmp && words.contains(&"50HX"));
     let base = Defaults { max: DEFAULT_MAX, max_src: "default", start_floor: None, start_src: "current offset or +120" };
     if turing && cmp50 {
-        Defaults { max: TURING_MAX, max_src: "CMP 50HX default", ..base }
+        Defaults { max: CMP50_MAX, max_src: "CMP 50HX default", ..base }
     } else if turing && cmp {
         Defaults { max: CMP_MAX, max_src: "CMP default", ..base }
     } else if turing {
@@ -387,6 +390,7 @@ struct Entry {
     refs: Vec<String>,
     m: usize,   // rows of A per attempt the transcript digests were taken at
     cap: i32,   // the upper limit (--uv-max or the card default) of the tuning that found `offset`; 0 = unknown (before 1.6.2)
+    floor: bool, // 1.7.7: the climb stopped at the voltage floor (plateau), not at a failure or the limit: a higher limit does not re-tune it
     // 1.7.2: the clocks the result was found at (the edge moves with the core clock: +495 verified at 1410 MHz crashed at 1805)
     lock: u32,          // core clock lock this miner set (--lock-cclock) when tuned; 0 = none set by the miner (or unknown)
     start: Option<i32>, // offset of the baseline whose load clock is `clk` (None: before 1.7.2)
@@ -399,11 +403,15 @@ struct Entry {
 
 impl Entry {
     fn to_json(&self) -> Value {
-        json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
+        let mut v = json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "orig_offset": self.orig,
                "offset": self.offset, "clk_mhz": self.clk, "watts_before": self.w_before, "watts_after": self.w_after,
                "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until, "refs": self.refs, "m": self.m, "cap": self.cap,
                "core_lock": self.lock, "start_offset": self.start, "clk_ok_mhz": self.clk_ok, "edge": self.edge,
-               "mem_lock": self.mlock, "unlocked": self.unlocked, "migrated": self.migrated})
+               "mem_lock": self.mlock, "unlocked": self.unlocked, "migrated": self.migrated});
+        if self.floor {
+            v["floor"] = json!(true); // written only when set: other versions' files stay as they were
+        }
+        v
     }
 
     fn from_json(v: &Value) -> Option<Entry> {
@@ -423,6 +431,7 @@ impl Entry {
             refs: v["refs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
             m: v["m"].as_u64().unwrap_or(0) as usize,
             cap: v["cap"].as_i64().unwrap_or(0) as i32,
+            floor: v["floor"].as_bool().unwrap_or(false),
             lock: v["core_lock"].as_u64().unwrap_or(0) as u32,
             start: v["start_offset"].as_i64().map(|x| x as i32),
             clk_ok: v["clk_ok_mhz"].as_u64().unwrap_or(0) as u32,
@@ -677,7 +686,11 @@ pub struct Manager {
     inject_bad: Option<u64>,
     injected: AtomicBool,
     /// 1.7.3: check processes allowed at once (from the free RAM at the start; 0 = no checks this run) and the RAM of one
-    at_once: u64,
+    at_once: AtomicU64,
+    /// 1.7.7: the start plan gave 0 (low RAM): checks are planned again once the miner has settled (`settle_replan`); 0 = done / not needed
+    replan: Mutex<u8>,
+    /// the low-RAM mode of `replan_low_ram` is on (set when the start plan was 0)
+    low_ram: AtomicBool,
     check_need: u64,
     main_more: u64,
     /// a check process was killed for lack of RAM (SIGKILL by the OOM killer): no more checks this run
@@ -791,6 +804,28 @@ fn checks_reserved_mb(running: u64, need: u64, rss: &[Option<u64>]) -> u64 {
 /// swap, hung at the miner start).
 fn check_fits(reserved: u64, need: u64, avail: Option<u64>, main_more: u64) -> bool {
     avail.is_none_or(|a| (a * RAM_SHARE_PCT / 100).saturating_sub(main_more).saturating_sub(reserved) >= need)
+}
+
+/// Safety margin (MB) the low-RAM check plan keeps free on top of a proof and the check process (the OS, HiveOS, the error of MemAvailable).
+const LOW_RAM_MARGIN_MB: u64 = 128;
+/// 1.7.7: the miner has settled (buffers allocated, its first proof done: `proofs` = proofs_peak) -- 15 s after the first proof, or
+/// 10 minutes after the start whatever happens (a rig with few hits).
+fn miner_settled(since_start_secs: u64, proofs: usize) -> bool {
+    (proofs >= 1 && since_start_secs >= 75) || since_start_secs >= 600
+}
+/// 1.7.7: the plan of a rig that had no RAM for a check at the start, made again when the miner has settled.  On such a rig proofs
+/// are serialized (one at a time on the machine: the miner's or the check's), so the memory at the peak is a proof (`proof`) plus the
+/// check process (`need`) plus the margin on top of what is in use now; never more than ONE check at a time (1.7.2 ran two on a
+/// 3.8 GB rig and swapped for minutes).  0 = still not enough.  `avail` None: unknown, one.
+pub(crate) fn replan_low_ram(avail: Option<u64>, need: u64, proof: u64) -> u64 {
+    match avail {
+        None => 1,
+        Some(a) => u64::from(a.saturating_sub(LOW_RAM_MARGIN_MB).saturating_sub(proof) >= need),
+    }
+}
+/// May a check start on a rig in the low-RAM mode (`replan_low_ram`)? Looked at again before every check.
+fn low_ram_check_fits(avail: Option<u64>, running: u64, need: u64, proof: u64) -> bool {
+    running == 0 && replan_low_ram(avail, need, proof) == 1
 }
 
 static ACTIVE: OnceLock<Mutex<Option<Arc<Manager>>>> = OnceLock::new();
@@ -990,7 +1025,7 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         match avail {
             None => lg(format!("free RAM unknown: checking all {} GPU(s) at once", cards.len())),
             Some(a) if n == 0 => lg(format!(
-                "NOT ENOUGH RAM for a check: {} available, a check needs ~{} and mining ~{} more ({} % of the free RAM is planned with): no checks or tunings this run; a GPU with a verified profile of these clocks uses it, the others mine at your offset (more RAM, or close other programs, for --auto-uv)",
+                "NOT ENOUGH RAM for a check: {} available, a check needs ~{} and mining ~{} more ({} % of the free RAM is planned with): checks and tunings wait until the miner has settled (its buffers and the first proof), then the RAM is looked at again: one check at a time, or none (more RAM, or close other programs, for --auto-uv)",
                 gb(a), gb(need), gb(more), RAM_SHARE_PCT
             )),
             Some(a) => lg(format!("checking {n} of {} GPU(s) at a time: {} available (a check needs ~{}, mining ~{} more)", cards.len(), gb(a), gb(need), gb(more))),
@@ -1018,7 +1053,9 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         started: Instant::now(),
         inject_bad: std::env::var("FFGP_UV_TEST_INJECT_BAD").ok().and_then(|v| v.parse().ok()),
         injected: AtomicBool::new(false),
-        at_once,
+        at_once: AtomicU64::new(at_once),
+        replan: Mutex::new(if at_once == 0 && mem_available_mb().is_some() { 1 } else { 0 }),
+        low_ram: AtomicBool::new(at_once == 0 && mem_available_mb().is_some()),
         check_need,
         main_more,
         no_mem: AtomicBool::new(false),
@@ -1548,9 +1585,9 @@ impl Manager {
             }
             Choice::Higher => {}
         }
-        match saved_vs_limit(e.offset, e.cap, c.max) {
+        match saved_vs_limit(e.offset, e.cap, e.floor, c.max, c.max_src) {
             Saved::Retune => {
-                lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning on from it", c.label(), signed(e.cap), signed(c.max), signed(e.offset)));
+                lg(format!("{} the limit was raised ({} when tuned, {} now) and the saved {} is the old limit: tuning on from it", c.label(), signed(eff_cap(e.offset, e.cap, c.max_src)), signed(c.max), signed(e.offset)));
                 Plan::Tune { resume: Some(e.offset), prev: Some(e), crashed: None }
             }
             Saved::Clamp if c.max <= c.orig => {
@@ -1603,7 +1640,20 @@ impl Manager {
 
     /// Runs a plan: Apply at once (an NVML set); the others in a thread of their own while the miner mines.
     fn launch(self: &Arc<Self>, c: &Arc<Card>, p: Plan) {
-        let p = if self.at_once == 0 || self.no_mem.load(Ordering::Relaxed) { self.without_checks(c, p) } else { p };
+        // 1.7.7: no RAM for a check at the start is not final: a plan that needs a check waits (the GPU mines at the owner's
+        // offset meanwhile) until the miner has settled, then the RAM is looked at again
+        if self.at_once.load(Ordering::Relaxed) == 0 && *self.replan.lock().unwrap() == 1 && !self.stopped() && !matches!(p, Plan::None) {
+            let (m, c2) = (self.clone(), c.clone());
+            lg(format!("{} waits for the miner to settle before its check / tuning (low RAM at the start: the plan is made again then)", c.label()));
+            std::thread::spawn(move || {
+                m.settle_replan();
+                if !m.stopped() {
+                    m.launch(&c2, p);
+                }
+            });
+            return;
+        }
+        let p = if self.at_once.load(Ordering::Relaxed) == 0 || self.no_mem.load(Ordering::Relaxed) { self.without_checks(c, p) } else { p };
         match p {
             Plan::None => {}
             Plan::Apply { e, want } if !verified(&e) => self.launch(c, Plan::Check { e, want }),
@@ -1635,6 +1685,37 @@ impl Manager {
                     c2.reval_busy.store(false, Ordering::SeqCst);
                 });
             }
+        }
+    }
+
+    /// Waits until the miner has allocated its buffers and done its first proof, then plans the checks again from the RAM that is
+    /// free now (once for all GPUs): one check at a time, or none (logged).
+    fn settle_replan(&self) {
+        while !self.stopped() && !miner_settled(self.started.elapsed().as_secs(), crate::mining::proofs_peak()) {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        let mut st = self.replan.lock().unwrap();
+        if *st != 1 || self.stopped() {
+            return;
+        }
+        *st = 0;
+        let mmax = self.cards.iter().map(|c| c.m).max().unwrap_or(0);
+        let proof = a_matrix_mb(mmax);
+        let avail = mem_available_mb();
+        let n = replan_low_ram(avail, self.check_need, proof);
+        let gb = |mb: u64| format!("{:.1} GB", mb as f64 / 1024.0);
+        if n == 0 {
+            lg(format!(
+                "NOT ENOUGH RAM for a check even with the miner settled: {} available, a check needs ~{} on top of a proof (~{}) and {} MB spare: no checks or tunings this run; a GPU with a verified profile of these clocks uses it, the others mine at your offset",
+                avail.map_or("unknown".to_string(), gb), gb(self.check_need), gb(proof), LOW_RAM_MARGIN_MB
+            ));
+            self.low_ram.store(false, Ordering::SeqCst);
+        } else {
+            self.at_once.store(1, Ordering::SeqCst);
+            lg(format!(
+                "the miner has settled: {} available, one check at a time now (a check needs ~{} on top of a proof ~{}; the RAM is looked at again before every check)",
+                avail.map_or("unknown".to_string(), gb), gb(self.check_need), gb(proof)
+            ));
         }
     }
 
@@ -1938,9 +2019,33 @@ impl Manager {
         }
         // search base/floor: --uv-min for this card, else its default (Card::start); never above the cap
         let mut start = c.start().0.clamp(0, cap);
+        // 1.7.7: a repeated search (new driver / kernel / re-check) starts one coarse step below the last result of this card at
+        // these clocks, else of the nearest clock (climb::prior_start); never below `start` (--uv-min / default), never above `cap`
+        let prior = if crashed.is_none() && resume.is_none() {
+            let now = now();
+            let pri: Vec<climb::PriorProfile> = self
+                .profiles(c)
+                .iter()
+                .map(|e| climb::PriorProfile {
+                    clk: if e.lock != 0 { e.lock } else { e.clk },
+                    mlock: e.mlock,
+                    offset: e.offset,
+                    at: e.verified_at.max(e.tested_at),
+                    who: format!("driver {}, kernel {}", e.driver, e.kernel),
+                    usable: (e.verified_at > 0 || e.migrated) && !e.unlocked && e.disabled_until <= now,
+                })
+                .collect();
+            climb::prior_start(&pri, c.lock.or(c.lock_hint).unwrap_or(0), c.mlock.unwrap_or(0), start, cap, coarse)
+        } else {
+            None
+        };
+        if let Some((h, line)) = prior {
+            lg(format!("{} {line}", c.label()));
+            start = h;
+        }
         // 1.7.6: a new clock lock that has a verified profile of a higher clock starts below that profile's offset (not with
         // --uv-min, not after a crash, not on a re-tune of a saved profile of these clocks)
-        if c.min.is_none() && crashed.is_none() && prev.is_none() && resume.is_none() {
+        else if c.min.is_none() && crashed.is_none() && prev.is_none() && resume.is_none() {
             let hints: Vec<climb::HintProfile> = self
                 .profiles(c)
                 .iter()
@@ -1990,8 +2095,9 @@ impl Manager {
             // first one that passes, which becomes the profile of these clocks (below the owner's offset: used instead of it)
             lg(format!("{} the start offset {} FAILS the check at these clocks ({}): looking for a lower one that passes (30 MHz steps)", c.label(), signed(start), base.reason));
             let mut v = start - 30;
-            loop {
-                if v < c.lo || self.aborted() {
+            for w in climb::fall_steps(start, c.lo) {
+                v = w;
+                if self.aborted() {
                     break;
                 }
                 crate::status::set(c.dev, format!("tuning: looking lower, {}", signed(v)), true, Some(Instant::now() + Duration::from_secs(self.opts.confirm_secs as u64 + 40)));
@@ -2021,10 +2127,6 @@ impl Manager {
                     return Ok(());
                 }
                 lg(format!("{} {} FAILS too ({})", c.label(), signed(v), r.reason));
-                if v <= 0 {
-                    break;
-                }
-                v = (v - 30).max(0);
             }
             lg(format!("{} RESULT: FAILED, no offset down to {} passes the check at these clocks: check the clocks / memory / power of this GPU (left at {})", c.label(), signed(v.max(c.lo)), signed(c.cur.load(Ordering::Relaxed))));
             return Ok(());
@@ -2050,7 +2152,7 @@ impl Manager {
         // a driver fault on a coarse step is not refined (no second Xid)
         let mut n = 0u64;
         let mut last_reason = String::new();
-        let s = climb::climb(good, if good == start { base_w } else { None }, cap, step, coarse, |cand, g, mhz, refine| {
+        let s = climb::climb(good, if good == start { base_w } else { None }, if good == start { base.temp.map(|t| t as i32) } else { None }, cap, step, coarse, |cand, g, mhz, refine| {
             n += 1;
             crate::status::set(c.dev, format!("tuning {} (step {}/{})", signed(cand), n, nsteps.max(n)), true, Some(est(nsteps.saturating_sub(n) + 1)));
             c.last_good.store(g, Ordering::Relaxed);
@@ -2073,7 +2175,7 @@ impl Manager {
                 lg(format!("{} step {}{kind}: FAILED ({}){note}", c.label(), signed(cand), r.reason));
                 last_reason = r.reason.clone();
             }
-            climb::StepOut { ok: r.ok, fault: r.driver_fault, w: r.watts, abort: false }
+            climb::StepOut { ok: r.ok, fault: r.driver_fault, w: r.watts, t: r.temp.map(|t| t as i32), abort: false }
         });
         if s.aborted {
             return Ok(());
@@ -2136,6 +2238,7 @@ impl Manager {
         let mut e = self.new_entry(c);
         e.offset = fin;
         e.cap = c.max;
+        e.floor = plateau && failed.is_none();
         e.refs = refs;
         e.m = c.m;
         e.clk = base.clk.unwrap_or(0);
@@ -2279,7 +2382,10 @@ impl Manager {
             let rss: Vec<Option<u64>> = check_pids().lock().unwrap().values().map(|&p| proc_rss_mb(p)).collect();
             let reserved = checks_reserved_mb(*running, need, &rss);
             let avail = mem_available_mb();
-            if self.stopped() || (!self.suspended.load(Ordering::SeqCst) && (!early || *running < self.at_once.max(1)) && check_fits(reserved, need, avail, more)) {
+            // low-RAM mode (the start plan was 0, 1.7.7): one check at a time, the RAM looked at before each one
+            let low = self.low_ram.load(Ordering::SeqCst);
+            let fits = if low { low_ram_check_fits(avail, *running, need, a_matrix_mb(c.m)) } else { (!early || *running < self.at_once.load(Ordering::Relaxed).max(1)) && check_fits(reserved, need, avail, more) };
+            if self.stopped() || (!self.suspended.load(Ordering::SeqCst) && fits) {
                 *running += 1;
                 SLOT_HELD.with(|h| h.set(true));
                 return Some(CheckSlot);
@@ -2290,6 +2396,9 @@ impl Manager {
                     "{} waits its turn for a check (mining meanwhile): {} check(s) running, {} MB free, of it {} % minus ~{} MB still to come for the running checks and ~{} MB for the miner may be used, a check needs ~{} MB",
                     c.label(), *running, avail.unwrap_or(0), RAM_SHARE_PCT, reserved, more, need
                 ));
+                if low {
+                    lg(format!("{} (low-RAM mode: one check at a time, it starts when {} MB are free: a check {} MB + a proof {} MB + {} MB spare)", c.label(), need + a_matrix_mb(c.m) + LOW_RAM_MARGIN_MB, need, a_matrix_mb(c.m), LOW_RAM_MARGIN_MB));
+                }
             }
             running = cv.wait_timeout(running, Duration::from_secs(1)).unwrap().0;
         }
@@ -2693,7 +2802,7 @@ impl Manager {
 
     /// Quick check of the current offset with mining on this GPU paused; on failure one step back and again.
     fn recheck(&self, c: &Arc<Card>, gs: &Arc<GpuStat>, what: &str) {
-        if self.at_once == 0 || self.no_mem.load(Ordering::Relaxed) {
+        if self.at_once.load(Ordering::Relaxed) == 0 || self.no_mem.load(Ordering::Relaxed) {
             return; // not enough RAM for a check process this run (logged)
         }
         // RAM for the check first: while other GPUs' checks fill the RAM this GPU keeps mining instead of idling paused
@@ -2748,11 +2857,18 @@ pub(crate) enum Saved {
     Retune, // the saved result is the old limit itself (no failing step below it) and the limit is higher now
 }
 
-/// `cap`: the limit the saved result was tuned with (0 = unknown, results of 1.6.1 and older: never re-tuned for it).
-pub(crate) fn saved_vs_limit(offset: i32, cap: i32, max: i32) -> Saved {
+/// The limit a saved result was tuned with.  `cap` 0 = unknown (results of 1.6.1 and older): never re-tuned for it, except the
+/// CMP 50HX at +225 (1.7.7: its default limit was 225 before, `max_src` "CMP 50HX default"; a result of 225 is that limit itself).
+pub(crate) fn eff_cap(offset: i32, cap: i32, max_src: &str) -> i32 {
+    if cap == 0 && offset == TURING_MAX && max_src == "CMP 50HX default" { TURING_MAX } else { cap }
+}
+
+/// `floor`: the climb stopped at the voltage floor (no edge searched above it): a higher limit changes nothing, no re-tune.
+pub(crate) fn saved_vs_limit(offset: i32, cap: i32, floor: bool, max: i32, max_src: &str) -> Saved {
+    let cap = eff_cap(offset, cap, max_src);
     if offset > max {
         Saved::Clamp
-    } else if cap > 0 && max > cap && offset >= cap {
+    } else if !floor && cap > 0 && max > cap && offset >= cap {
         Saved::Retune
     } else {
         Saved::Apply
@@ -3066,8 +3182,10 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     let bus = gpu::device_pci_bus_id(a.dev)?;
     ensure!(bus.eq_ignore_ascii_case(&a.expect_bus), "CUDA device {} is at {bus}, expected {}: refusing to run", a.dev, a.expect_bus);
     let cm = crate::mining::device_m(gpu::sm_count(a.dev)); // this card's m (its SM group); FFGP_M env inherited from the parent
-    let job = Job::new(&test_header(7), 3, cm)?;
+    let tile = gpu::tile_rows_for(a.dev); // the jackpot tile of this card's kernel (8, or 16 for A9h256): its Job is built for it
+    let job = Job::new(&test_header(7), 3, cm, tile)?;
     gpu::init(a.dev)?;
+    ensure!(gpu::tile_rows() == tile, "library tile rows: {} after init, {tile} before", gpu::tile_rows());
     gpu::set_job(&job.br_t, &job.q1, &job.q2, N, k())?;
     // test hook (1.7.3): FFG_BENCH_PROOFS=K proves K hits at once on K threads (a burst of K GPUs hitting together), prints the
     // time of each and the peak RSS, and ends the check process
@@ -3189,6 +3307,33 @@ mod tests {
     }
 
     #[test]
+    fn low_ram_replan() {
+        // Rig05: 5x CMP 50HX (m = 86016, a proof 1411 MB), 3.8 GB; serialized proofs: a check costs 250 MB on top of a proof
+        let proof = a_matrix_mb_k(86016, 8192);
+        let need = CHECK_BASE_MB;
+        let more = 5 * MAIN_PER_GPU_MB + proof;
+        // the start: 2.4 GB free, the miner has not allocated yet: 0 (as before)
+        assert_eq!(checks_at_once(Some(2400), need, more, 5), 0);
+        // the miner settled, 2060 MB free (measured on Rig05): one check
+        assert_eq!(replan_low_ram(Some(2060), need, proof), 1);
+        // still not enough after the miner settled: stays 0
+        assert_eq!(replan_low_ram(Some(1700), need, proof), 0);
+        assert_eq!(replan_low_ram(Some(1900), need, proof), 1); // Rig05 mines at ~1.9 GB free: a margin of 256 MB starved the checks
+        assert_eq!(replan_low_ram(Some(proof + need + LOW_RAM_MARGIN_MB - 1), need, proof), 0);
+        assert_eq!(replan_low_ram(Some(proof + need + LOW_RAM_MARGIN_MB), need, proof), 1);
+        // never more than one at a time, however much RAM
+        assert_eq!(replan_low_ram(Some(3800), need, proof), 1);
+        assert!(!low_ram_check_fits(Some(3800), 1, need, proof));
+        assert!(low_ram_check_fits(Some(3800), 0, need, proof));
+        // before every check the RAM is looked at again: a drop defers it
+        assert!(!low_ram_check_fits(Some(1500), 0, need, proof));
+        // unknown RAM: one
+        assert_eq!(replan_low_ram(None, need, proof), 1);
+        // the settle moment: first proof + 15 s after the 60 s of buffers, else 10 minutes
+        assert!(!miner_settled(30, 1) && !miner_settled(200, 0) && miner_settled(75, 1) && miner_settled(600, 0));
+    }
+
+    #[test]
     fn per_gpu_parse() {
         assert_eq!(PerGpu::parse("495", "--uv-max").unwrap(), PerGpu::All(495));
         assert_eq!(PerGpu::parse("+225", "--uv-max").unwrap(), PerGpu::All(225));
@@ -3278,11 +3423,11 @@ mod tests {
             assert_eq!(t(n, Some((7, 5))).max_src, "CMP default");
             assert_eq!(t(n, None).max, 150, "{n} without compute capability");
         }
-        // CMP 50HX (TU102): 225, by name or by PCI device id 0x1e09
-        assert_eq!(t("NVIDIA CMP 50HX", Some((7, 5))).max, 225);
+        // CMP 50HX (TU102): 330, by name or by PCI device id 0x1e09
+        assert_eq!(t("NVIDIA CMP 50HX", Some((7, 5))).max, 330);
         assert_eq!(t("NVIDIA CMP 50HX", Some((7, 5))).max_src, "CMP 50HX default");
-        assert_eq!(t("NVIDIA CMP 50HX", None).max, 225);
-        assert_eq!(card_defaults("NVIDIA Graphics Device", Some((7, 5)), Some(0x1e09)).max, 225);
+        assert_eq!(t("NVIDIA CMP 50HX", None).max, 330);
+        assert_eq!(card_defaults("NVIDIA Graphics Device", Some((7, 5)), Some(0x1e09)).max, 330);
         assert_eq!(card_defaults("NVIDIA CMP 40HX", Some((7, 5)), Some(0x1f0b)).max, 150); // TU106 id: still 150
         // Turing GeForce
         for n in ["NVIDIA GeForce RTX 2060 SUPER", "NVIDIA GeForce RTX 2080 Ti", "NVIDIA GeForce GTX 1660 Ti", "NVIDIA GeForce GTX 1650"] {
@@ -3344,7 +3489,7 @@ mod tests {
         assert!(l[0].ends_with("range +120..+150 (max: CMP default; start: default)"), "{}", l[0]);
         assert_eq!(card(TU.0, TU.1, 0, 0, &o).max, 225);
         let c50 = card("NVIDIA CMP 50HX", (7, 5), 0, 1, &o);
-        assert!(c50.range_lines(true)[0].ends_with("range +120..+225 (max: CMP 50HX default; start: default)"), "{:?}", c50.range_lines(true));
+        assert!(c50.range_lines(true)[0].ends_with("range +120..+330 (max: CMP 50HX default; start: default)"), "{:?}", c50.range_lines(true));
         assert_eq!(card(AMP.0, AMP.1, 0, 2, &o).max, 495);
         // the HiveOS offset is the start
         assert_eq!(card(TU.0, TU.1, 150, 0, &o).start(), (150, "current offset"));
@@ -3416,19 +3561,49 @@ mod tests {
 
     #[test]
     fn saved_result_under_a_new_limit() {
+        let d = "default";
         // within the limit: applied
-        assert_eq!(saved_vs_limit(270, 495, 495), Saved::Apply);
-        assert_eq!(saved_vs_limit(270, 0, 495), Saved::Apply); // 1.6.1 entry (no cap saved)
+        assert_eq!(saved_vs_limit(270, 495, false, 495, d), Saved::Apply);
+        assert_eq!(saved_vs_limit(270, 0, false, 495, d), Saved::Apply); // 1.6.1 entry (no cap saved)
         // the limit was lowered below the saved result: run at the limit
-        assert_eq!(saved_vs_limit(315, 495, 225), Saved::Clamp);
-        assert_eq!(saved_vs_limit(315, 0, 150), Saved::Clamp); // 1.6.1 entry: a lower limit is respected too
+        assert_eq!(saved_vs_limit(315, 495, false, 225, d), Saved::Clamp);
+        assert_eq!(saved_vs_limit(315, 0, false, 150, d), Saved::Clamp); // 1.6.1 entry: a lower limit is respected too
         // the result is the old limit itself and the limit went up: tune again
-        assert_eq!(saved_vs_limit(225, 225, 495), Saved::Retune);
+        assert_eq!(saved_vs_limit(225, 225, false, 495, d), Saved::Retune);
         // an edge was found below the old limit: a higher limit changes nothing
-        assert_eq!(saved_vs_limit(210, 225, 495), Saved::Apply);
+        assert_eq!(saved_vs_limit(210, 225, false, 495, d), Saved::Apply);
+        // the climb stopped at the voltage floor (plateau), even at the old limit: no re-tune
+        assert_eq!(saved_vs_limit(225, 225, true, 495, d), Saved::Apply);
         // unknown old limit: never re-tuned for it
-        assert_eq!(saved_vs_limit(225, 0, 495), Saved::Apply);
-        assert_eq!(saved_vs_limit(150, 150, 150), Saved::Apply);
+        assert_eq!(saved_vs_limit(225, 0, false, 495, d), Saved::Apply);
+        assert_eq!(saved_vs_limit(150, 150, false, 150, d), Saved::Apply);
+    }
+
+    #[test]
+    fn cmp_50hx_limit_raised_to_330_retunes_up() {
+        let c = "CMP 50HX default";
+        assert_eq!(card_defaults("NVIDIA CMP 50HX", Some((7, 5)), None).max_src, c);
+        // 1.7.7 entry with the cap saved: the result is the old limit, the limit is 330 now
+        assert_eq!(saved_vs_limit(225, 225, false, 330, c), Saved::Retune);
+        // an old profile (before 1.6.2, no cap) at +225 on the 50HX: its old default limit, re-tuned
+        assert_eq!(eff_cap(225, 0, c), 225);
+        assert_eq!(saved_vs_limit(225, 0, false, 330, c), Saved::Retune);
+        // not at 225, or not a 50HX default limit (--uv-max, other cards): left as it is
+        assert_eq!(saved_vs_limit(210, 0, false, 330, c), Saved::Apply);
+        assert_eq!(saved_vs_limit(225, 0, false, 330, "--uv-max"), Saved::Apply);
+        assert_eq!(saved_vs_limit(225, 0, false, 330, "default"), Saved::Apply);
+        // below the old limit: no re-tune; the plateau at 225: none either
+        assert_eq!(saved_vs_limit(195, 225, false, 330, c), Saved::Apply);
+        assert_eq!(saved_vs_limit(225, 0, true, 330, c), Saved::Apply);
+        // the result at the new limit: nothing above
+        assert_eq!(saved_vs_limit(330, 330, false, 330, c), Saved::Apply);
+        // the flag survives the json round trip; an old entry has none
+        let e = Entry { driver: "580".into(), kernel: "k".into(), offset: 225, cap: 225, floor: true, ..Default::default() };
+        let back = Entry::from_json(&e.to_json()).unwrap();
+        assert!(back.floor);
+        let mut v = e.to_json();
+        v.as_object_mut().unwrap().remove("floor");
+        assert!(!Entry::from_json(&v).unwrap().floor);
     }
 
     fn prof(lock: u32, clk: u32, offset: i32) -> Entry {
@@ -3631,7 +3806,7 @@ mod tests {
         let b = best_fit(&es, Some(1805), Some(810), None).expect("the 1805/810 profile");
         assert_eq!((b.lock, b.mlock, b.offset), (1805, 810, 270));
         assert!(best_fit(&es, Some(1410), Some(810), None).is_none() || es.iter().any(|e| e.lock == 1410));
-        assert_eq!(saved_vs_limit(b.offset, b.cap, 495), Saved::Apply);
+        assert_eq!(saved_vs_limit(b.offset, b.cap, b.floor, 495, "default"), Saved::Apply);
     }
 
     #[test]

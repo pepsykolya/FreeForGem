@@ -69,6 +69,7 @@ struct Entry {
     base: i32,
     offset: i32,
     cap: i32,
+    floor: bool, // 1.7.7: the climb stopped at the voltage floor: a higher limit does not re-tune it
     step: i32,
     edge: i32, // first failing offset (0 = none found below the cap)
     mhs_base: f64,
@@ -85,11 +86,15 @@ struct Entry {
 
 impl Entry {
     fn to_json(&self) -> Value {
-        json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "core_lock": self.core_lock,
+        let mut v = json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "core_lock": self.core_lock,
                "power_limit": self.pl, "orig_offset": self.orig, "base_offset": self.base, "offset": self.offset, "cap": self.cap,
                "step": self.step, "edge": self.edge, "mhs_base": self.mhs_base, "watts_base": self.w_base, "mhs": self.mhs,
                "watts": self.w, "tested_at": self.tested_at, "verified_at": self.verified_at, "disabled_until": self.disabled_until,
-               "stepped_back_in_mining": self.stepped_back, "clk_mhz": self.clk, "clk_ok_mhz": self.clk_ok})
+               "stepped_back_in_mining": self.stepped_back, "clk_mhz": self.clk, "clk_ok_mhz": self.clk_ok});
+        if self.floor {
+            v["floor"] = json!(true); // written only when set: other versions' files stay as they were
+        }
+        v
     }
     fn from_json(v: &Value) -> Option<Entry> {
         let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
@@ -105,6 +110,7 @@ impl Entry {
             base: v["base_offset"].as_i64()? as i32,
             offset: v["offset"].as_i64()? as i32,
             cap: v["cap"].as_i64().unwrap_or(0) as i32,
+            floor: v["floor"].as_bool().unwrap_or(false),
             step: v["step"].as_i64().unwrap_or(0) as i32,
             edge: v["edge"].as_i64().unwrap_or(0) as i32,
             mhs_base: f("mhs_base"),
@@ -641,7 +647,7 @@ impl Tuner<'_> {
             return Some(c.base);
         }
         let age = now().saturating_sub(e.verified_at);
-        if saved_vs_limit(e.offset, e.cap, c.max) != Saved::Apply || self.o.reval_hours <= 0.0 || (age as f64) >= self.o.reval_hours * 3600.0 {
+        if saved_vs_limit(e.offset, e.cap, e.floor, c.max, c.max_src) != Saved::Apply || self.o.reval_hours <= 0.0 || (age as f64) >= self.o.reval_hours * 3600.0 {
             return None;
         }
         lg(format!("{} NOID profiles ({mode}): {line}; using {key}: offset {} (verified {} ago at this lock): applied", c.label(), signed(e.offset), fmt_age(age)));
@@ -733,7 +739,7 @@ impl Tuner<'_> {
             lg(format!("{} no safe NOID offset above {} was found when tuned; mining at it (--uv-reset to tune again)", c.label(), signed(c.base)));
             return c.base;
         }
-        let at = match saved_vs_limit(e.offset, e.cap, c.max) {
+        let at = match saved_vs_limit(e.offset, e.cap, e.floor, c.max, c.max_src) {
             Saved::Apply => e.offset,
             Saved::Clamp => {
                 lg(format!("{} saved NOID offset {} is above the limit {} ({}): mining at the limit", c.label(), signed(e.offset), signed(c.max), c.max_src));
@@ -902,9 +908,34 @@ impl Tuner<'_> {
             return c.base;
         }
         let mut start = c.start;
+        // 1.7.7: the last result of this card at these clocks (any driver / kernel), else of the nearest clock, minus one coarse
+        // step (climb::prior_start; never below `start` = --uv-min / default, never above `max`); not after a crash
+        let prior = if below.is_none() {
+            let now = now();
+            let pri: Vec<climb::PriorProfile> = self
+                .db
+                .profiles(&c.uuid, mode)
+                .iter()
+                .map(|(_, e)| climb::PriorProfile {
+                    clk: if e.core_lock != 0 { e.core_lock } else { e.clk },
+                    mlock: 0,
+                    offset: e.offset,
+                    at: e.verified_at.max(e.tested_at),
+                    who: format!("driver {}, kernel {}", e.driver, e.kernel),
+                    usable: e.verified_at > 0 && e.disabled_until <= now && e.offset > e.base,
+                })
+                .collect();
+            climb::prior_start(&pri, c.r.core_lock.or(c.lock_hint).unwrap_or(0), 0, start, max, self.o.coarse_step())
+        } else {
+            None
+        };
+        if let Some((h, line)) = prior {
+            lg(format!("{} {line}", c.label()));
+            start = h;
+        }
         // 1.7.6: a new clock lock that has a verified profile of a higher clock starts below that profile's offset (not with
         // --uv-min, not after a crash)
-        if !c.min_given && below.is_none() {
+        else if !c.min_given && below.is_none() {
             let hints: Vec<climb::HintProfile> = self
                 .db
                 .profiles(&c.uuid, mode)
@@ -958,7 +989,7 @@ impl Tuner<'_> {
             let coarse = self.o.coarse_step();
             let mut seen: Vec<(i32, f64, f64)> = vec![(last_ok, good.0, good.1)]; // (offset, MH/s, W) of every passed step
             let mut infra: Option<Res> = None;
-            let s = climb::climb(last_ok, Some(good.1).filter(|&w| w > 0.0), max, step, coarse, |o, g, mhz, refine| {
+            let s = climb::climb(last_ok, Some(good.1).filter(|&w| w > 0.0), None, max, step, coarse, |o, g, mhz, refine| {
                 self.db.s.set_good(&c.uuid, Some(g)); // the crash marker of this check remembers it
                 let r = self.check(c, o, self.step_secs());
                 if r.infra {
@@ -983,7 +1014,7 @@ impl Tuner<'_> {
                     };
                     lg(format!("{} {}: FAILED ({}){note}", c.label(), signed(o), r.reason));
                 }
-                climb::StepOut { ok: r.ok, fault: r.fault, w: r.watts, abort: false }
+                climb::StepOut { ok: r.ok, fault: r.fault, w: r.watts, t: None, abort: false }
             });
             if let Some(r) = infra {
                 return self.abort(c, &r);
@@ -1046,6 +1077,7 @@ impl Tuner<'_> {
         }
         e.offset = res;
         e.cap = c.max;
+        e.floor = plateau;
         e.edge = edge;
         e.clk_ok = conf_clk.unwrap_or(0);
         (e.mhs, e.w) = good;

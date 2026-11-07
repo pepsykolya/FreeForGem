@@ -101,6 +101,7 @@ pub struct Nvml {
     get_clock: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
     get_max_clock: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int>,
     get_temp: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
+    get_util: Option<unsafe extern "C" fn(*mut c_void, *mut [c_uint; 2]) -> c_int>,
     gpc_get: Option<unsafe extern "C" fn(*mut c_void, *mut c_int) -> c_int>,
     gpc_set: Option<unsafe extern "C" fn(*mut c_void, c_int) -> c_int>,
     gpc_minmax: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> c_int>,
@@ -173,6 +174,7 @@ impl Nvml {
             get_clock: req!("nvmlDeviceGetClockInfo"),
             get_max_clock: opt!("nvmlDeviceGetMaxClockInfo"),
             get_temp: req!("nvmlDeviceGetTemperature"),
+            get_util: opt!("nvmlDeviceGetUtilizationRates"),
             gpc_get: opt!("nvmlDeviceGetGpcClkVfOffset"),
             gpc_set: opt!("nvmlDeviceSetGpcClkVfOffset"),
             gpc_minmax: opt!("nvmlDeviceGetGpcClkMinMaxVfOffset"),
@@ -289,6 +291,13 @@ impl Nvml {
     pub fn mem_clock_mhz(&self, d: Dev) -> Option<u32> {
         let mut c = 0;
         (unsafe { (self.get_clock)(d.0, 2, &mut c) } == 0).then_some(c)
+    }
+
+    /// GPU utilization in percent (nvmlDeviceGetUtilizationRates: the share of the last sample period with a kernel running).
+    pub fn util_gpu(&self, d: Dev) -> Option<u32> {
+        let f = self.get_util?;
+        let mut u = [0u32; 2]; // nvmlUtilization_t { gpu, memory }
+        (unsafe { f(d.0, &mut u) } == 0).then_some(u[0])
     }
 
     /// Highest memory clock of the board (nvmlDeviceGetMaxClockInfo, NVML_CLOCK_MEM).

@@ -8,7 +8,7 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.5**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.7**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
@@ -31,18 +31,20 @@ Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 | Field | Pearl | NOID |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz` | same |
 | Hash algorithm | `pearlhash` | `parano1d` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
 | Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1300 --auto-uv` |
 
-Use the **HiveOS** file of the release (`freeforgem-1.7.5.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Use the **HiveOS** file of the release (`freeforgem-1.7.7_hiveos.tar.gz`) as the Installation URL — not the Linux or Windows archive.
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
+
+**CMP cards (optional, off by default):** under the stock NVIDIA driver they compute about 10 times slower. Adding `cmp-unlock-driver` to *Extra config arguments* (or `sudo ./freeforgem --cmp-driver`) makes the miner install an unlocked driver and **reboot the rig**; it replaces the kernel driver of the whole rig, read MANUAL.md section 20 first.
 
 ### Windows 10/11 x64
 
-Download `freeforgem-1.7.5-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+Download `freeforgem-1.7.7-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
 pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
 replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
 Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -51,8 +53,8 @@ Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details
 ### Linux x86_64
 
 ```
-tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
-cd freeforgem-1.7.5
+tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
+cd freeforgem-1.7.7
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv                                # NOID
@@ -122,7 +124,7 @@ Full manual in English, Russian and Chinese: **[MANUAL.md](MANUAL.md)** (HiveOS,
 | `--auto-uv` | optional (off by default): find, apply and supervise a safe undervolt of the GPU (V/F offset), needs root/Administrator, restores your settings on exit; see [MANUAL.md](MANUAL.md) section 12 |
 | `--uv-offset N` / `--uv-reset` / `--uv-reset-all` | apply a fixed undervolt offset after a check / forget the saved profile of the current lock / forget all saved results |
 | `--no-color` | no colours in the log (also `NO_COLOR=1`) |
-| `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 50HX up to +225, CMP 30HX/40HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
+| `--uv-max N` / `--uv-min N` | highest / starting undervolt offset; default per card (RTX 20xx / GTX 16xx up to +225, CMP 50HX up to +330, CMP 30HX/40HX up to +150, others +495). One value for all GPUs, or one per GPU in `--devices` order: `--uv-max 225,495,150` |
 
 The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per GPU and in total,
 plus the submitted, accepted and rejected shares.
@@ -234,7 +236,7 @@ Requirements: Rust (stable, edition 2024), a C linker (gcc), git, and the NVIDIA
 linker can resolve the library's `libcuda.so.1` dependency. No `nvcc` is needed.
 
 ```
-./build.sh          # -> dist/freeforgem-<version>-linux-x86_64.tar.gz and dist/freeforgem-<version>.tar.gz (HiveOS)
+./build.sh          # -> dist/freeforgem-<version>-linux-x86_64.tar.gz and dist/freeforgem-<version>_hiveos.tar.gz (HiveOS)
 ```
 
 Windows x64 (Visual Studio 2022 or Build Tools with the C++ workload, Rust with the MSVC toolchain, git), in PowerShell:

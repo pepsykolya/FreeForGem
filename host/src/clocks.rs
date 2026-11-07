@@ -356,8 +356,126 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
             "mem_off": it.mem_off, "core_prev": it.core_prev.to_json(), "mem_prev": it.mem_prev.to_json()})).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
+    let checks: Vec<(i32, String, u32)> = items.iter().filter(|it| it.mem_locked).map(|it| (devices[it.pos], it.bus.clone(), it.mem_mhz)).collect();
     *state().lock().unwrap() = Some(State { nv, marker, items, suspended: false });
+    if !checks.is_empty() {
+        spawn_mem_lock_check(checks);
+    }
     Some(Guard)
+}
+
+/// A memory clock sample counts only at or above this GPU utilization (an idle card may sit in a low P-state).
+const MEM_CHECK_BUSY_PCT: u32 = 70;
+/// Busy samples needed (spaced `MEM_CHECK_STEP_S` apart, the first after `MEM_CHECK_FIRST_S`), and how long to wait for them.
+const MEM_CHECK_SAMPLES: usize = 3;
+const MEM_CHECK_FIRST_S: u64 = 60;
+const MEM_CHECK_STEP_S: u64 = 10;
+const MEM_CHECK_GIVE_UP_S: u64 = 900;
+
+/// Verdict of the memory-lock check: the memory clock the card really runs at under load when it is steadily off the requested
+/// lock, else `None` (holds, too few busy samples, or the samples disagree).  `samples` = (memory MHz, GPU utilization %);
+/// idle samples are ignored (the clock may be lower while idling, that is no error).  Tolerance: 5 % of the lock, at least 30 MHz.
+pub(crate) fn mem_lock_verdict(requested: u32, samples: &[(u32, u32)]) -> Option<u32> {
+    let mut busy: Vec<u32> = samples.iter().filter(|s| s.1 >= MEM_CHECK_BUSY_PCT).map(|s| s.0).collect();
+    if requested == 0 || busy.len() < MEM_CHECK_SAMPLES {
+        return None;
+    }
+    let tol = (requested / 20).max(30);
+    if !busy.iter().all(|&m| m.abs_diff(requested) > tol) {
+        return None;
+    }
+    let above = busy[0] > requested;
+    if busy.iter().any(|&m| (m > requested) != above) {
+        return None; // on both sides of the lock: not steady
+    }
+    busy.sort_unstable();
+    Some(busy[busy.len() / 2])
+}
+
+/// The warning text for `mem_lock_verdict`; one line per card.
+pub(crate) fn mem_lock_message(dev: i32, bus: &str, requested: u32, actual: u32) -> String {
+    if actual > requested {
+        format!(
+            "WARNING: GPU{dev} (bus {bus}): memory clock lock {requested} MHz accepted, but the memory runs at {actual} MHz under load (the lowest this GPU/driver allows while computing); the lock has no effect below {actual}"
+        )
+    } else {
+        format!(
+            "WARNING: GPU{dev} (bus {bus}): memory clock lock {requested} MHz accepted, but the memory runs at {actual} MHz under load, below the lock; the lock is not held"
+        )
+    }
+}
+
+/// Once per card, after the first minute of mining: reads the real memory clock through NVML a few times under load and
+/// warns when it is steadily not the locked one (RTX 3070, driver 595: `-lmc 405` is accepted, the card computes at 810).  Only
+/// a warning: the lock and the restore on exit are untouched; no NVML reading, no load or a pause (idle mode) = no verdict.
+fn spawn_mem_lock_check(cards: Vec<(i32, String, u32)>) {
+    let _ = std::thread::Builder::new().name("mclk-check".into()).spawn(move || {
+        let sleep = |s: u64| std::thread::sleep(std::time::Duration::from_secs(s));
+        let mut samples: Vec<Vec<(u32, u32)>> = vec![Vec::new(); cards.len()];
+        let mut done = vec![false; cards.len()];
+        sleep(MEM_CHECK_FIRST_S);
+        let mut waited = MEM_CHECK_FIRST_S;
+        while waited <= MEM_CHECK_GIVE_UP_S && done.iter().any(|d| !d) {
+            {
+                let g = state().lock().unwrap();
+                let Some(st) = g.as_ref() else { return }; // restored / shut down
+                if !st.suspended {
+                    for (i, (dev, bus, req)) in cards.iter().enumerate() {
+                        if done[i] {
+                            continue;
+                        }
+                        let Some(it) = st.items.iter().find(|it| it.mem_locked && it.bus == *bus) else {
+                            done[i] = true;
+                            continue;
+                        };
+                        let (Some(m), Some(u)) = (st.nv.mem_clock_mhz(it.dev), st.nv.util_gpu(it.dev)) else {
+                            done[i] = true; // NVML does not give it: silently skip
+                            continue;
+                        };
+                        samples[i].push((m, u));
+                        if samples[i].iter().filter(|s| s.1 >= MEM_CHECK_BUSY_PCT).count() >= MEM_CHECK_SAMPLES {
+                            done[i] = true;
+                            if let Some(actual) = mem_lock_verdict(*req, &samples[i]) {
+                                lg(mem_lock_message(*dev, bus, *req, actual));
+                            }
+                        }
+                    }
+                }
+            }
+            sleep(MEM_CHECK_STEP_S);
+            waited += MEM_CHECK_STEP_S;
+        }
+    });
+}
+
+/// Core lock (MHz) with the best Pearl TMAC/J on RTX 30 (Ampere).  Source: RTX 3070 frequency sweeps (pearl-miner JOURNAL, night 10):
+/// 1530 MHz = -1.9% speed, -5.4% power, +3.6% TMAC/J against 1560; 1515 and below is a plateau.  Only a hint: nothing is set.
+pub const AMPERE_PEARL_LOCK: u32 = 1530;
+
+/// RTX 30 (GA10x, sm_86; a CMP 70HX/90HX is not one) whose core lock is missing or above `AMPERE_PEARL_LOCK`.
+pub(crate) fn ampere_hint_needed(name: &str, cc: Option<(i32, i32)>, lock: Option<u32>) -> bool {
+    let n = name.to_ascii_uppercase();
+    let rtx30 = n.contains("RTX 30") && !n.contains("CMP") && cc.is_none_or(|c| c == (8, 6));
+    rtx30 && lock.is_none_or(|l| l > AMPERE_PEARL_LOCK)
+}
+
+/// Pearl on RTX 30: one log line when a GPU runs without a core lock or above 1530 MHz (`locks` = what the miner set, by position).
+pub fn hint_ampere(devices: &[i32], locks: &[Option<u32>]) {
+    let Ok(nv) = Nvml::load() else { return };
+    let mut gpus = Vec::new();
+    for (i, &dev) in devices.iter().enumerate() {
+        let Some(d) = gpu::device_pci_bus_id(dev).ok().and_then(|b| nv.by_bus(&b).ok()) else { continue };
+        let name = nv.name(d).unwrap_or_default();
+        if ampere_hint_needed(&name, nv.compute_capability(d), locks.get(i).copied().flatten()) {
+            gpus.push(format!("GPU{dev}"));
+        }
+    }
+    if !gpus.is_empty() {
+        lg(format!(
+            "hint: for better TMAC/W on RTX 30 try --lock-cclock {AMPERE_PEARL_LOCK} ({}: no lock or above {AMPERE_PEARL_LOCK} MHz); about +3.6% TMAC/J for -1.9% speed against 1560 (RTX 3070); auto-uv tunes a new lock from the profile of a higher one",
+            gpus.join(", ")
+        ));
+    }
 }
 
 /// Core clock lock this run set on each of `n` mining GPUs (by position; None = not set by the miner).
@@ -501,11 +619,64 @@ mod tests {
     }
 
     #[test]
+    fn mem_lock_check_decision() {
+        let busy = |v: &[u32]| v.iter().map(|&m| (m, 99)).collect::<Vec<_>>();
+        // RTX 3070: lock 405, the card computes at 810 -> warning with the real clock
+        assert_eq!(mem_lock_verdict(405, &busy(&[810, 810, 810])), Some(810));
+        // holds (within 30 MHz / 5 %)
+        assert_eq!(mem_lock_verdict(810, &busy(&[810, 810, 810])), None);
+        assert_eq!(mem_lock_verdict(5001, &busy(&[5001, 4990, 5001])), None);
+        assert_eq!(mem_lock_verdict(810, &busy(&[835, 810, 790])), None);
+        // lower than the lock (5001 -> 4000)
+        assert_eq!(mem_lock_verdict(5001, &busy(&[4000, 4000, 4000])), Some(4000));
+        // tolerance is 5 % on a big clock
+        assert_eq!(mem_lock_verdict(7000, &busy(&[7300, 7300, 7300])), None);
+        assert_eq!(mem_lock_verdict(7000, &busy(&[7400, 7400, 7400])), Some(7400));
+        // one sample on the lock = not steady
+        assert_eq!(mem_lock_verdict(405, &busy(&[810, 405, 810])), None);
+        // both sides of the lock = not steady
+        assert_eq!(mem_lock_verdict(5001, &busy(&[4000, 7000, 4000])), None);
+        // too few samples, no lock
+        assert_eq!(mem_lock_verdict(405, &busy(&[810, 810])), None);
+        assert_eq!(mem_lock_verdict(0, &busy(&[810, 810, 810])), None);
+        // idle samples never count (a low clock while idling is no error)
+        let mut s = vec![(405, 0), (405, 3)];
+        assert_eq!(mem_lock_verdict(810, &s), None);
+        s.extend(busy(&[810, 810, 810]));
+        assert_eq!(mem_lock_verdict(810, &s), None);
+        assert_eq!(mem_lock_verdict(405, &s), Some(810));
+        let idle = vec![(810, 0), (810, 0), (810, 5), (810, 20)];
+        assert_eq!(mem_lock_verdict(405, &idle), None);
+    }
+
+    #[test]
+    fn mem_lock_message_is_a_yellow_warning() {
+        let m = mem_lock_message(1, "00000000:04:00.0", 405, 810);
+        assert!(m.contains("GPU1") && m.contains("lock 405 MHz accepted") && m.contains("runs at 810 MHz under load"));
+        assert_eq!(crate::color::kind(&format!("clocks: {m}")), crate::color::Kind::Warn);
+        let m = mem_lock_message(0, "x", 5001, 4000);
+        assert!(m.contains("4000 MHz") && m.contains("not held"));
+        assert_eq!(crate::color::kind(&format!("clocks: {m}")), crate::color::Kind::Warn);
+    }
+
+    #[test]
     fn restore_env_values() {
         assert_eq!(prev_from_env_value("1200", 0, 3), Some(Prev::Locked(1200)));
         assert_eq!(prev_from_env_value("0", 2, 3), Some(Prev::Unlocked));
         assert_eq!(prev_from_env_value("1200,-,1400", 1, 3), None);
         assert_eq!(prev_from_env_value("1200,-,1400", 2, 3), Some(Prev::Locked(1400)));
         assert_eq!(prev_from_env_value("1200,1400", 0, 3), None); // wrong count: not used
+    }
+
+    #[test]
+    fn ampere_hint_only_for_rtx30_without_or_above_1530() {
+        let n = "NVIDIA GeForce RTX 3070";
+        assert!(ampere_hint_needed(n, Some((8, 6)), None));
+        assert!(ampere_hint_needed(n, Some((8, 6)), Some(1560)));
+        assert!(!ampere_hint_needed(n, Some((8, 6)), Some(1530)));
+        assert!(!ampere_hint_needed(n, Some((8, 6)), Some(1410)));
+        assert!(!ampere_hint_needed("NVIDIA GeForce RTX 4070", Some((8, 9)), None));
+        assert!(!ampere_hint_needed("NVIDIA CMP 90HX", Some((8, 6)), None));
+        assert!(!ampere_hint_needed(n, Some((8, 9)), None));
     }
 }

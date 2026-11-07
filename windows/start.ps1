@@ -33,6 +33,23 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Set-Location -LiteralPath $root
 
+# Console QuickEdit off for this window.  A mouse click in a QuickEdit console starts a text selection and freezes every
+# program writing to that window until a key is pressed; Write-Host below then blocks, the pipe from the miner fills up and
+# the miner stops (seen on a rig: 35+ minutes of 0 % GPU).  Only the QuickEdit bit is cleared (ENABLE_EXTENDED_FLAGS set,
+# insert mode and the rest kept).  No console (Windows Terminal, redirected input) or any error: nothing is changed.
+try {
+    Add-Type -Namespace FFG -Name Con -ErrorAction Stop -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int h);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, uint m);
+'@
+    $h = [FFG.Con]::GetStdHandle(-10)
+    $m = [uint32]0
+    if ([FFG.Con]::GetConsoleMode($h, [ref]$m)) {
+        [void][FFG.Con]::SetConsoleMode($h, (($m -band [uint32]4294967231) -bor 0x0080))
+    }
+} catch { }
+
 function Fail([string]$message) { Write-Host "ERROR: $message" -ForegroundColor Red; exit 1 }
 
 if ($root -match '\s|[^\x00-\x7F]') {
@@ -177,8 +194,11 @@ try {
             $writer.WriteLine($line)
             # pool replies carry "error":null even when all is well: that is not an error
             $plain = $line -replace '"error"\s*:\s*null', ''
-            $color = if ($line -match 'share ACCEPTED|^SUBMIT ') { 'Green' }
-                elseif ($plain -match 'ERROR|error|!!|panick|DISCONNECTED|REJECTED|rej [1-9]') { 'Red' }
+            # the periodic stats line ("[ 120s] GPU0 ... | user sub N acc N rej N ...") stays plain, as in the miner itself:
+            # its running "rej 1" counter turned every stats line red for the rest of the run after a single rejected share
+            $color = if ($line -match '^\[\s*\d+s\]') { $null }
+                elseif ($line -match 'share ACCEPTED|^SUBMIT ') { 'Green' }
+                elseif ($plain -match 'ERROR|error|!!|panick|DISCONNECTED|REJECTED') { 'Red' }
                 elseif ($line -match 'devfee') { 'DarkGray' } else { $null }
             if ($color) { Write-Host $line -ForegroundColor $color } else { Write-Host $line }
         }

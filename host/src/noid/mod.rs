@@ -622,7 +622,7 @@ pub fn mine(o: Opts) -> Result<()> {
                 clocks::restore_all();
                 tune::forget_trying_on_stop();
                 eprintln!("second interrupt: exiting at once");
-                std::process::exit(130);
+                crate::conout::exit(130);
             }
             eprintln!("shutting down (finishing in-flight work)...");
         })?;

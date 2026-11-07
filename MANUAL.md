@@ -46,10 +46,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.7.5):**
+**Installation URL (1.7.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -73,15 +73,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7
 4. **Apply.** *Apply changes*, *Create flight sheet*, then apply it to the rig.
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
-The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.5 0.652 TH/W, new 1.7.6`: the miner looks for one on GitHub ~1 min after the start and every ~12 h, nothing is installed by itself; `--no-update-check` turns it off).
+The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.7 0.652 TH/W, need update!!`: the miner looks for one on GitHub ~1 min after the start and every ~12 h, nothing is installed by itself; `--no-update-check` turns it off).
 To update, change the Installation URL to the new version. The same guide with more details: [HIVEOS.md](HIVEOS.md).
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
 
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
-cd freeforgem-1.7.5
+tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
+cd freeforgem-1.7.7
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -102,8 +102,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.5-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
+1. Download **`freeforgem-1.7.7-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -154,7 +154,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.5-windows-x64
+cd /d C:\Mining\freeforgem-1.7.7-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -248,13 +248,13 @@ cards of the same generation and are not measured. Every card differs: let `--au
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | lock `810` | +390..480 | estimate |
 | RTX 2060 SUPER, RTX 2070/2080 (incl. SUPER), GTX 1660/1650 | 1500–1650 | lock `5001` (**not 810**: Turing loses ~25% at 810) | +200..260; auto-uv limit +225 by default (since 1.6.2) | reference (2060 SUPER: measured) |
 | CMP 40HX | 1400 | lock `5001` | +150; auto-uv limit +150 by default (since 1.6.2) | user rigs; a CMP 40HX hit Xid at +255 |
-| CMP 50HX (TU102) | — | lock `5001` | +220 and more; auto-uv limit +225 by default (`--uv-max 225`) | user rigs. **Not recommended for Pearl: ~2.6 TH/s per card** (int8 tensor cores cut ~17× against the 40HX; the same on drivers 550.78 and 595.91.07, 3× CMP 50HX rig) |
+| CMP 50HX (TU102) | — | lock `5001` | +220 and more; auto-uv limit +330 by default (`--uv-max 330`) | user rigs. **Not recommended for Pearl: ~2.6 TH/s per card** (int8 tensor cores cut ~17× against the 40HX; the same on drivers 550.78 and 595.91.07, 3× CMP 50HX rig) |
 
 RTX 40 and 50 run at a much higher locked core clock (**1900–2500 MHz**) and hold a higher offset than RTX 30; that is why
 auto-uv starts their search at +200 on RTX 40 and +300 on RTX 50 (RTX 30: +120).
 
 **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card automatically (since 1.6.2): RTX 20xx / GTX 16xx up to
-+225, CMP 30HX/40HX up to +150 (CMP 50HX: +225), all others up to +495; the log shows the range of every GPU at start
++225, CMP 30HX/40HX up to +150 (CMP 50HX: +330), all others up to +495; the log shows the range of every GPU at start
 (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). For manual control give one value
 per GPU in `--devices` order: `--uv-max 225,495,150` (`-` = that GPU's default). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
@@ -291,9 +291,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -342,7 +342,7 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
 3. The first mismatch, CUDA error, Xid error or hang ends the climb. The result is the **last good step minus one step (15 MHz
    margin)**, confirmed by a longer check (about 2 minutes); if the confirmation fails it goes one step lower. The highest
    value tried is +495 (`--uv-max`, at most +600; before 1.5.1 it was +300 with a hard cap of +400); since 1.6.2 it is +225 on
-   Turing (RTX 20xx / GTX 16xx) and +150 on CMP 30HX/40HX (CMP 50HX: +225) unless `--uv-max` says otherwise. RTX 40/50 cards often hold +450..480.
+   Turing (RTX 20xx / GTX 16xx) and +150 on CMP 30HX/40HX (CMP 50HX: +330) unless `--uv-max` says otherwise. RTX 40/50 cards often hold +450..480.
    A saved result above a lowered limit is not used as is: the card runs at the limit (after a quick check) and the saved
    result is kept for when the limit goes up again; a saved result that *is* the old limit is tuned again when the limit rises.
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version, kernel build and core clock lock (one profile per lock,
@@ -388,7 +388,7 @@ same clock), and the safety net worked too (a found result failed the CPU check 
    without the lock the card may boost higher instead and the saving is smaller.
 3. **Turn it on**, one of:
    * `start.bat` (or any `start-luckypool-*` / `start-kryptex-*`): remove `rem` before `set "AUTO_UV=1"`. The upper limit is
-     `set "UV_MAX="` (empty = per card: +495, RTX 20xx/GTX 16xx/CMP 50HX +225, CMP 30HX/40HX +150; RTX 40/50 often hold +450..480, RTX 30
+     `set "UV_MAX="` (empty = per card: +495, RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150; RTX 40/50 often hold +450..480, RTX 30
      usually +200..360). A comma list sets one value per GPU in `DEVICES` order, e.g. `set "UV_MAX=225,495,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, the range in `UV_MIN` / `UV_MAX`, plus power limit and clock lock through `nvidia-smi`.
    * your own command line: `freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
@@ -445,7 +445,7 @@ set "UV_MIN=300"
 set "UV_MAX=495"
 ```
 * **Mixed rig:** `LOCK_CCLOCK` / `LOCK_MCLOCK` take one value per GPU in `DEVICES` order, e.g. `set "LOCK_CCLOCK=1560,2445"`.
-  For the undervolt `AUTO_UV=1` alone is enough: the limits are chosen per card (RTX 20xx/GTX 16xx/CMP 50HX +225, CMP 30HX/40HX +150, others +495;
+  For the undervolt `AUTO_UV=1` alone is enough: the limits are chosen per card (RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150, others +495;
   RTX 40/50 start at +200/+300 by themselves). For manual control `UV_MIN` / `UV_MAX` / `UV_OFFSET` take a list in the same order,
   e.g. `set "UV_MAX=225,495,150"` (`-` = that GPU's default). A list must have exactly one value per GPU.
 * **Faster tuning:** `set "UV_STEP=30"` halves the number of steps (coarser result). On RTX 50 a higher start (about +300)
@@ -471,7 +471,7 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--uv-reset` | forget the saved profile of the current lock (and coin / mode); with `--auto-uv` that lock is tuned again; without a wallet the miner just exits |
 | `--uv-reset-all` | forget every saved result (all locks, coins, modes) |
 | `--no-color` | no colours in the log (also `NO_COLOR=1` or `FFG_COLOR=0`; `FFG_COLOR=1` forces them) |
-| `--uv-max N` | highest offset the tuner tries (at most 600; default per card: RTX 20xx / GTX 16xx / CMP 50HX 225, CMP 30HX/40HX 150, all others 495; on Windows: `set "UV_MAX=480"` in `start.bat`) |
+| `--uv-max N` | highest offset the tuner tries (at most 600; default per card: RTX 20xx / GTX 16xx 225, CMP 50HX 330, CMP 30HX/40HX 150, all others 495; on Windows: `set "UV_MAX=480"` in `start.bat`) |
 | `--uv-min N` | offset the tuner starts from; a start that fails steps down (default: RTX 3070 / 3060 Ti by the core lock, RTX 3080/3090 +180 (section 17); else the HiveOS/driver offset or 120; RTX 40: at least 200, RTX 50: at least 300; Windows: `UV_MIN`) |
 | `--uv-step N` | MHz per fine tuning step (default 15; the result, the margin and the step backs; a failing start / a crash steps down 30 MHz; Windows: `UV_STEP`) |
 | `--uv-coarse N` | climbing step in MHz (default: 2 x `--uv-step` = 30; since 1.7.6 for Pearl, NOID and CMFD): the first failing step is searched again in `--uv-step` steps inside its own interval only. `0` (or <= `--uv-step`) = one step size, as before 1.7.6. A driver fault (Xid, hang) on a coarse step is not refined: the result is one step below the last good one |
@@ -488,7 +488,7 @@ extended. An explicit `--uv-max` is used as given, also above the card's default
 (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Example for 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop and a CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (the same as the defaults).
 
-**GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). **Since 1.7.1 a lock that was there before is put back instead of removed:** on HiveOS the lock of the OC profile (*Lock Core Clock* / *Lock Memory Clock*, read from `/hive-config/nvidia-oc.conf`; before 1.7.1 a test run with `--lock-cclock` left a rig without its HiveOS lock); elsewhere NVML cannot read a lock back, so name it in `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (the FreeForGemPear names `FFGP_RESTORE_*` work too; one value or a list per GPU, 0 = none), otherwise the clock is reset to default as before. The log says what happens: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, at exit `core clock lock 1470 MHz put back`. After a crash or `kill -9` the next start does the same. On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
+**GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). **Since 1.7.1 a lock that was there before is put back instead of removed:** on HiveOS the lock of the OC profile (*Lock Core Clock* / *Lock Memory Clock*, read from `/hive-config/nvidia-oc.conf`; before 1.7.1 a test run with `--lock-cclock` left a rig without its HiveOS lock); elsewhere NVML cannot read a lock back, so name it in `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (the FreeForGemPear names `FFGP_RESTORE_*` work too; one value or a list per GPU, 0 = none), otherwise the clock is reset to default as before. The log says what happens: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, at exit `core clock lock 1470 MHz put back`. After a crash or `kill -9` the next start does the same. On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`. **RTX 30 hint (1.7.7):** for Pearl on RTX 30 (Ampere) the best TMAC/J is at a core lock of about 1530 MHz (+3.6% TMAC/J for -1.9% speed against 1560, measured on an RTX 3070; 1515 and below is a plateau). The miner only says so: when an RTX 30 runs without a core lock or above 1530, the start log has one `clocks: hint: ... try --lock-cclock 1530` line; nothing is set for you. With `--auto-uv`, a new lock means a tuning of its own (profiles are kept per core lock; the search starts from the profile of the nearest higher lock). After the first minute of mining the miner reads the real memory clock of each locked card a few times under load and prints one yellow warning if it is not the locked one (e.g. `--lock-mclock 405` on an RTX 3070: the card computes at 810 MHz, the lowest it allows under load); the lock itself is left as it is.
 
 Default location of the files: next to the binary (Windows: the miner folder), on HiveOS `/hive-config/freeforgem`
 (survives miner updates and reboots). **Reset:** `freeforgem --uv-reset` (or delete `uv.json`).
@@ -596,7 +596,7 @@ After the model is prepared and before the engine starts, per card: the engine's
 loads the model once and runs two fixed batches again and again; at the base offset (0, stock) it takes their final digests as
 the reference and runs the official Common Foundry 1.0.16 test vector; then the core offset goes up in `--uv-coarse` (30 MHz) steps, `--uv-step` inside the first failing one
 (15 MHz) from `--uv-min` (default: one step above 0) up to `--uv-max` (default: the per-card limit of section 12: 495,
-RTX 20xx / CMP 50HX 225, CMP 30HX/40HX 150); every step runs 30 s + 10 s of measurement and **every digest must be
+RTX 20xx 225, CMP 50HX 330, CMP 30HX/40HX 150); every step runs 30 s + 10 s of measurement and **every digest must be
 bit-identical** to the reference (a single wrong bit anywhere in the 384 layers changes it). The first failing step is the
 edge; the result is one step lower (`--uv-keep-last` keeps the last good one), confirmed for 2 minutes + the test vector
 (one more step down on failure). It is saved in `uv.json` (section `cmfd`, per card UUID, with the driver and the engine/worker
@@ -999,6 +999,31 @@ the clocks can be set.
   repeats after 1, 5, 15 min, then every 15 min; the other GPUs mine meanwhile.
 - The files `uv.json`, `gpu-faults.json` and the restore markers keep their 1.7.5 format: a 1.7.6 file is read by 1.7.5 and the other way round.
 
+### 20. NVIDIA CMP cards: the unlocked driver, `--cmp-driver` (optional, new in 1.7.7)
+
+NVIDIA CMP mining cards (CMP 50HX and the family) compute at a small part of their speed under the stock NVIDIA driver: the same card,
+the same engine and the same clock made about 2.4 inf/s with the stock driver and about 27 inf/s with an unlocked driver (the stock driver
+limits the arithmetic of the CMP chip, the miner does not change). The unlock is in the driver, so it helps every algorithm of the miner on
+these cards. The miner can install such a driver on HiveOS, **only when you ask for it**. **The function is off by default.**
+
+- once, by hand: `sudo ./freeforgem --cmp-driver` in the miner folder; or
+- on every start, from the flight sheet: add the word `cmp-unlock-driver` to *Extra config arguments* (the miner itself does not get it).
+
+What it does: checks that this is HiveOS (`/hive/sbin/nvidia-driver-update`), that it runs as root and that a CMP card is on the PCI bus;
+if the unlocked build is not installed yet, it downloads the pinned driver file (about 540 MB) to disk, checks its SHA-256 against the value fixed in
+the miner (another file is deleted, nothing is installed), installs it with HiveOS's own `nvidia-driver-update --force` and **reboots the rig**;
+HiveOS starts the miner again after the boot. A rig that already has the unlocked driver, or has no CMP card, or runs without root, is left
+alone and mining goes on. Whether the unlocked build is in place is read from the build tag of the kernel module in
+`/proc/driver/nvidia/version` (the stock driver of the same version has another tag). The log lines begin with `--cmp-driver:`.
+
+Environment: `FFG_CMP_DRIVER_DRY_RUN=1` runs every check and says what it would do, changing nothing (use it first);
+`FFG_CMP_DRIVER_NO_REBOOT=1` installs without the reboot; `FFG_CMP_DRIVER_FORCE=1` installs again even if the driver is in place or no CMP card is found.
+
+Before you use it: **this replaces the NVIDIA kernel driver of the whole rig** (every GPU program uses it afterwards) and needs a **reboot**;
+Secure Boot must be off; the build is a third-party modification of the driver, not NVIDIA's, and you use it at your own risk; if the power fails during
+the installation the rig can start without a working driver, so do it when you can reach the rig. To go back, install another driver version with
+`nvidia-driver-update` and reboot.
+
 ---
 
 ## Русский
@@ -1039,10 +1064,10 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.7.5):**
+**Ссылка для установки (1.7.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1066,15 +1091,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7
 4. **Применить.** *Apply changes*, *Create flight sheet*, затем применить лист к ригу.
 
 Лог майнера: `/var/log/miner/freeforgem/freeforgem.log` и консоль майнера в HiveOS.
-На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера; с 1.7.5 там же — вышедшая новая версия (`1.7.5 0.652 TH/W, new 1.7.6`: майнер проверяет GitHub через ~1 мин после старта и раз в ~12 ч, сам ничего не устанавливает; `--no-update-check` выключает).
+На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера; с 1.7.5 там же — вышедшая новая версия (`1.7.7 0.652 TH/W, need update!!`: майнер проверяет GitHub через ~1 мин после старта и раз в ~12 ч, сам ничего не устанавливает; `--no-update-check` выключает).
 Для обновления смените Installation URL на новую версию. То же подробнее: [HIVEOS.md](HIVEOS.md).
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
 
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
-cd freeforgem-1.7.5
+tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
+cd freeforgem-1.7.7
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1095,8 +1120,8 @@ cd freeforgem-1.7.5
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.5-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.7-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1147,7 +1172,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.5-windows-x64
+cd /d C:\Mining\freeforgem-1.7.7-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1239,13 +1264,13 @@ AlphaPool `eu1.alphapool.tech:5571` (также `us1`, `us2`, `ru1`, `sg1`), Him
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | лок `810` | +390..480 | оценка |
 | RTX 2060 SUPER, RTX 2070/2080 (вкл. SUPER), GTX 1660/1650 | 1500–1650 | лок `5001` (**не 810**: на 810 Turing теряет ~25%) | +200..260; предел auto-uv +225 по умолчанию (с 1.6.2) | опорное (2060 SUPER: замер) |
 | CMP 40HX | 1400 | лок `5001` | +150; предел auto-uv +150 по умолчанию (с 1.6.2) | риги пользователей; CMP 40HX ловила Xid на +255 |
-| CMP 50HX (TU102) | — | лок `5001` | +220 и выше; предел auto-uv +225 по умолчанию (`--uv-max 225`) | риги пользователей. **Для Pearl не рекомендуется: ~2.6 TH/s на карту** (int8 тензорные ядра урезаны ~в 17 раз относительно 40HX; от драйвера не зависит: 550.78 и 595.91.07 одинаково, риг 3× CMP 50HX) |
+| CMP 50HX (TU102) | — | лок `5001` | +220 и выше; предел auto-uv +330 по умолчанию (`--uv-max 330`) | риги пользователей. **Для Pearl не рекомендуется: ~2.6 TH/s на карту** (int8 тензорные ядра урезаны ~в 17 раз относительно 40HX; от драйвера не зависит: 550.78 и 595.91.07 одинаково, риг 3× CMP 50HX) |
 
 RTX 40 и 50 работают на гораздо более высоком локе ядра (**1900–2500 МГц**) и держат больший offset, чем RTX 30; поэтому
 auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300 (RTX 30 — с +120).
 
 **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте автоматически (с 1.6.2): RTX 20xx / GTX 16xx
-до +225, CMP 30HX/40HX до +150 (CMP 50HX: +225), остальные до +495; при старте в логе виден диапазон каждой карты
+до +225, CMP 30HX/40HX до +150 (CMP 50HX: +330), остальные до +495; при старте в логе виден диапазон каждой карты
 (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). Для ручного управления — по значению
 на карту в порядке `--devices`: `--uv-max 225,495,150` (`-` = значение по умолчанию для этой карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
@@ -1282,9 +1307,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1333,7 +1358,7 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 3. Первое расхождение, ошибка CUDA, Xid или зависание останавливают подъём. Итог — **последний успешный шаг минус один шаг
    (запас 15 МГц)**, подтверждённый более длинной проверкой (около 2 минут); если подтверждение не прошло, берётся шагом ниже.
    Выше +495 не поднимается (`--uv-max`, максимум +600; до 1.5.1 было +300 с жёстким потолком +400); с 1.6.2 на Turing
-   (RTX 20xx / GTX 16xx) — выше +225, на CMP 30HX/40HX — выше +150 (CMP 50HX — выше +225), если `--uv-max` не задан. Карты RTX 40/50 часто держат +450..480.
+   (RTX 20xx / GTX 16xx) — выше +225, на CMP 30HX/40HX — выше +150 (CMP 50HX — выше +330), если `--uv-max` не задан. Карты RTX 40/50 часто держат +450..480.
    Сохранённый результат выше уменьшенного предела не применяется как есть: карта работает на пределе (после быстрой проверки),
    а сохранённый результат остаётся на случай, когда предел снова поднимут; если результат *равен* старому пределу, при
    повышении предела карта подбирается заново.
@@ -1380,7 +1405,7 @@ offset (в логе `allowed -1000..1000`), подбор нашёл +240 вме�
    на той же частоте; без фиксации карта может вместо этого буститься выше, и экономия меньше.
 3. **Включите**, любой из вариантов:
    * `start.bat` (или любой `start-luckypool-*` / `start-kryptex-*`): уберите `rem` перед `set "AUTO_UV=1"`. Верхний предел —
-     `set "UV_MAX="` (пусто = по карте: +495, RTX 20xx/GTX 16xx/CMP 50HX +225, CMP 30HX/40HX +150; RTX 40/50 часто держат +450..480, RTX 30
+     `set "UV_MAX="` (пусто = по карте: +495, RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150; RTX 40/50 часто держат +450..480, RTX 30
      обычно +200..360). Список через запятую задаёт значение для каждой карты в порядке `DEVICES`, например `set "UV_MAX=225,495,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, диапазон в `UV_MIN` / `UV_MAX`, плюс лимит мощности и фиксация частот через `nvidia-smi`.
    * своя командная строка: `freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
@@ -1468,7 +1493,7 @@ set "UV_MAX=495"
 | `--uv-reset` | забыть сохранённый профиль текущего лока (и монеты / режима); с `--auto-uv` этот лок подбирается заново; без кошелька майнер просто завершается |
 | `--uv-reset-all` | забыть все сохранённые результаты (все локи, монеты, режимы) |
 | `--no-color` | лог без цвета (также `NO_COLOR=1` или `FFG_COLOR=0`; `FFG_COLOR=1` включает его принудительно) |
-| `--uv-max N` | наибольший offset, который пробует подбор (максимум 600; по умолчанию по карте: RTX 20xx / GTX 16xx / CMP 50HX 225, CMP 30HX/40HX 150, остальные 495; в Windows: `set "UV_MAX=480"` в `start.bat`) |
+| `--uv-max N` | наибольший offset, который пробует подбор (максимум 600; по умолчанию по карте: RTX 20xx / GTX 16xx 225, CMP 50HX 330, CMP 30HX/40HX 150, остальные 495; в Windows: `set "UV_MAX=480"` в `start.bat`) |
 | `--uv-min N` | offset, с которого начинается подбор; старт, не прошедший проверку, понижается (по умолчанию: RTX 3070 / 3060 Ti — по локу ядра, RTX 3080/3090 — +180 (раздел 17); иначе offset из HiveOS/драйвера или 120; RTX 40 — не ниже 200, RTX 50 — не ниже 300; Windows: `UV_MIN`) |
 | `--uv-step N` | мелкий шаг подбора в МГц (по умолчанию 15; результат, запас и откаты; старт, не прошедший проверку, / падение — шаг вниз на 30 МГц; Windows: `UV_STEP`) |
 | `--uv-coarse N` | шаг подъёма в МГц (по умолчанию 2 x `--uv-step` = 30; с 1.7.6 для Pearl, NOID и CMFD): первый неудачный шаг перепроверяется шагами `--uv-step` только внутри своего интервала. `0` (или <= `--uv-step`) — один размер шага, как до 1.7.6. Сбой драйвера (Xid, зависание) на крупном шаге не уточняется: результат — на шаг ниже последнего удачного |
@@ -1485,7 +1510,7 @@ set "UV_MAX=495"
 предупреждение (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Пример для 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop и CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (то же, что по умолчанию).
 
-**Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). **С 1.7.1 прежний лок возвращается, а не снимается:** в HiveOS — лок из профиля разгона (*Lock Core Clock* / *Lock Memory Clock*, читается из `/hive-config/nvidia-oc.conf`; до 1.7.1 тестовый запуск с `--lock-cclock` оставлял риг без лока HiveOS); вне HiveOS NVML не умеет читать лок, поэтому укажите его в `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (имена FreeForGemPear `FFGP_RESTORE_*` тоже работают; одно значение или список по картам, 0 = лока не было), иначе частота, как и раньше, сбрасывается по умолчанию. В логе видно, что происходит: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, при выходе `core clock lock 1470 MHz put back`. После сбоя или `kill -9` то же делает следующий запуск. В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`.
+**Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). **С 1.7.1 прежний лок возвращается, а не снимается:** в HiveOS — лок из профиля разгона (*Lock Core Clock* / *Lock Memory Clock*, читается из `/hive-config/nvidia-oc.conf`; до 1.7.1 тестовый запуск с `--lock-cclock` оставлял риг без лока HiveOS); вне HiveOS NVML не умеет читать лок, поэтому укажите его в `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (имена FreeForGemPear `FFGP_RESTORE_*` тоже работают; одно значение или список по картам, 0 = лока не было), иначе частота, как и раньше, сбрасывается по умолчанию. В логе видно, что происходит: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, при выходе `core clock lock 1470 MHz put back`. После сбоя или `kill -9` то же делает следующий запуск. В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`. **Подсказка для RTX 30 (1.7.7):** для Pearl на RTX 30 (Ampere) лучший TMAC/Дж на локе ядра около 1530 МГц (+3,6 % TMAC/Дж за -1,9 % скорости против 1560, замер на RTX 3070; 1515 и ниже — плато). Майнер только подсказывает: если RTX 30 работает без лока ядра или выше 1530, в логе при старте одна строка `clocks: hint: ... try --lock-cclock 1530`; сам ничего не ставит. С `--auto-uv` новый лок означает отдельный подбор (профили хранятся по локу ядра; поиск стартует от профиля ближайшего более высокого лока). После первой минуты майнинга майнер несколько раз читает фактическую частоту памяти каждой карты с локом под нагрузкой и пишет одно жёлтое предупреждение, если она не равна локу (например `--lock-mclock 405` на RTX 3070: карта считает на 810 МГц, ниже под нагрузкой она не опускается); сам лок майнер не меняет.
 
 Файлы по умолчанию лежат рядом с программой (Windows — в папке майнера), в HiveOS — `/hive-config/freeforgem`
 (переживает обновления майнера и перезагрузки). **Сброс:** `freeforgem --uv-reset` (или удалить `uv.json`).
@@ -1593,8 +1618,8 @@ HiveOS показывает FW/s по каждой карте; первый за
 После подготовки модели и до старта движка, на каждой карте: родной GPU-воркер движка (`cmfd-v4-replay`, без изменений)
 один раз грузит модель и гоняет две фиксированные пачки; на базовом смещении (0, сток) их финальные дайджесты берутся
 эталоном и прогоняется официальный тест-вектор Common Foundry 1.0.16; затем смещение ядра растёт шагами `--uv-coarse` (30 МГц), внутри первого неудачного — `--uv-step` (15 МГц)
-от `--uv-min` (по умолчанию — шаг над 0) до `--uv-max` (по умолчанию — лимит карты из раздела 12: 495, RTX 20xx / CMP 50HX
-225, CMP 30HX/40HX 150); каждый шаг — 30 с + 10 с замера, и **каждый дайджест должен совпасть побитно** с эталоном (один
+от `--uv-min` (по умолчанию — шаг над 0) до `--uv-max` (по умолчанию — лимит карты из раздела 12: 495, RTX 20xx 225, CMP 50HX
+330, CMP 30HX/40HX 150); каждый шаг — 30 с + 10 с замера, и **каждый дайджест должен совпасть побитно** с эталоном (один
 неверный бит где угодно в 384 слоях его меняет). Первый упавший шаг — край; результат — на шаг ниже (`--uv-keep-last`
 оставляет последний удачный), подтверждение 2 минуты + тест-вектор (при ошибке ещё шаг вниз). Результат сохраняется в
 `uv.json` (раздел `cmfd`, по UUID карты, с драйвером и идентичностью движка/воркера), следующие запуски применяют его сразу
@@ -1992,6 +2017,31 @@ GPU на буст-частоте во время запусков, поэтом�
   затем каждые 15 мин; остальные карты майнят.
 - Файлы `uv.json`, `gpu-faults.json` и маркеры восстановления сохраняют формат 1.7.5: файл 1.7.6 читает 1.7.5 и наоборот.
 
+### 20. Карты NVIDIA CMP: разблокированный драйвер, `--cmp-driver` (по желанию, новое в 1.7.7)
+
+Майнинговые карты NVIDIA CMP (CMP 50HX и семейство) под штатным драйвером NVIDIA работают на малой части своей скорости: одна и та же карта,
+тот же движок и та же частота давали около 2,4 inf/s на штатном драйвере и около 27 inf/s на разблокированном (штатный драйвер режет
+арифметику чипа CMP, майнер не меняется). Разблокировка сделана в драйвере, поэтому она помогает всем алгоритмам майнера на этих
+картах. Майнер умеет поставить такой драйвер в HiveOS, **только по вашей просьбе**. **По умолчанию функция выключена.**
+
+- один раз вручную: `sudo ./freeforgem --cmp-driver` в папке майнера; или
+- при каждом старте из полётного листа: добавьте слово `cmp-unlock-driver` в *Extra config arguments* (сам майнер его не получает).
+
+Что делает: проверяет, что это HiveOS (`/hive/sbin/nvidia-driver-update`), что запуск от root и что на шине PCI есть карта CMP; если
+разблокированная сборка ещё не стоит, скачивает закреплённый файл драйвера (около 540 МБ) на диск, сверяет его SHA-256 с зашитым в майнер (другой файл
+удаляется, ничего не ставится), ставит штатным `nvidia-driver-update --force` из HiveOS и **перезагружает риг**; после загрузки HiveOS снова
+запускает майнер. Риг, у которого уже стоит разблокированный драйвер, или без карты CMP, или без root, не трогается, майнинг идёт дальше.
+Стоит ли разблокированная сборка, определяется по тегу сборки модуля ядра в `/proc/driver/nvidia/version` (у штатного драйвера той же версии
+другой тег). Строки лога начинаются с `--cmp-driver:`.
+
+Переменные окружения: `FFG_CMP_DRIVER_DRY_RUN=1` выполняет все проверки и пишет, что сделал бы, ничего не меняя (сначала запустите так);
+`FFG_CMP_DRIVER_NO_REBOOT=1` ставит без перезагрузки; `FFG_CMP_DRIVER_FORCE=1` ставит заново, даже если драйвер уже стоит или карты CMP не найдено.
+
+Прежде чем использовать: **это заменяет драйвер ядра NVIDIA на всём риге** (им потом пользуются все GPU-программы) и требует **перезагрузки**;
+Secure Boot должен быть выключен; сборка — сторонняя модификация драйвера, не NVIDIA, вы используете её на свой риск; если во время установки пропадёт
+питание, риг может загрузиться без рабочего драйвера, поэтому ставьте, когда можете добраться до рига. Чтобы вернуться, поставьте другую версию
+драйвера через `nvidia-driver-update` и перезагрузитесь.
+
 ---
 
 ## 中文
@@ -2031,10 +2081,10 @@ FreeForGem 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用工作
 
 FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.7.2)：**
+**安装链接 (1.7.7)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -2058,15 +2108,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7
 4. **应用。** *Apply changes*，*Create flight sheet*，然后应用到矿机。
 
 矿工日志位于 `/var/log/miner/freeforgem/freeforgem.log`，也可在 HiveOS 矿工控制台查看。
-仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）；自 1.7.5 起还显示已发布的新版本（`1.7.5 0.652 TH/W, new 1.7.6`：矿工在启动约 1 分钟后及每约 12 小时检查 GitHub，不会自动安装；`--no-update-check` 关闭）。更新时把 Installation URL 改成新版本即可。
+仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）；自 1.7.5 起还显示已发布的新版本（`1.7.7 0.652 TH/W, need update!!`：矿工在启动约 1 分钟后及每约 12 小时检查 GitHub，不会自动安装；`--no-update-check` 关闭）。更新时把 Installation URL 改成新版本即可。
 更详细的同一指南：[HIVEOS.md](HIVEOS.md)。
 HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同，因此请始终粘贴新版本的链接。
 
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.5-linux-x86_64.tar.gz
-cd freeforgem-1.7.5
+tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
+cd freeforgem-1.7.7
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -2087,8 +2137,8 @@ cd freeforgem-1.7.5
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.5-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.7-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -2130,7 +2180,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.5-windows-x64
+cd /d C:\Mining\freeforgem-1.7.7-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2204,12 +2254,12 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | RTX 5060、5060 Ti、5080、5090 | 1900–2500 | 锁定 `810` | +390..480 | 估计 |
 | RTX 2060 SUPER、RTX 2070/2080（含 SUPER）、GTX 1660/1650 | 1500–1650 | 锁定 `5001`（**不是 810**：Turing 在 810 下损失约 25%） | +200..260；自 1.6.2 起 auto-uv 默认上限 +225 | 参考（2060 SUPER：实测） |
 | CMP 40HX | 1400 | 锁定 `5001` | +150；自 1.6.2 起 auto-uv 默认上限 +150 | 用户矿机；CMP 40HX 在 +255 出现 Xid |
-| CMP 50HX（TU102） | — | 锁定 `5001` | +220 及以上；auto-uv 默认上限 +225（`--uv-max 225`） | 用户矿机。**不建议用于 Pearl：每卡约 2.6 TH/s**（int8 张量核心相比 40HX 被削减约 17 倍；与驱动无关：550.78 与 595.91.07 相同，3× CMP 50HX 矿机实测） |
+| CMP 50HX（TU102） | — | 锁定 `5001` | +220 及以上；auto-uv 默认上限 +330（`--uv-max 330`） | 用户矿机。**不建议用于 Pearl：每卡约 2.6 TH/s**（int8 张量核心相比 40HX 被削减约 17 倍；与驱动无关：550.78 与 595.91.07 相同，3× CMP 50HX 矿机实测） |
 
 RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高；因此 auto-uv 在 RTX 40 上从 +200、在 RTX 50 上从 +300 开始搜索（RTX 30 从 +120）。
 
 **混合矿机：**只需 `--auto-uv`——上限按每块显卡自动选择（自 1.6.2 起）：RTX 20xx / GTX 16xx 最高 +225，CMP 30HX/40HX
-最高 +150（CMP 50HX：+225），其他最高 +495；启动时日志会显示每块显卡的范围（`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`）。
+最高 +150（CMP 50HX：+330），其他最高 +495；启动时日志会显示每块显卡的范围（`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`）。
 如需手动控制，按 `--devices` 顺序每卡一个值：`--uv-max 225,495,150`（`-` = 该卡的默认值）。
 Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
@@ -2244,9 +2294,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.5-linux-x86_64.tar.gz freeforgem-1.7.5.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.5-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.5-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -2290,7 +2340,7 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
    驱动不报任何错误的错误结果，因此检查同时在 GPU 和 CPU 上进行。
 3. 第一次不一致、CUDA 错误、Xid 错误或卡死就结束爬升。结果为**最后一个正常步长再减一步（15 MHz 余量）**，并用更长的
    检查（约 2 分钟）确认；确认失败则再降一步。最高尝试到 +495（`--uv-max`，最多 +600；1.5.1 之前为 +300，硬上限 +400）；自 1.6.2 起，未指定 `--uv-max` 时 Turing（RTX 20xx / GTX 16xx）
-   为 +225，CMP 30HX/40HX 为 +150（CMP 50HX 为 +225）。RTX 40/50 显卡常能稳定在 +450..480。已保存的结果若高于降低后的上限，不会原样使用：显卡在上限处运行
+   为 +225，CMP 30HX/40HX 为 +150（CMP 50HX 为 +330）。RTX 40/50 显卡常能稳定在 +450..480。已保存的结果若高于降低后的上限，不会原样使用：显卡在上限处运行
    （先快速检查），已保存的结果保留，待上限再次提高时使用；若已保存的结果*正好*等于旧上限，上限提高后会重新调校。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本、内核版本和核心锁频为键（每个锁频一个配置，第 17 节）。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动或内核版本发生变化，则重新调校；新的锁频调校一次，已知锁频直接复用其配置。
@@ -2326,7 +2376,7 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
    `start-nvidia-smi.bat` 中用 `nvidia-smi -lgc`。锁频后，更高的偏移意味着同频下更低的电压；不锁频时显卡可能改为提升频率，节省更少。
 3. **开启**，任选其一：
    * `start.bat`（或任一 `start-luckypool-*` / `start-kryptex-*`）：删除 `set "AUTO_UV=1"` 前面的 `rem`。上限为
-     `set "UV_MAX="`（留空 = 按显卡：+495，RTX 20xx/GTX 16xx/CMP 50HX +225，CMP 30HX/40HX +150；RTX 40/50 常能稳定在 +450..480，RTX 30 通常
+     `set "UV_MAX="`（留空 = 按显卡：+495，RTX 20xx/GTX 16xx +225，CMP 50HX +330，CMP 30HX/40HX +150；RTX 40/50 常能稳定在 +450..480，RTX 30 通常
      +200..360）。逗号分隔的列表按 `DEVICES` 顺序为每卡设置一个值，例如 `set "UV_MAX=225,495,150"`。
    * `start-nvidia-smi.bat`：`AUTO_UV=1`，范围在 `UV_MIN` / `UV_MAX`，并通过 `nvidia-smi` 设置功耗限制和锁频。
    * 自己的命令行：`freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`。
@@ -2375,7 +2425,7 @@ set "UV_MIN=300"
 set "UV_MAX=495"
 ```
 * **混合矿机：**`LOCK_CCLOCK` / `LOCK_MCLOCK` 按 `DEVICES` 顺序每卡一个值，例如 `set "LOCK_CCLOCK=1560,2445"`。
-  降压只需 `AUTO_UV=1`：上限按每块显卡选择（RTX 20xx/GTX 16xx/CMP 50HX +225，CMP 30HX/40HX +150，其他 +495；RTX 40/50 自动从 +200/+300 开始）。
+  降压只需 `AUTO_UV=1`：上限按每块显卡选择（RTX 20xx/GTX 16xx +225，CMP 50HX +330，CMP 30HX/40HX +150，其他 +495；RTX 40/50 自动从 +200/+300 开始）。
   如需手动控制，`UV_MIN` / `UV_MAX` / `UV_OFFSET` 接受同样顺序的列表，例如 `set "UV_MAX=225,495,150"`（`-` = 该卡默认值）。列表必须每卡恰好一个值。
 * **更快调校：**`set "UV_STEP=30"` 使步数减半（结果更粗）。在 RTX 50 上，较高的起点（约 +300）最省时间：显卡反正能承受，搜索直接从那里开始（自 1.6.2 起这是 RTX 50 的默认值）。不要设得过高：如果显卡在 `UV_MIN` 处就未通过检查，则不会调校，保持你自己的偏移（日志会说明；此时请降低 `UV_MIN`）。
 * **已知道偏移：**`set "UV_OFFSET=480"`（不开启 `AUTO_UV`）——一次快速检查后直接应用，不搜索。
@@ -2397,7 +2447,7 @@ set "UV_MAX=495"
 | `--uv-reset` | 忘记当前锁频（及币种 / 模式）的已保存配置；与 `--auto-uv` 一起使用时重新调校该锁频；没有钱包地址时矿工直接退出 |
 | `--uv-reset-all` | 忘记所有已保存的结果（全部锁频、币种、模式） |
 | `--no-color` | 日志不着色（也可 `NO_COLOR=1` 或 `FFG_COLOR=0`；`FFG_COLOR=1` 强制着色） |
-| `--uv-max N` | 调校尝试的最高偏移（最多 600；默认按显卡：RTX 20xx / GTX 16xx / CMP 50HX 225，CMP 30HX/40HX 150，其他 495；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
+| `--uv-max N` | 调校尝试的最高偏移（最多 600；默认按显卡：RTX 20xx / GTX 16xx 225，CMP 50HX 330，CMP 30HX/40HX 150，其他 495；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
 | `--uv-min N` | 调校的起始偏移；起点检查失败时向下调整（默认：RTX 3070 / 3060 Ti 按核心锁频，RTX 3080/3090 为 +180（第 17 节）；否则为 HiveOS/驱动中的偏移或 120；RTX 40 至少 200，RTX 50 至少 300；Windows：`UV_MIN`） |
 | `--uv-step N` | 精细调校步长（MHz，默认 15；结果、余量和回退；起点失败 / 崩溃时下调 30 MHz；Windows：`UV_STEP`） |
 | `--uv-coarse N` | 爬升步长（MHz，默认 2 x `--uv-step` = 30；1.7.6 起适用于 Pearl、NOID、CMFD）：第一个失败的步仅在其自身区间内以 `--uv-step` 重试。`0`（或 <= `--uv-step`）= 只用一种步长，与 1.7.6 之前相同。粗步上的驱动故障（Xid、卡死）不再细化：结果为最后通过的步再低一步 |
@@ -2413,7 +2463,7 @@ set "UV_MAX=495"
 此时日志会给出警告（`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`）。2× RTX 2060 SUPER、
 3× RTX 3070 Laptop 加一块 CMP 40HX 的示例：`--auto-uv --uv-max 225,225,495,495,495,150`（与默认值相同）。
 
-**GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。**自 1.7.1 起，原有的锁频会被恢复而不是移除：** 在 HiveOS 上恢复超频配置中的锁频（*Lock Core Clock* / *Lock Memory Clock*，从 `/hive-config/nvidia-oc.conf` 读取）；其他系统上 NVML 无法读回锁频，可在 `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` 中指定（FreeForGemPear 的变量名 `FFGP_RESTORE_*` 同样有效；一个值或按显卡的列表，0 = 无锁频），否则与以前一样恢复为默认。日志：`core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`，退出时 `core clock lock 1470 MHz put back`。崩溃或 `kill -9` 后，下次启动会做同样的恢复。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。
+**GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。**自 1.7.1 起，原有的锁频会被恢复而不是移除：** 在 HiveOS 上恢复超频配置中的锁频（*Lock Core Clock* / *Lock Memory Clock*，从 `/hive-config/nvidia-oc.conf` 读取）；其他系统上 NVML 无法读回锁频，可在 `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` 中指定（FreeForGemPear 的变量名 `FFGP_RESTORE_*` 同样有效；一个值或按显卡的列表，0 = 无锁频），否则与以前一样恢复为默认。日志：`core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`，退出时 `core clock lock 1470 MHz put back`。崩溃或 `kill -9` 后，下次启动会做同样的恢复。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。 **RTX 30 提示（1.7.7）：** Pearl 在 RTX 30（Ampere）上，核心锁频约 1530 MHz 时 TMAC/J 最佳（相对 1560：速度 -1.9%，TMAC/J +3.6%，RTX 3070 实测；1515 及以下为平台）。矿工只给出提示：RTX 30 未锁核心或高于 1530 时，启动日志有一行 `clocks: hint: ... try --lock-cclock 1530`，不会自动设置。使用 `--auto-uv` 时，新的锁频意味着单独调校（档案按核心锁频保存；搜索从最近的更高锁频档案开始）。 挖矿一分钟后，矿工会在负载下多次读取每张已锁定显存频率的显卡的实际显存频率；若与锁定值不符，则输出一条黄色警告（例如 RTX 3070 上 `--lock-mclock 405`：显卡实际以 810 MHz 运行，这是负载下的最低值）；锁定本身不会被改动。
 
 文件默认位置：程序旁边（Windows：矿工文件夹）；HiveOS 上为 `/hive-config/freeforgem`（矿工更新和重启后仍保留）。
 **重置：** `freeforgem --uv-reset`（或删除 `uv.json`）。
@@ -2508,7 +2558,7 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 `AUTO_UV=1`，以管理员身份运行）时，矿工会**专门为 CMFD** 寻找降压偏移，与 Pearl 的结果分开保存。模型准备好之后、引擎启动之前，
 对每张卡：引擎自带的 GPU 工作进程（`cmfd-v4-replay`，未修改）只加载一次模型，反复运行两批固定输入；在基准偏移（0，默认）下
 记录其最终摘要作为参考，并运行 Common Foundry 1.0.16 官方测试向量；然后核心偏移以 `--uv-coarse`（30 MHz）为步长（第一个失败的步内用 `--uv-step`，15 MHz），从 `--uv-min`
-（默认：0 之上一步）升到 `--uv-max`（默认：第 12 节的每卡上限：495，RTX 20xx / CMP 50HX 225，CMP 30HX/40HX 150）；每一步
+（默认：0 之上一步）升到 `--uv-max`（默认：第 12 节的每卡上限：495，RTX 20xx 225，CMP 50HX 330，CMP 30HX/40HX 150）；每一步
 运行 30 秒 + 10 秒测量，**每个摘要都必须与参考逐位一致**。第一个失败的步长即为边界；结果取低一步（`--uv-keep-last` 保留最后
 成功的一步），再做 2 分钟确认 + 测试向量（失败则再降一步）。结果保存在 `uv.json`（`cmfd` 部分，按显卡 UUID，含驱动与引擎/工作进程
 标识），之后的启动直接应用（若上次验证早于 `--uv-reval-hours`，先做 30 秒检查）。挖矿期间，已调优显卡上出现引擎
@@ -2829,3 +2879,18 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 - *Xid 属于谁：* 内核日志（Linux 的 `dmesg`）指明属于其他进程（同一矿机上的其他矿工）的 Xid 不计入本矿工；与其他工具改动显卡频率/偏移（HiveOS `nvidia-oc`）同时发生的崩溃，不会算作该偏移的失败。
 - *无法打开的 GPU*（前一个矿工故障后的 `busy or unavailable`）不算偏移失败：检查会等待并在 1、5、15 分钟后重试，之后每 15 分钟一次；其他 GPU 照常挖矿。
 - `uv.json`、`gpu-faults.json` 和恢复标记保持 1.7.5 的格式：1.7.6 的文件可被 1.7.5 读取，反之亦然。
+
+### 20. NVIDIA CMP 显卡：解锁驱动 `--cmp-driver`（可选，1.7.7 新增）
+
+NVIDIA CMP 挖矿卡（CMP 50HX 等）在官方驱动下只能发挥很小一部分速度：同一张卡、同一引擎、同一频率，官方驱动约 2.4 inf/s，解锁驱动约 27 inf/s。
+解锁在驱动层面完成，因此对矿工的所有算法都有效。矿工可在 HiveOS 上安装这种驱动，**仅在您明确要求时**。**该功能默认关闭。**
+
+- 手动一次：在矿工目录运行 `sudo ./freeforgem --cmp-driver`；或
+- 每次启动时由飞行表触发：在 *Extra config arguments* 中加入单词 `cmp-unlock-driver`（矿工本身不会收到它）。
+
+流程：检查是 HiveOS、以 root 运行、PCI 总线上有 CMP 显卡；若尚未安装解锁版本，则下载固定的驱动文件（约 540 MB），核对其 SHA-256（不符则删除，不安装），
+用 HiveOS 自带的 `nvidia-driver-update --force` 安装并**重启矿机**；重启后 HiveOS 自动再次启动矿工。已装解锁驱动、没有 CMP 显卡或非 root 时不做任何改动，继续挖矿。
+环境变量：`FFG_CMP_DRIVER_DRY_RUN=1` 只检查并说明会做什么；`FFG_CMP_DRIVER_NO_REBOOT=1` 安装但不重启；`FFG_CMP_DRIVER_FORCE=1` 强制重装。
+
+使用前请注意：**这会替换整台矿机的 NVIDIA 内核驱动**并需要**重启**；必须关闭 Secure Boot；该版本是第三方修改的驱动，非 NVIDIA 官方，风险自负；安装中断电可能导致无可用驱动，请在能接触到矿机时操作。
+回退：用 `nvidia-driver-update` 安装其他版本并重启。

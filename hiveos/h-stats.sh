@@ -41,9 +41,9 @@ else
   # rig efficiency (Pearl "1157 W, 0.560 TH/W", NOID "0.460 MH/W"): HiveOS shows it next to the miner version
   _eff=$(grep -oP 'total .*?\K[0-9.]+ (TH|MH)/W' <<< "$_line" | head -n 1)
   _ver=$CUSTOM_VERSION; [[ -n $_eff ]] && _ver="$CUSTOM_VERSION $_eff"
-  # a newer release found by the miner (update.rs, 1.7.5): "1.7.5 0.652 TH/W, new 1.7.6"
+  # a newer release found by the miner (update.rs, 1.7.5): "1.7.5 0.652 TH/W, need update!!"
   _new=; [[ -f $_ffgp_dir/update-available ]] && _new=$(tr -cd '0-9A-Za-z.' < "$_ffgp_dir/update-available" | head -c 20)
-  [[ -n $_new ]] && _ver="$_ver, new $_new"
+  [[ -n $_new ]] && _ver="$_ver, need update!!"
   khs=$(awk -v x="${_total:-0}" -v m="$_kmul" -v f="$_fmt" 'BEGIN{printf (m < 1 ? "%.5f" : f), x*m}')
   stats=$(jq -nc \
     --argjson hs "$(printf '%s\n' "${_hs[@]}" | jq -sc .)" \

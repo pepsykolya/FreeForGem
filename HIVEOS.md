@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.5):**
+**Installation URL (1.7.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -45,8 +45,8 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
 The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig
-efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.5 0.652 TH/W,
-new 1.7.6`; `--no-update-check` turns the check off).
+efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.7 0.652 TH/W,
+need update!!`; `--no-update-check` turns the check off).
 
 ### Overclocking (RTX 3070)
 
@@ -91,7 +91,7 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   Other options (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) and a manual-tuning
   procedure are in [MANUAL.md](MANUAL.md#12-undervolt---auto-uv-optional-new-in-140). Undervolting is at your own risk, like any overclocking.
 - **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card (since 1.6.2): RTX 20xx / GTX 16xx up to +225,
-  CMP 30HX/40HX up to +150 (CMP 50HX: +225), all others up to +495; `grep range` in the miner log shows each GPU's range. For manual
+  CMP 30HX/40HX up to +150 (CMP 50HX: +330), all others up to +495; `grep range` in the miner log shows each GPU's range. For manual
   control give one value per GPU in nvidia-smi order (GPU0, GPU1, ... as in the miner log; or in `--devices` order), no spaces:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = that GPU's default).
 
@@ -111,6 +111,14 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   5-min load average reaches the rig's max_la, 28 on a 4C/8T Xeon rig). Weak CPUs (4 cores) with many GPUs are at risk while
   several GPUs tune at once. Since 1.7.2 the miner keeps its runnable threads low (no busy wait for the GPU, one CPU reference
   at a time at nice 10) and the tuning summary shows the load average, with a WARNING above 2 x the CPU threads.
+
+### CMP cards: unlocked driver (optional, off by default, 1.7.7)
+
+Under the stock NVIDIA driver a CMP card (CMP 50HX and the family) makes about a tenth of its speed. To let the miner install an
+unlocked driver, add the word `cmp-unlock-driver` to *Extra config arguments* (the miner does not get it). Before mining it checks, installs the driver
+only if the unlocked build is not in place yet, and **reboots the rig**; a rig that already has it, has no CMP card or runs without root is left
+alone. **This replaces the NVIDIA kernel driver of the whole rig:** read MANUAL.md section 20 first. By hand: `sudo ./freeforgem --cmp-driver`
+(`FFG_CMP_DRIVER_DRY_RUN=1` only reports what it would do).
 
 ### Developer fee
 
@@ -154,10 +162,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.5):**
+**Ссылка для установки (1.7.7):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.5/freeforgem-1.7.5.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
@@ -233,7 +241,7 @@ HiveOS кэширует скачанный архив по имени файла
   Остальные параметры (`--uv-offset N`, `--uv-max N`, `--uv-reval-hours H`, `--auto-uv-dry-run`) и порядок ручной настройки —
   в [MANUAL.md](MANUAL.md#12-андервольт---auto-uv-необязательно-новое-в-140). Андервольт — на ваш риск, как и любой разгон.
 - **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте (с 1.6.2): RTX 20xx / GTX 16xx до +225,
-  CMP 30HX/40HX до +150 (CMP 50HX: +225), остальные до +495; `grep range` в логе майнера показывает диапазон каждой карты. Для ручного
+  CMP 30HX/40HX до +150 (CMP 50HX: +330), остальные до +495; `grep range` в логе майнера показывает диапазон каждой карты. Для ручного
   управления — по значению на карту в порядке nvidia-smi (GPU0, GPU1, ... как в логе майнера; или в порядке `--devices`), без пробелов:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = значение по умолчанию для карты).
 
@@ -285,6 +293,14 @@ CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04
 проверяется побитно на реальной модели; первый запуск ~15–20 мин, дальше применяется сразу; ваше смещение возвращается при
 `miner stop`). Подбирайте с тем профилем разгона, с которым майните: смена лимита мощности — подбор заново, смена лока частоты
 ядра — свой профиль CMFD для этого лока (подбирается один раз, с 1.7.2). MANUAL.md, раздел 13.
+
+### Карты CMP: разблокированный драйвер (по желанию, по умолчанию выключено, 1.7.7)
+
+Под штатным драйвером NVIDIA карта CMP (CMP 50HX и семейство) выдаёт около десятой части скорости. Чтобы майнер поставил разблокированный драйвер,
+добавьте слово `cmp-unlock-driver` в *Extra config arguments* (майнер его не получает). Перед майнингом он проверяет, ставит драйвер, только если
+разблокированной сборки ещё нет, и **перезагружает риг**; риг, у которого она уже стоит, без карты CMP или без root, не трогается.
+**Это заменяет драйвер ядра NVIDIA на всём риге:** сначала прочитайте MANUAL.md, раздел 20. Вручную: `sudo ./freeforgem --cmp-driver`
+(`FFG_CMP_DRIVER_DRY_RUN=1` только сообщает, что было бы сделано).
 
 ### Комиссия разработчика
 

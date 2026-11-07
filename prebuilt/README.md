@@ -17,7 +17,10 @@ sm_86+ GPU (tuned for Ampere). RTX 50xx (Blackwell, sm_120) runs a compiled kern
 Turing (sm_75: RTX 20xx, GTX 16xx, CMP 30HX–50HX) runs its own SASS kernel since 1.5.3 (1.5.3-rc3; compiled fallback in rc1/rc2).
 Ada (sm_89: RTX 40xx) runs a dedicated SASS kernel since 1.5.4 (256-row tiles: same hashrate, about 6% fewer watts per TH on an RTX 4070 Ti);
 RTX 30xx (Ampere, sm_86) runs a revised SASS kernel since 1.5.4-rc2 (A′ built with ldmatrix.trans: about 2% fewer watts per TH on an RTX 3070,
-−0.4% hashrate). Turing and RTX 50xx keep their kernels. `PEARL_KERNEL=gen13|t256|auto` forces the choice for A/B tests.
+−0.4% hashrate). Since 1.7.7 the RTX 30xx kernel (A9h256) hashes a 256-element jackpot tile (16 rows x 16 cols instead of 8 x 16; +0.27% hashrate
+at the same power on an RTX 3070); the library reports the tile with `pg_tile_rows_for(device)` and the host builds the mining configuration (job key,
+proof, target) from it. The previous 8 x 16 kernel (A9) stays in the library next to A9h256: `--target-mode jackpot` (the pool sends a threshold made for the
+128-element tile) runs on A9, chosen with `pg_set_tile_rows(8)`, also when the mode changes while mining. Ada (t256), Turing and RTX 50xx keep their kernels and the 8 x 16 tile; `windows-x64/pearlgpu.dll` is rebuilt from the same source (same cubins). `PEARL_KERNEL=gen13|t256|auto` forces the choice for A/B tests.
 
 The AMD library (`pearlgpu_amd.dll`, closed source like the CUDA one) exports the same `pg_*` API plus `pg_amd_power_w`; it
 uses discrete AMD GPUs only (integrated Radeon graphics are skipped) and needs the AMD Adrenalin driver (OpenCL). No Linux AMD

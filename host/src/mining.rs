@@ -106,9 +106,10 @@ pub fn k() -> usize {
     })
 }
 pub const RANK: usize = 128;
-/// rows*cols*(k/rank)*128 = 8*16*(k/RANK)*128 (524288 at k = 4096, 1048576 at 8192); scales a "base" share target to the jackpot target.
-pub fn adjustment_factor() -> u64 {
-    (8 * 16 * (k() / RANK) * 128) as u64
+/// rows*cols*(k/rank)*128 = tile_rows*16*(k/RANK)*128 (8 rows: 524288 at k = 4096, 1048576 at 8192; 16 rows: twice that); scales a "base"
+/// share target to the jackpot target.  `tile_rows` is the row count of the rows_pattern of the kernel that found the hit.
+pub fn adjustment_factor(tile_rows: usize) -> u64 {
+    (tile_rows * 16 * (k() / RANK) * 128) as u64
 }
 const CHUNK: usize = 1024;
 
@@ -124,23 +125,42 @@ const fn label(l: [u8; 8]) -> [u8; 32] {
     r
 }
 
-pub fn mining_config() -> MiningConfiguration {
+/// Jackpot tile rows of the default kernels (8 rows x 16 cols = 128 elements).  The sm_86 kernel A9h256 hashes a 16 x 16 = 256-element tile
+/// (`TILE_ROWS_H256`); the library says which one mines on a device (`gpu::tile_rows_for`).
+/// Key of a prepared Job: the rows of A (`device_m`) and the tile rows of the kernel that mines on the device.  Two devices of one
+/// SM count can run different kernels (an sm_86 card on A9h256, a Turing card on m4a), so the Job must be per (m, tile).
+pub type JobKey = (usize, usize);
+pub const TILE_ROWS_DEFAULT: usize = 8;
+pub const TILE_ROWS_H256: usize = 16;
+
+/// Tile rows of the kernel that mines in a target mode.  In jackpot mode the pool sends a threshold made for the 128-element tile, so the
+/// 8x16 kernel runs (also on sm_86, where base mode uses the 16x16 A9h256); in base mode the library's default kernel (`native`).
+pub fn tile_for_mode(native: usize, jackpot: bool) -> usize {
+    if jackpot { TILE_ROWS_DEFAULT } else { native }
+}
+
+/// The mining configuration (it enters the job key, the proof and the target scaling) for a kernel whose jackpot tile has `tile_rows` rows
+/// (rows 0, 8, .., 8 * (tile_rows - 1); the 16 cols are the same for every kernel).  Everything per Job must use the configuration of
+/// the kernel that actually mines for that Job: `Job::cfg`.
+pub fn mining_config(tile_rows: usize) -> MiningConfiguration {
+    assert!(tile_rows == TILE_ROWS_DEFAULT || tile_rows == TILE_ROWS_H256, "unsupported tile rows {tile_rows}");
+    let rows: Vec<u32> = (0..tile_rows as u32).map(|i| 8 * i).collect();
     MiningConfiguration {
         common_dim: k() as u32,
         rank: RANK as u16,
         mma_type: MMAType::Int7xInt7ToInt32,
-        rows_pattern: PeriodicPattern::from_list(&[0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
+        rows_pattern: PeriodicPattern::from_list(&rows).unwrap(),
         cols_pattern: PeriodicPattern::from_list(&[0, 1, 8, 9, 16, 17, 24, 25, 32, 33, 40, 41, 48, 49, 56, 57]).unwrap(),
         moe: None,
     }
 }
 
 /// Official sanity check of the (config, m, n) combination.
-pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation, m: usize) -> Result<()> {
+pub fn config_sanity(header: IncompleteBlockHeader, deriv: SeedDerivation, m: usize, cfg: &MiningConfiguration) -> Result<()> {
     let p = PublicProofParams {
         block_header: header,
         seed_derivation: deriv,
-        mining_config: mining_config(),
+        mining_config: *cfg,
         hash_a: [0; 32],
         hash_b: [0; 32],
         hash_jackpot: [0; 32],
@@ -260,6 +280,8 @@ pub struct Job {
     #[allow(dead_code)]
     pub cert_version: u32,
     pub m: usize, // rows of A this job was built for (per device / SM group)
+    pub tile_rows: usize, // rows of the jackpot tile of the kernel this job is for (8, or 16 for A9h256): part of `cfg`
+    pub cfg: MiningConfiguration,
     pub deriv: SeedDerivation,
     pub job_key: [u8; 32],
     pub b_noise_seed: [u8; 32],
@@ -274,12 +296,13 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn new(header_bytes: &[u8], cert_version: u32, m: usize) -> Result<Job> {
+    pub fn new(header_bytes: &[u8], cert_version: u32, m: usize, tile_rows: usize) -> Result<Job> {
         let header = IncompleteBlockHeader::from_bytes(header_bytes)?;
         let deriv = CertificateVersion::try_from(cert_version)?.seed_derivation();
-        config_sanity(header, deriv, m).context("public_params_sanity_check")?;
+        let cfg = mining_config(tile_rows);
+        config_sanity(header, deriv, m, &cfg).context("public_params_sanity_check")?;
         let mut data = header.to_bytes().to_vec();
-        data.extend_from_slice(&mining_config().to_bytes());
+        data.extend_from_slice(&cfg.to_bytes());
         let job_key = blake3_digest(&data, None);
 
         let kk = k();
@@ -309,7 +332,7 @@ impl Job {
         let br_t: Vec<i8> = generate_uniform_random_matrix(&LABEL_B, &b_noise_seed, &all_cols, RANK).concat();
         let (q1, q2) = split_pairs(&generate_permutation_matrix(&LABEL_B, &b_noise_seed, kk, RANK));
 
-        Ok(Job { header, cert_version, m, deriv, job_key, b_noise_seed, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
+        Ok(Job { header, cert_version, m, tile_rows, cfg, deriv, job_key, b_noise_seed, b_col, sibs, nonce_base: rand::random(), br_t, q1, q2 })
     }
 
     /// Nonce row (A row 0): K int8 values in [-64, 63] derived from (job_key, counter).
@@ -354,7 +377,7 @@ impl Job {
 
     /// Builds the plain proof for the jackpot tile at (t_rows, t_cols) of the attempt with `row0`.
     pub fn build_proof(&self, row0: &[u8], t_rows: usize, t_cols: usize) -> PlainProof {
-        let cfg = mining_config();
+        let cfg = &self.cfg;
         let a_rows: Vec<usize> = cfg.rows_pattern.to_list().iter().map(|&d| t_rows + d as usize).collect();
         let b_cols: Vec<usize> = cfg.cols_pattern.to_list().iter().map(|&d| t_cols + d as usize).collect();
         let a = a_matrix(self.m, row0);

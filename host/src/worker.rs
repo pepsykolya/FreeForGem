@@ -19,13 +19,16 @@ const MAX_HITS: usize = 64;
 /// Max queued attempts with hits per GPU; each one pins its Job (~100 MB for an old job), so keep it small.
 const WORK_QUEUE: usize = 8;
 
-/// What the GPUs mine right now.  `jobs` holds one prepared Job per distinct device `m` (SM group): a
-/// homogeneous rig has one entry, a mixed-SM rig one per SM count.  Each worker picks the Job for its own m.
+/// What the GPUs mine right now.  `jobs` holds one prepared Job per distinct device (`m`, tile rows): a
+/// homogeneous rig has one entry, a mixed rig one per SM count / kernel tile.  Each worker picks the Job for its own key, and the
+/// target for its tile (`targets` by tile rows: the target is scaled by the tile size of the kernel).
 pub struct Assignment {
     pub src: Src,
     pub pj: PoolJob,
-    pub jobs: Arc<BTreeMap<usize, Arc<Job>>>,
-    pub target: U256,
+    pub jobs: Arc<BTreeMap<JobKey, Arc<Job>>>,
+    pub targets: BTreeMap<usize, U256>,
+    /// target mode jackpot: the pool's threshold is made for the 8x16 tile, so every device mines on the 8x16 kernel (`mining::tile_for_mode`)
+    pub jackpot: bool,
 }
 
 /// State shared by the coordinator and all workers.
@@ -112,7 +115,7 @@ pub fn src_name(s: Src) -> &'static str {
 /// Starts the worker thread of GPU `dev`. `ready` receives the device name once the GPU is initialised.
 pub fn spawn(
     dev: i32,
-    m_dev: usize,
+    key: JobKey,
     sh: Arc<Shared>,
     gs: Arc<GpuStat>,
     sinks: [Sender<Submit>; 2],
@@ -123,6 +126,12 @@ pub fn spawn(
             let _ = ready.send(Err(e));
             return;
         }
+        // the library's answer for this thread must be the one the Job was built for (job key, proofs and target depend on it)
+        if gpu::tile_rows() != key.1 {
+            let _ = ready.send(Err(anyhow::anyhow!("GPU {dev}: the kernel mines a {}x16 jackpot tile, but the job configuration was built for {}x16", gpu::tile_rows(), key.1)));
+            return;
+        }
+        let m_dev = key.0;
         crate::mining::warn_m_align(dev, m_dev, gpu::row_align());
         crate::wintune::feed_thread();
         let _ = ready.send(Ok(()));
@@ -132,7 +141,7 @@ pub fn spawn(
             let gs = gs.clone();
             std::thread::Builder::new().name(format!("prover{dev}")).spawn(move || prover_loop(work_rx, sh, sinks, gs)).expect("spawn prover")
         };
-        if let Err(e) = run(dev, m_dev, &sh, &gs, &work_tx) {
+        if let Err(e) = run(dev, key, &sh, &gs, &work_tx) {
             eprintln!("!! GPU {dev} worker stopped: {e:#}");
             *gs.err.lock().unwrap() = Some(format!("{e:#}"));
         }
@@ -163,7 +172,10 @@ pub fn stagger_start(dev: i32, stop: &std::sync::atomic::AtomicBool) {
     }
 }
 
-fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Result<()> {
+fn run(dev: i32, native: JobKey, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<Work>) -> Result<()> {
+    // `native` = (m, tile of the library's default kernel: base mode); `key` = (m, tile of the kernel that mines now), follows the target mode
+    let m_dev = native.0;
+    let mut key = native;
     let mut staggered = false;
     let mut my_gen = 0u64;
     let mut cur: Option<Arc<Assignment>> = None;
@@ -197,8 +209,24 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
         if g != my_gen {
             my_gen = g;
             let a = sh.assign.lock().unwrap().clone();
+            // the kernel follows the target mode (jackpot: 8x16, the pool's threshold is for that tile; base: the library's default,
+            // 16x16 on sm_86).  The Job (job key, proofs) and the target are those of the kernel that mines: key.1.  A change is
+            // only made with nothing in flight, and the Job of the new tile is a different object, so the B side is loaded again.
+            if let Some(n) = &a {
+                let want = crate::mining::tile_for_mode(native.1, n.jackpot);
+                if want != key.1 {
+                    if let Some(p) = pending.take() {
+                        finish(p, &mut hit_buf, sh, gs, work_tx)?;
+                    }
+                    gpu::set_tile_rows(want)?;
+                    anyhow::ensure!(gpu::tile_rows() == want, "GPU {dev}: kernel tile {}x16 after switching to {want}x16", gpu::tile_rows());
+                    println!("GPU {dev}: target mode {} -> kernel {} (jackpot tile {want}x16)", if n.jackpot { "jackpot" } else { "base" }, gpu::kernel_label());
+                    key.1 = want;
+                    loaded = None;
+                }
+            }
             // the Job this device mines = the one built for its own m (SM group)
-            let newjob = a.as_ref().map(|n| n.jobs.get(&m_dev).expect("no prepared Job for this device's m").clone());
+            let newjob = a.as_ref().map(|n| n.jobs.get(&key).expect("no prepared Job for this device's (m, tile)").clone());
             let job_changed = match (&newjob, &loaded) {
                 (Some(n), Some(l)) => !Arc::ptr_eq(n, l),
                 (Some(_), None) => true,
@@ -215,7 +243,7 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
                 let t = Instant::now();
                 gpu::set_job(&nj.br_t, &nj.q1, &nj.q2, N, k())?;
                 loaded = Some(nj.clone());
-                println!("GPU {dev}: [{}] job {} (cert {}) m={m_dev} loaded in {:?}", src_name(n.src), n.pj.job_id, n.pj.cert_version, t.elapsed());
+                println!("GPU {dev}: [{}] job {} (cert {}) m={m_dev} tile {}x16 loaded in {:?}", src_name(n.src), n.pj.job_id, n.pj.cert_version, key.1, t.elapsed());
             }
             cur = a;
         }
@@ -235,9 +263,10 @@ fn run(dev: i32, m_dev: usize, sh: &Shared, gs: &GpuStat, work_tx: &SyncSender<W
         let a_seed = job.a_noise_seed(&row0);
         // the kernel derives P_A and A_L from a_seed itself: no host-side permutation (a_perm = 512 hashes per attempt)
         let t_launch = Instant::now();
-        gpu::launch(slot, &a_seed, &[], &[], m_dev, &target_words(c.target))?;
+        let target = c.targets[&key.1];
+        gpu::launch(slot, &a_seed, &[], &[], m_dev, &target_words(target))?;
         fd.launched(t_prep, t_launch);
-        let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: job.clone(), row0, a_seed, target: c.target, counter };
+        let next = Pending { slot, src: c.src, pj: c.pj.clone(), job: job.clone(), row0, a_seed, target, counter };
         counter += 1;
         slot ^= 1;
         if let Some(p) = pending.replace(next) {
@@ -398,7 +427,7 @@ fn submit_hit(p: &Work, h: &gpu::Hit, id: u64) -> Result<String> {
         "job_id": p.pj.job_id,
         "plain_proof": base64::engine::general_purpose::STANDARD.encode(&payload),
         "jackpot": jackpot,
-        "adjustment_factor": adjustment_factor(),
+        "adjustment_factor": adjustment_factor(p.job.tile_rows),
     });
     if enc {
         params["proof_encoding"] = "gzip".into();
