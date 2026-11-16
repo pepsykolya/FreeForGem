@@ -47,8 +47,24 @@ const OC_RESETS_MAX: usize = 4; // OC applies per hour that get the verified off
 /// and by one proof (2.1 x A) while it proves a hit.
 const CHECK_BASE_MB: u64 = 250;
 const MAIN_PER_GPU_MB: u64 = 100; // Rig01 1.7.2: anon 1.39 GB = A 0.74 GB + ~0.08 GB per GPU (8)
-/// share of MemAvailable the miner's checks may plan with (the rest: the OS, HiveOS, page cache, the measurement error)
+/// MB of MemAvailable the miner's checks leave free (the OS, HiveOS, the error of MemAvailable).  1.7.8: a fixed margin; up to
+/// 1.7.7 70 % of MemAvailable (from 1.5.4, before the RAM of a check was measured), which on a 12 GB rig with 8.5 GB free kept
+/// ~2.5 GB unused and two checks at a time instead of three (Rig01 1.7.7: 8 GPUs tuned two by two)
+const RAM_MARGIN_MB: u64 = 512;
+/// share of MemAvailable the checks of a low-RAM rig (proofs serialized) plan with: kept from 1.7.7 (with the fixed margin a
+/// 3 GB Rig05 would start two checks before the miner settled, as 1.7.2 did, and swap)
 const RAM_SHARE_PCT: u64 = 70;
+
+/// RAM (MB) the checks and what the miner still needs may take of `avail` free: all but RAM_MARGIN_MB, on a low-RAM rig
+/// (`serialized`) RAM_SHARE_PCT % of it
+fn ram_budget(avail: u64, serialized: bool) -> u64 {
+    if serialized { avail * RAM_SHARE_PCT / 100 } else { avail.saturating_sub(RAM_MARGIN_MB) }
+}
+
+/// what the free RAM is planned with, for the log
+fn ram_rule(serialized: bool) -> String {
+    if serialized { format!("{RAM_SHARE_PCT} % of it") } else { format!("all of it but {RAM_MARGIN_MB} MB") }
+}
 
 /// A per-GPU option (`--uv-max`, `--uv-min`, `--uv-offset`): not given, one value for every GPU, or a comma list with one
 /// value per mining GPU, in `--devices` order (without `--devices`: GPU0, GPU1, ... as the miner numbers them; on HiveOS
@@ -69,7 +85,7 @@ impl PerGpu {
             let t = s.strip_prefix('+').unwrap_or(s);
             t.parse::<i32>().ok().filter(|_| !t.starts_with('+')).ok_or_else(|| anyhow::anyhow!("{flag}: '{s}' is not a whole number of MHz"))
         };
-        let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
+        let parts = list_parts(raw);
         if parts.len() == 1 {
             return match parts[0] {
                 "" => anyhow::bail!("{flag} needs a value (one number, or a comma list with one value per GPU)"),
@@ -293,6 +309,29 @@ pub(crate) fn search_start(coin: Coin, name: &str, def: &Defaults, lock_hint: Op
 
 fn lg(msg: impl AsRef<str>) {
     println!("auto-uv: {}", msg.as_ref());
+}
+
+/// The values of a per-GPU list (1.7.8, every algorithm): separated by commas, semicolons or spaces, also mixed and with spaces
+/// around a comma ("1500,1650", "1500;1650", "1500 1650", "1500, 1650 1800").  An empty field between two commas / semicolons is
+/// kept ("225,,150": that GPU keeps its default); spaces never make an empty field.
+pub(crate) fn list_parts(raw: &str) -> Vec<&str> {
+    let raw = raw.trim();
+    let mut out = Vec::new();
+    for field in raw.split([',', ';']) {
+        let f = field.trim();
+        if f.is_empty() {
+            out.push(f);
+        } else {
+            out.extend(f.split_whitespace());
+        }
+    }
+    out
+}
+
+/// A command-line token that continues a per-GPU list given without quotes (`--lock-cclock 1500 1650`): a number (also signed,
+/// `--uv-offset -100 50`), optionally with list separators inside ("1650,1800").
+pub(crate) fn is_list_value(t: &str) -> bool {
+    !t.is_empty() && list_parts(t).iter().all(|p| !p.is_empty() && p.strip_prefix('+').unwrap_or(p).parse::<i64>().is_ok())
 }
 
 pub(crate) fn now() -> u64 {
@@ -693,6 +732,8 @@ pub struct Manager {
     low_ram: AtomicBool,
     check_need: u64,
     main_more: u64,
+    /// one Pearl proof at a time on the machine (mining::proofs_serialized): the RAM is planned with RAM_SHARE_PCT % (ram_budget)
+    serialized: bool,
     /// a check process was killed for lack of RAM (SIGKILL by the OOM killer): no more checks this run
     no_mem: AtomicBool,
     /// idle mode (1.7.5): the PC is in use, no check may start; `aside` = the owner's offsets are back on the cards meanwhile
@@ -740,17 +781,28 @@ fn a_matrix_mb_k(m: usize, k: usize) -> u64 {
     ((m as u64 * k as u64) >> 20) * 21 / 10
 }
 
-/// RAM one check process needs at its peak, MB (FFGP_UV_CHECK_MB overrides).  `serialized`: one proof at a time on the machine
-/// (mining::proofs_serialized: low RAM), its proof is then the one already counted for the miner.
-fn check_need_mb(m: usize, serialized: bool) -> u64 {
-    std::env::var("FFGP_UV_CHECK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(CHECK_BASE_MB + if serialized { 0 } else { a_matrix_mb(m) })
+/// RAM one check process needs on top of the proofs, MB (FFGP_UV_CHECK_MB overrides).  Its proofs are never its own: on a low-RAM
+/// rig one proof at a time on the machine (mining::proofs_serialized), the one already counted for the miner; else (1.7.8) one at a
+/// time among the checks (the check-proof lock), counted once for all of them (`check_proof_mb`).  Up to 1.7.7 every check counted
+/// a proof of its own (~1.8 GB on an RTX 3070) although it builds one only for ~1 s, three times a check.
+fn check_need_mb() -> u64 {
+    std::env::var("FFGP_UV_CHECK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(CHECK_BASE_MB)
 }
 
-/// How many check processes may run at once: (RAM_SHARE_PCT % of `avail` - what the miner still needs: `main_more`) / `need`,
+/// RAM of the one proof the running checks share (the check-proof lock, 1.7.8), MB: none on a low-RAM rig (`serialized`: the
+/// checks' proofs take the miner's turn) or while no check runs
+fn check_proof_mb(m: usize, serialized: bool) -> u64 {
+    check_proof_mb_k(m, crate::mining::k(), serialized)
+}
+fn check_proof_mb_k(m: usize, k: usize, serialized: bool) -> u64 {
+    if serialized { 0 } else { a_matrix_mb_k(m, k) }
+}
+
+/// How many check processes may run at once: (ram_budget of `avail` - what the miner still needs: `main_more`) / `need`,
 /// at most `gpus`; 0 = not even one fits (then no checks at all this run).  `avail` None (unknown): every GPU at once.
-pub(crate) fn checks_at_once(avail: Option<u64>, need: u64, main_more: u64, gpus: u64) -> u64 {
+pub(crate) fn checks_at_once(avail: Option<u64>, need: u64, main_more: u64, gpus: u64, serialized: bool) -> u64 {
     let Some(a) = avail else { return gpus };
-    let budget = (a * RAM_SHARE_PCT / 100).saturating_sub(main_more);
+    let budget = ram_budget(a, serialized).saturating_sub(main_more);
     (budget / need.max(1)).min(gpus)
 }
 
@@ -802,8 +854,8 @@ fn checks_reserved_mb(running: u64, need: u64, rss: &[Option<u64>]) -> u64 {
 /// `need` MB; `avail` = free RAM in MB (None = unknown: no limit); `main_more` = what the miner itself may still take (a
 /// proof's A matrix).  1.7.3: the first check is no exception (1.7.2 started it whatever the free RAM: Rig05, 3.8 GB, no
 /// swap, hung at the miner start).
-fn check_fits(reserved: u64, need: u64, avail: Option<u64>, main_more: u64) -> bool {
-    avail.is_none_or(|a| (a * RAM_SHARE_PCT / 100).saturating_sub(main_more).saturating_sub(reserved) >= need)
+fn check_fits(reserved: u64, need: u64, avail: Option<u64>, main_more: u64, serialized: bool) -> bool {
+    avail.is_none_or(|a| ram_budget(a, serialized).saturating_sub(main_more).saturating_sub(reserved) >= need)
 }
 
 /// Safety margin (MB) the low-RAM check plan keeps free on top of a proof and the check process (the OS, HiveOS, the error of MemAvailable).
@@ -877,6 +929,16 @@ impl Drop for Guard {
 struct Crash {
     at: i32,
     good: Option<i32>,
+}
+
+impl Crash {
+    /// The card was only a bystander of another card's fault: no failed offset (profiles::NO_FAIL)
+    fn bystander(self) -> Option<Crash> {
+        self.good.map(|g| Crash { at: crate::profiles::NO_FAIL, good: Some(g) })
+    }
+    fn failed(&self) -> bool {
+        self.at != crate::profiles::NO_FAIL
+    }
 }
 
 struct Spec {
@@ -1011,26 +1073,26 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
     }
     // RAM plan (1.7.3): the miner is about to allocate its per-GPU buffers and builds an A matrix for every proof; a check
     // process needs its own; the checks that fit run at once, the others wait; none fits: no checks this run
-    let (check_need, main_more, at_once) = {
+    let (check_need, main_more, at_once, serialized) = {
         let mmax = cards.iter().map(|c| c.m).max().unwrap_or(0);
         let serialized = crate::mining::proofs_serialized(mmax);
-        let need = check_need_mb(mmax, serialized);
+        let need = check_need_mb();
         if serialized {
             lg("low on RAM: one Pearl proof at a time on this machine (the miner's and its check processes')".to_string());
         }
-        let more = MAIN_PER_GPU_MB * devices.len() as u64 + a_matrix_mb(mmax);
+        let more = MAIN_PER_GPU_MB * devices.len() as u64 + a_matrix_mb(mmax) + check_proof_mb(mmax, serialized);
         let avail = mem_available_mb();
-        let n = checks_at_once(avail, need, more, cards.len() as u64);
+        let n = checks_at_once(avail, need, more, cards.len() as u64, serialized);
         let gb = |mb: u64| format!("{:.1} GB", mb as f64 / 1024.0);
         match avail {
             None => lg(format!("free RAM unknown: checking all {} GPU(s) at once", cards.len())),
             Some(a) if n == 0 => lg(format!(
-                "NOT ENOUGH RAM for a check: {} available, a check needs ~{} and mining ~{} more ({} % of the free RAM is planned with): checks and tunings wait until the miner has settled (its buffers and the first proof), then the RAM is looked at again: one check at a time, or none (more RAM, or close other programs, for --auto-uv)",
-                gb(a), gb(need), gb(more), RAM_SHARE_PCT
+                "NOT ENOUGH RAM for a check: {} available, a check needs ~{} and mining ~{} more ({} of the free RAM is planned with): checks and tunings wait until the miner has settled (its buffers and the first proof), then the RAM is looked at again: one check at a time, or none (more RAM, or close other programs, for --auto-uv)",
+                gb(a), gb(need), gb(more), ram_rule(serialized)
             )),
             Some(a) => lg(format!("checking {n} of {} GPU(s) at a time: {} available (a check needs ~{}, mining ~{} more)", cards.len(), gb(a), gb(need), gb(more))),
         }
-        (need, more, n)
+        (need, more, n, serialized)
     };
     let m = Arc::new(Manager {
         nv,
@@ -1058,6 +1120,7 @@ pub fn start(o: &Opts, devices: &[i32], stop: &Arc<AtomicBool>) -> Option<(Arc<M
         low_ram: AtomicBool::new(at_once == 0 && mem_available_mb().is_some()),
         check_need,
         main_more,
+        serialized,
         no_mem: AtomicBool::new(false),
         suspended: AtomicBool::new(false),
         aside: AtomicBool::new(false),
@@ -1444,7 +1507,13 @@ impl Manager {
     fn run_card(&self, c: &Arc<Card>) -> Result<Plan> {
         let mut crashed = self.take_trying(c);
         if let Some(k) = crashed {
-            lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(k.at)));
+            // 1.7.7 plan, point 3: a CUDA fault on one card ends the whole process; only the card with the Xid has a failed offset
+            if let Some(by) = crate::faults::bystander(&self.dir, &c.uuid) {
+                lg(format!("{} the previous run died while this GPU checked offset {}, but the fault was on {by}: this GPU did not fail, its offset is not counted as failed{}", c.label(), signed(k.at), k.good.map_or(String::new(), |g| format!("; the steps up to {} that passed are kept", signed(g)))));
+                crashed = k.bystander();
+            } else {
+                lg(format!("{} the previous run died while checking offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(k.at)));
+            }
         }
         // crashes while mining, remembered by faults.rs (1.7.2): a crashed undervolt offset counts as failed; a crash at the
         // owner's / kept offset lowers it after 2 crash starts in a row; nothing left to lower: the GPU is left out of mining
@@ -1999,7 +2068,7 @@ impl Manager {
         let step = self.opts.step;
         let coarse = self.opts.coarse_step();
         let mut cap = c.max;
-        if let Some(x) = crashed.map(|k| k.at) {
+        if let Some(x) = crashed.filter(|k| k.failed()).map(|k| k.at) {
             let want = c.start().0.clamp(0, cap);
             if x - crash_back(step) < want + step {
                 // it died at (or one step above) the start: nothing left to search; remember "nothing above your offset"
@@ -2086,9 +2155,18 @@ impl Manager {
         ));
         // the transcript digests depend on m too: a reference saved at another m must not seed the check
         let golden = prev.as_ref().filter(|e| e.driver == self.driver && e.kernel == self.kernel_of(c) && e.m == c.m).map(|e| e.refs.clone()).unwrap_or_default();
-        let base = self.step_check(c, start, c.orig, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
+        let mut base = self.step_check(c, start, c.orig, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
         if self.aborted() {
             return Ok(());
+        }
+        // 1.7.8 (1.7.7 plan, point 4): a failing start is checked once more before the search goes lower (one failure can be a
+        // transient one; PC_White: +135 failed once and the result was +105 instead of +225); not after a driver fault
+        if !base.ok && !base.driver_fault {
+            lg(format!("{} the start offset {} failed once ({}): checking it again before going lower", c.label(), signed(start), base.reason));
+            base = self.step_check(c, start, c.orig, &Spec { secs: self.opts.warmup_secs, min_reruns: 60, cpu: 2, measure: 20, refs: golden.clone() });
+            if self.aborted() {
+                return Ok(());
+            }
         }
         if !base.ok {
             // the start itself fails at these clocks: never keep it (or the owner's offset) unchecked; down in 30 MHz steps from it (not a jump to the owner's offset) to the
@@ -2189,7 +2267,7 @@ impl Manager {
             lg(format!("{} power no longer drops above {} (voltage floor: the next two steps up to {} saved < 0.5 W per 15 MHz each): stopping there", c.label(), signed(good), signed(s.flat_top)));
         }
         // the cap below a crash (30 MHz under it) is the margin already: the last good step there is the result
-        let crash_edge = crashed.map(|k| k.at).filter(|_| failed.is_none() && good == cap);
+        let crash_edge = crashed.filter(|k| k.failed()).map(|k| k.at).filter(|_| failed.is_none() && good == cap);
         let crash_capped = crash_edge.is_some();
         if let Some(x) = crash_edge {
             failed = Some((x, "crashed in the previous run".into()));
@@ -2378,13 +2456,13 @@ impl Manager {
             // in the first minute never more at once than the start plan (the miner's own buffers were not there yet when the
             // free RAM was read first), later the free RAM alone decides
             let early = self.started.elapsed() < Duration::from_secs(60);
-            let more = if early { self.main_more } else { a_matrix_mb(c.m) };
+            let more = if early { self.main_more } else { a_matrix_mb(c.m) + check_proof_mb(c.m, self.serialized) };
             let rss: Vec<Option<u64>> = check_pids().lock().unwrap().values().map(|&p| proc_rss_mb(p)).collect();
             let reserved = checks_reserved_mb(*running, need, &rss);
             let avail = mem_available_mb();
             // low-RAM mode (the start plan was 0, 1.7.7): one check at a time, the RAM looked at before each one
             let low = self.low_ram.load(Ordering::SeqCst);
-            let fits = if low { low_ram_check_fits(avail, *running, need, a_matrix_mb(c.m)) } else { (!early || *running < self.at_once.load(Ordering::Relaxed).max(1)) && check_fits(reserved, need, avail, more) };
+            let fits = if low { low_ram_check_fits(avail, *running, need, a_matrix_mb(c.m)) } else { (!early || *running < self.at_once.load(Ordering::Relaxed).max(1)) && check_fits(reserved, need, avail, more, self.serialized) };
             if self.stopped() || (!self.suspended.load(Ordering::SeqCst) && fits) {
                 *running += 1;
                 SLOT_HELD.with(|h| h.set(true));
@@ -2393,8 +2471,8 @@ impl Manager {
             if !said && !self.suspended.load(Ordering::SeqCst) {
                 said = true;
                 lg(format!(
-                    "{} waits its turn for a check (mining meanwhile): {} check(s) running, {} MB free, of it {} % minus ~{} MB still to come for the running checks and ~{} MB for the miner may be used, a check needs ~{} MB",
-                    c.label(), *running, avail.unwrap_or(0), RAM_SHARE_PCT, reserved, more, need
+                    "{} waits its turn for a check (mining meanwhile): {} check(s) running, {} MB free, of it {} minus ~{} MB still to come for the running checks and ~{} MB for the miner may be used, a check needs ~{} MB",
+                    c.label(), *running, avail.unwrap_or(0), ram_rule(self.serialized), reserved, more, need
                 ));
                 if low {
                     lg(format!("{} (low-RAM mode: one check at a time, it starts when {} MB are free: a check {} MB + a proof {} MB + {} MB spare)", c.label(), need + a_matrix_mb(c.m) + LOW_RAM_MARGIN_MB, need, a_matrix_mb(c.m), LOW_RAM_MARGIN_MB));
@@ -2444,6 +2522,7 @@ impl Manager {
         let t0 = Instant::now();
         let deadline = Duration::from_secs((sp.secs + sp.measure) as u64 + 150);
         let mut load_start: Option<Instant> = None;
+        let mut load_end = false;
         let mut samples: Vec<(Instant, f64, u32, u32)> = Vec::new();
         let mut result: Option<String> = None;
         let mut xid: Option<u64> = None;
@@ -2465,7 +2544,9 @@ impl Manager {
             }
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(l) => {
-                    if l.starts_with("UVMEASURE") {
+                    if l.starts_with("UVLOADEND") {
+                        load_end = true;
+                    } else if l.starts_with("UVMEASURE") {
                         load_start = Some(Instant::now());
                     } else if l.starts_with("UVRESULT") {
                         result = Some(l);
@@ -2474,7 +2555,7 @@ impl Manager {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
                 Err(_) => {}
             }
-            if load_start.is_some() && result.is_none() && last_sample.elapsed() >= Duration::from_millis(250) {
+            if load_start.is_some() && !load_end && result.is_none() && last_sample.elapsed() >= Duration::from_millis(250) {
                 last_sample = Instant::now();
                 if let Some(w) = self.nv.power_w(c.nv) {
                     samples.push((Instant::now(), w, self.nv.clock_mhz(c.nv).unwrap_or(0), self.nv.temp_c(c.nv).unwrap_or(0)));
@@ -3192,6 +3273,8 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
     if let Some(kp) = std::env::var("FFG_BENCH_PROOFS").ok().and_then(|v| v.parse::<usize>().ok()) {
         return bench_proofs(&job, cm, kp);
     }
+    // 1.7.8: the proofs of this check wait for the other checks' (one A of the checks at a time on the machine)
+    crate::mining::set_check_process();
     // fixed seeds: the digests depend only on the job (from the fixed test header), the seed and the kernel, never on the process
     let seeds: Vec<[u8; 32]> = (0..4u32).map(|i| std::array::from_fn(|j| (j as u32 * 37 + i * 101 + 5) as u8)).collect();
     let mut refs: Vec<Option<String>> = (0..4).map(|i| a.refs.get(i).cloned()).collect();
@@ -3255,7 +3338,7 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
             cpu!(1001);
         }
     }
-    // phase 2: pure mining load for the power measurement (the parent samples NVML from the UVMEASURE line on)
+    // phase 2: pure mining load for the power measurement (the parent samples NVML from the UVMEASURE line to UVLOADEND)
     if a.measure > 0 {
         println!("UVMEASURE");
         let m0 = Instant::now();
@@ -3264,6 +3347,9 @@ fn check_child_inner(a: &ChildArgs) -> Result<(bool, String)> {
             mine_burst!(i % 4, 200);
             i += 1;
         }
+        // 1.7.8: the GPU idles from here (the last CPU verification, waiting for the other checks' proofs): not measured
+        // (Rig01, 8 checks at once: baselines of 77-100 W instead of ~115 W, then every step "drew more": a false voltage floor)
+        println!("UVLOADEND");
     }
     cpu!(1002);
     let refs: Vec<String> = refs.into_iter().map(|r| r.unwrap_or_default()).collect();
@@ -3296,14 +3382,14 @@ mod tests {
         let more = 5 * MAIN_PER_GPU_MB + proof;
         assert_eq!((proof, more), (1411, 1911));
         let serial = CHECK_BASE_MB;
-        assert_eq!(checks_at_once(Some(3000), serial, more, 5), 0); // 2100 - 1911 = 189 < 250: not even one
-        assert_eq!(checks_at_once(Some(3300), serial, more, 5), 1);
-        assert_eq!(checks_at_once(Some(3800), serial, more, 5), 2);
-        // plenty of RAM: proofs in parallel, a check carries its own
+        assert_eq!(checks_at_once(Some(3000), serial, more, 5, true), 0); // 2100 - 1911 = 189 < 250: not even one
+        assert_eq!(checks_at_once(Some(3300), serial, more, 5, true), 1);
+        assert_eq!(checks_at_once(Some(3800), serial, more, 5, true), 2);
+        // plenty of RAM: proofs in parallel, a check carries its own (up to 1.7.7; 1.7.8 shares one: ram_gate_for_checks)
         let full = CHECK_BASE_MB + a_matrix_mb_k8(94208);
         assert!((1700..=1850).contains(&full)); // measured 1666 MB peak (1.7.2: 2378 MB)
-        assert_eq!(checks_at_once(Some(60000), full, 8 * MAIN_PER_GPU_MB + a_matrix_mb_k8(94208), 8), 8);
-        assert_eq!(checks_at_once(None, full, 0, 8), 8);
+        assert_eq!(checks_at_once(Some(60000), full, 8 * MAIN_PER_GPU_MB + a_matrix_mb_k8(94208), 8, false), 8);
+        assert_eq!(checks_at_once(None, full, 0, 8, false), 8);
     }
 
     #[test]
@@ -3313,7 +3399,7 @@ mod tests {
         let need = CHECK_BASE_MB;
         let more = 5 * MAIN_PER_GPU_MB + proof;
         // the start: 2.4 GB free, the miner has not allocated yet: 0 (as before)
-        assert_eq!(checks_at_once(Some(2400), need, more, 5), 0);
+        assert_eq!(checks_at_once(Some(2400), need, more, 5, true), 0);
         // the miner settled, 2060 MB free (measured on Rig05): one check
         assert_eq!(replan_low_ram(Some(2060), need, proof), 1);
         // still not enough after the miner settled: stays 0
@@ -3349,7 +3435,29 @@ mod tests {
         assert_eq!(PerGpu::parse("225,-,150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
         assert_eq!(PerGpu::parse("225,,150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
         assert_eq!(PerGpu::parse("-50,-", "--uv-offset").unwrap(), PerGpu::List(vec![Some(-50), None]));
-        for bad in ["", "abc", "1.5", "150,abc", "150;225", "150 225", "++150"] {
+        // 1.7.8 (owner's rule): semicolons, spaces, mixed forms
+        assert_eq!(PerGpu::parse("150;225", "--uv-max").unwrap(), PerGpu::List(vec![Some(150), Some(225)]));
+        assert_eq!(PerGpu::parse("150 225", "--uv-max").unwrap(), PerGpu::List(vec![Some(150), Some(225)]));
+        assert_eq!(PerGpu::parse("150, 225 330", "--uv-max").unwrap(), PerGpu::List(vec![Some(150), Some(225), Some(330)]));
+        assert_eq!(PerGpu::parse("150 ; 225;330", "--uv-max").unwrap(), PerGpu::List(vec![Some(150), Some(225), Some(330)]));
+        assert_eq!(PerGpu::parse("-100 50", "--uv-offset").unwrap(), PerGpu::List(vec![Some(-100), Some(50)]));
+        assert_eq!(PerGpu::parse("-100;-50", "--uv-offset").unwrap(), PerGpu::List(vec![Some(-100), Some(-50)]));
+        assert_eq!(PerGpu::parse("225 - 150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
+        assert_eq!(PerGpu::parse("225;;150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
+        assert!(PerGpu::parse("150 225 330", "--uv-max").unwrap().check_count(2, "--uv-max").is_err(), "a wrong count is an error, never extended");
+        assert!(crate::clocks::expand_u32("1500 1650 1800", 2, "--lock-cclock").is_err());
+        assert_eq!(crate::clocks::expand_u32("1500;1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
+        assert_eq!(crate::clocks::expand_u32("1500 1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
+        assert_eq!(crate::clocks::expand_u32("1500, 1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
+        assert_eq!(crate::clocks::expand_i32("-100 50", 2, "--moffset").unwrap(), vec![Some(-100), Some(50)]);
+        assert_eq!(crate::clocks::expand_u32("1500", 3, "--lock-cclock").unwrap(), vec![Some(1500); 3]);
+        for t in ["1500", "-100", "+225", "1650,1800", "1500;1650"] {
+            assert!(is_list_value(t), "{t}");
+        }
+        for t in ["--wallet", "-", "x", "", "1.5", "1500,x"] {
+            assert!(!is_list_value(t), "{t}");
+        }
+        for bad in ["", "abc", "1.5", "150,abc", "150;x", "150 x", "++150"] {
             assert!(PerGpu::parse(bad, "--uv-max").is_err(), "{bad:?} must be rejected");
         }
         assert!(format!("{:#}", PerGpu::parse("150,x", "--uv-max").unwrap_err()).contains("--uv-max: 'x'"));
@@ -3543,20 +3651,40 @@ mod tests {
     fn ram_gate_for_checks() {
         // the first check always runs; more only while the free RAM covers them (each running one counted in full)
         // 1.7.3: the first check needs its RAM too (1.7.2 started it on a 3.8 GB rig: Rig05 hung)
-        assert!(!check_fits(0, 2400, Some(100), 0));
-        assert!(check_fits(2400, 2400, None, 0));
-        assert!(check_fits(0, 1200, Some(3000), 800)); // 70 % of 3000 = 2100 - 800 = 1300 >= 1200
-        assert!(!check_fits(0, 1200, Some(3000), 1000));
-        assert!(check_fits(1000, 1000, Some(4000), 500)); // 2800 - 500 - 1000 = 1300
-        assert!(!check_fits(2000, 1000, Some(4000), 500));
+        assert!(!check_fits(0, 2400, Some(100), 0, false));
+        assert!(check_fits(2400, 2400, None, 0, false));
+        assert!(check_fits(0, 1200, Some(2600), 800, false)); // 2600 - 512 - 800 = 1288 >= 1200
+        assert!(!check_fits(0, 1200, Some(2600), 1000, false));
+        assert!(check_fits(1000, 1000, Some(3100), 500, false)); // 3100 - 512 - 500 - 1000 = 1088
+        assert!(!check_fits(2000, 1000, Some(4000), 500, false)); // 988
         // a running check counts with what it may still take: not started / RSS unknown in full, 1600 of 1795 MB taken: 195
         assert_eq!(checks_reserved_mb(2, 1795, &[]), 3590);
         assert_eq!(checks_reserved_mb(2, 1795, &[Some(1600), None]), 195 + 1795);
         assert_eq!(checks_reserved_mb(3, 1795, &[Some(1700), Some(1900)]), 95 + 1795);
         // 4 checks all at their peak, 12972 MB free, miner ~1545 MB more: the 5th fits (1.7.4 counted their peak twice: waited)
         let r = checks_reserved_mb(4, 1795, &[Some(1650); 4]);
-        assert!(check_fits(r, 1795, Some(12972), 1545));
-        assert!(!check_fits(4 * 1795, 1795, Some(12972), 1545));
+        assert!(check_fits(r, 1795, Some(12972), 1545, false));
+        assert!(check_fits(5 * 1795, 1795, Some(12972), 1545, false)); // 12972 - 512 - 1545 - 8975 = 1940
+        assert!(!check_fits(6 * 1795, 1795, Some(12972), 1545, false));
+        // Rig01 1.7.7 (12 GB, 8x RTX 3070): 8543 MB free, two checks with ~3435 MB still to come, the miner ~1545 MB more:
+        // 70 % let no third one start (1000 MB left), the 512 MB margin does (3051), a fourth still not (1256)
+        assert!(check_fits(3435, 1795, Some(8543), 1545, false));
+        assert!(!check_fits(3435 + 1795, 1795, Some(8543), 1545, false));
+        assert_eq!(checks_at_once(Some(8543), 1795, 1545, 8, false), 3);
+        // a low-RAM rig keeps the 70 % share: 3000 MB free, a check 250, the miner ~1911 MB more: none at the start (the
+        // margin alone would start two before the miner settled)
+        assert!(!check_fits(0, 250, Some(3000), 1911, true));
+        assert!(check_fits(0, 250, Some(3000), 1911, false));
+        // 1.7.8: the checks share one proof (the check-proof lock): a check costs CHECK_BASE_MB, the shared A is counted once in
+        // what the miner may still take; Rig01 (8x RTX 3070, m = 94208, 9.7 GB free): all 8 at once (1.7.8 before it: 3)
+        let a = a_matrix_mb_k(94208, 8192);
+        assert_eq!(check_proof_mb_k(94208, 8192, false), a);
+        assert_eq!(check_proof_mb_k(94208, 8192, true), 0);
+        let more = 8 * MAIN_PER_GPU_MB + a + check_proof_mb_k(94208, 8192, false);
+        assert_eq!(checks_at_once(Some(9930), CHECK_BASE_MB, more, 8, false), 8);
+        assert_eq!(checks_at_once(Some(9930), CHECK_BASE_MB + a, more - a, 8, false), 3);
+        // later the running checks reserve their rest only: the 8th fits with 7 running and 8.5 GB free
+        assert!(check_fits(7 * CHECK_BASE_MB, CHECK_BASE_MB, Some(8543), 2 * a, false));
     }
 
     #[test]

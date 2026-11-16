@@ -228,6 +228,13 @@ pub fn proof_mb(m: usize) -> u64 {
 pub fn proofs_serialized(m: usize) -> bool {
     crate::uv::mem_available_mb().is_some_and(|a| a < 4 * proof_mb(m))
 }
+/// 1.7.8: this process is an auto-uv check (`--uv-check`): its proofs (the CPU verification of a few hits) take the machine-wide
+/// check-proof lock, so all the checks of a rig together hold one A at a time and a check costs only its small rest (Rig01, 12 GB,
+/// 8x RTX 3070: 3 checks at once with an A each, 8 with one shared); the miner's own proofs never wait for it
+static CHECK_PROCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_check_process() {
+    CHECK_PROCESS.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 /// Proofs building their A right now, and the wake-up for the ones waiting.  More than one at a time only while the free RAM
 /// covers another (half of MemAvailable >= one A): a burst of GPUs hitting together (0.6 s per proof on an RTX 3070) does not
 /// queue for seconds on a rig with RAM, and a 4 GB rig still builds one at a time.
@@ -263,13 +270,19 @@ fn a_matrix(m: usize, row0: &[u8]) -> AMatrix {
     *busy += 1;
     PEAK.fetch_max(*busy, std::sync::atomic::Ordering::Relaxed);
     drop(busy);
-    let machine = if proofs_serialized(m) {
-        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(std::env::temp_dir().join("freeforgem-proof.lock")).ok().inspect(|f| {
-            let _ = f.lock();
-        })
+    // low RAM: one proof at a time on the machine (the miner's and the checks'); else the checks' proofs one at a time among them
+    let lock = if proofs_serialized(m) {
+        Some("freeforgem-proof.lock")
+    } else if CHECK_PROCESS.load(std::sync::atomic::Ordering::SeqCst) {
+        Some("freeforgem-check-proof.lock")
     } else {
         None
     };
+    let machine = lock.and_then(|name| {
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(std::env::temp_dir().join(name)).ok().inspect(|f| {
+            let _ = f.lock();
+        })
+    });
     let mut data = vec![64u8; bytes];
     data[..row0.len()].copy_from_slice(row0);
     AMatrix { data, _machine: machine }

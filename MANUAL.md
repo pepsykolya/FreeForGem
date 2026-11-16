@@ -13,7 +13,7 @@
 
 FreeForGem is a GPU miner for **Pearl (PRL)** (pearlhash proof-of-useful-work) on NVIDIA GPUs (and, since 1.6.0, AMD Radeon
 on Windows), with a **1% developer fee**. Since 1.6.0 it also mines Common Foundry (CMFD, section 13), since 1.7.0 **NOID**
-(Parano1d, section 15).
+(Parano1d, section 15), since 1.7.8 **Proxima (PROX)** (section 21).
 
 **Name.** Since 1.7.0 the multi-coin miner (Pearl + CMFD + NOID) is called **FreeForGem** (binary `freeforgem`, HiveOS custom
 miner `freeforgem`, repository `pepsykolya/FreeForGem`). **FreeForGemPear** continues as the Pearl miner under its own name.
@@ -29,7 +29,7 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **main target, tuned: ~70 TH/s on an RTX 3070 at ~107 W** |
 | RTX 40xx (Ada, sm_89) | own SASS kernel since 1.5.4 (RTX 4070 Ti: same hashrate, ~10 W less than the RTX 30xx kernel) |
 | RTX 50xx (Blackwell, sm_120) | supported since 1.5.0 with a compiled kernel (untuned); needs driver 570+ |
-| CMP 50HX (TU102) | runs, but **not recommended for Pearl: ~2.6 TH/s per card** (int8 tensor cores cut ~17× against the CMP 40HX, on any driver) |
+| CMP 50HX (TU102) | runs: **on driver 610.43.03 about 67 TH/s per card at lock 1300 and about 77 TH/s at lock 1500** (166–176 W per card, 4× CMP 50HX rig, 1.7.8). On the older drivers 550.78 and 595.91.07 only ~2.6 TH/s (int8 tensor cores cut ~17×): update the driver |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | supported since 1.5.3 with an own SASS kernel: ~49.9 TH/s on an RTX 2060 SUPER @1605 MHz; **memory must be locked at 5001, not 810** |
 | AMD Radeon RX 6000 (RDNA2), Windows | **new in 1.6.0**, own OpenCL kernel: 34.4 TH/s on an RX 6800 XT (section 14) |
 | Older GPUs, A100 (sm_80), AMD on Linux / HiveOS | not supported |
@@ -46,10 +46,10 @@ The host builds and checks every share proof with the official `zk-pow` verifier
 
 FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installation.
 
-**Installation URL (1.7.7):**
+**Installation URL (1.7.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -73,15 +73,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7
 4. **Apply.** *Apply changes*, *Create flight sheet*, then apply it to the rig.
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
-The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.7 0.652 TH/W, need update!!`: the miner looks for one on GitHub ~1 min after the start and every ~12 h, nothing is installed by itself; `--no-update-check` turns it off).
+The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.8 0.652 TH/W, need update!!`: the miner looks for one on GitHub ~1 min after the start and every ~12 h, nothing is installed by itself; `--no-update-check` turns it off).
 To update, change the Installation URL to the new version. The same guide with more details: [HIVEOS.md](HIVEOS.md).
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
 
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
-cd freeforgem-1.7.7
+tar xzf freeforgem-1.7.8-linux-x86_64.tar.gz
+cd freeforgem-1.7.8
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -102,8 +102,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.7.7-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
+1. Download **`freeforgem-1.7.8-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -154,7 +154,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.7-windows-x64
+cd /d C:\Mining\freeforgem-1.7.8-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -191,6 +191,7 @@ configuration (`https://pearl.luckypool.io/api/stats`, `config.stratum` and `con
 
 Example: `--pool pearl-pl.luckypool.io:3360`. Use your plain `prl1...` address as the wallet; the worker name is sent separately.
 Any other Pearl stratum pool that speaks the same JSON-RPC stratum can be used; the dev fee (section 10) is then mined on that pool.
+Backup pools: `--pool A,B` (the first is the primary; the miner fails over and returns to the primary when it works again), see section 22.
 
 **NOCK merge mining (LuckyPool only).** LuckyPool pays Nockchain (NOCK) for the same Pearl work, with no
 hashrate loss: write the wallet as `PRL_ADDRESS+NOCK_ADDRESS`, for example
@@ -248,7 +249,7 @@ cards of the same generation and are not measured. Every card differs: let `--au
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | lock `810` | +390..480 | estimate |
 | RTX 2060 SUPER, RTX 2070/2080 (incl. SUPER), GTX 1660/1650 | 1500–1650 | lock `5001` (**not 810**: Turing loses ~25% at 810) | +200..260; auto-uv limit +225 by default (since 1.6.2) | reference (2060 SUPER: measured) |
 | CMP 40HX | 1400 | lock `5001` | +150; auto-uv limit +150 by default (since 1.6.2) | user rigs; a CMP 40HX hit Xid at +255 |
-| CMP 50HX (TU102) | — | lock `5001` | +220 and more; auto-uv limit +330 by default (`--uv-max 330`) | user rigs. **Not recommended for Pearl: ~2.6 TH/s per card** (int8 tensor cores cut ~17× against the 40HX; the same on drivers 550.78 and 595.91.07, 3× CMP 50HX rig) |
+| CMP 50HX (TU102) | — | lock `5001` | +220 and more; auto-uv limit +330 by default (`--uv-max 330`) | user rigs. Lock **1300–1500** (default top of `--auto-lock` for CMP cards is 1500). **Pearl on driver 610.43.03: ~67 TH/s per card at 1300, ~77 TH/s at 1500** (166–176 W per card, 4× CMP 50HX rig); on the older drivers 550.78 / 595.91.07 only ~2.6 TH/s (int8 tensor cores cut ~17×) |
 
 RTX 40 and 50 run at a much higher locked core clock (**1900–2500 MHz**) and hold a higher offset than RTX 30; that is why
 auto-uv starts their search at +200 on RTX 40 and +300 on RTX 50 (RTX 30: +120).
@@ -259,8 +260,9 @@ auto-uv starts their search at +200 on RTX 40 and +300 on RTX 50 (RTX 30: +120).
 per GPU in `--devices` order: `--uv-max 225,495,150` (`-` = that GPU's default). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
 **CMP cards (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX mine Pearl with the Turing kernel (memory locked at 5001, auto-uv
-limit +150). **CMP 50HX: not recommended for Pearl** — only ~2.6 TH/s per card (its int8 tensor cores are cut ~17x against the
-CMP 40HX, on every driver). **For Common Foundry (CMFD) the CMP 50HX works well:** ~13 FW/s per card at ~220 W (power limit
+limit +150). **CMP 50HX and Pearl:** on driver 610.43.03 it mines about 67 TH/s per card at core lock 1300 and about 77 TH/s at 1500
+(166–176 W per card; 4× CMP 50HX rig, FreeForGem 1.7.8); on the older drivers 550.78 and 595.91.07 it gives only ~2.6 TH/s
+(its int8 tensor cores are cut ~17x there), so update the driver first. **For Common Foundry (CMFD) the CMP 50HX works well:** ~13 FW/s per card at ~220 W (power limit
 225 W, core lock 1410 MHz, memory not locked; 4x CMP 50HX rig on the Aria pool), with `--auto-uv` (CMFD tuner, +225) about
 13.2 FW/s at 196–203 W (+8–11 % FW/kWh); see section 13. CMFD needs ~7 GB of free GPU memory, so 6 GB cards (CMP 30HX) cannot
 run it. **Unlocking CMP cards is not part of FreeForGem:** we do not provide or support drivers or tools that lift the
@@ -291,9 +293,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.8-linux-x86_64.tar.gz freeforgem-1.7.8_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.8-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.7.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -303,6 +305,7 @@ separate login (worker `ffgp-devfee`). The log shows `devfee: next slot in N min
 the first 100 minutes. If the fee login cannot be served, the slot is skipped; your mining is never blocked.
 On LuckyPool the fee login also merge-mines NOCK for the developer (`prl1...+NOCK`, since 1.4.2); if the pool refuses that login,
 the miner falls back to the plain PRL fee wallet. The fee time stays 1%.
+With a pool list (section 22) the fee connection follows you: it always goes to the pool you are on at the moment its slot starts.
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted (see [LICENSE](LICENSE), clause 3).
 
 ### 11. Troubleshooting
@@ -488,6 +491,12 @@ extended. An explicit `--uv-max` is used as given, also above the card's default
 (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Example for 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop and a CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (the same as the defaults).
 
+**Per-GPU lists (1.7.8, every coin):** every option that takes one value per GPU (`--devices`, `--lock-cclock`, `--lock-mclock`,
+`--moffset`, `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`, `--temp-stop`) accepts commas, semicolons or spaces, also mixed:
+`--lock-cclock 1500,1650`, `1500;1650`, `"1500 1650"`, `1500, 1650 1800`, and without quotes `--lock-cclock 1500 1650 1800` (the numbers
+after the option are its values up to the next option; negative values count: `--uv-offset -100 50`). The same in HiveOS *Extra config*
+and in the `.bat` files. An empty field between commas / semicolons (or `-`) = that GPU's default; a wrong number of values is an error.
+
 **GPU clock control (optional, NVML; needs root / Administrator, works on Windows — new in 1.4.9).** `--lock-cclock N` locks the core clock to N MHz (like `nvidia-smi -lgc N,N`), `--lock-mclock N` locks the memory clock to N MHz (like `-lmc`), and `--moffset N` sets a memory-clock offset in MHz, which may be negative (needs driver 555+). Each takes one value for all GPUs, or a comma-separated list in `--devices` order (one value per device). The settings are applied at start and undone on exit (Ctrl-C / SIGTERM / crash). **Since 1.7.1 a lock that was there before is put back instead of removed:** on HiveOS the lock of the OC profile (*Lock Core Clock* / *Lock Memory Clock*, read from `/hive-config/nvidia-oc.conf`; before 1.7.1 a test run with `--lock-cclock` left a rig without its HiveOS lock); elsewhere NVML cannot read a lock back, so name it in `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (the FreeForGemPear names `FFGP_RESTORE_*` work too; one value or a list per GPU, 0 = none), otherwise the clock is reset to default as before. The log says what happens: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, at exit `core clock lock 1470 MHz put back`. After a crash or `kill -9` the next start does the same. On Windows set `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` in the `.bat` file. Example: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`. **RTX 30 hint (1.7.7):** for Pearl on RTX 30 (Ampere) the best TMAC/J is at a core lock of about 1530 MHz (+3.6% TMAC/J for -1.9% speed against 1560, measured on an RTX 3070; 1515 and below is a plateau). The miner only says so: when an RTX 30 runs without a core lock or above 1530, the start log has one `clocks: hint: ... try --lock-cclock 1530` line; nothing is set for you. With `--auto-uv`, a new lock means a tuning of its own (profiles are kept per core lock; the search starts from the profile of the nearest higher lock). After the first minute of mining the miner reads the real memory clock of each locked card a few times under load and prints one yellow warning if it is not the locked one (e.g. `--lock-mclock 405` on an RTX 3070: the card computes at 810 MHz, the lowest it allows under load); the lock itself is left as it is.
 
 Default location of the files: next to the binary (Windows: the miner folder), on HiveOS `/hive-config/freeforgem`
@@ -522,7 +531,7 @@ value with `--uv-offset N` and do not copy another card's number.
 ### 13. Common Foundry (CMFD), new in 1.6.0
 
 The same binary also mines **Common Foundry (CMFD, ForgeMatrix V4)**. The CMFD work is done by the
-**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.4), in the `cmfd/` folder of the
+**FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>, release 1.2.5), in the `cmfd/` folder of the
 package: Windows uses the release binaries unchanged; the Linux/HiveOS binaries are built from the same pinned source on
 Ubuntu 20.04, so they run on every HiveOS (Ubuntu 20.04 and 22.04 images). FreeForGem prepares the model, runs one engine process per GPU, applies your clock
 settings, prints its usual stats line and restarts an engine that exits.
@@ -978,7 +987,7 @@ below `C`; the worker mines one launch and then rests (the same duty cycle as `l
 ramps up; nothing is logged unless the GPU gets near its limit. The hashrate shown and reported is the real one (only finished launches
 count), the status line ends with `[temp-limit 72%]`. `--temp-stop C2[,C2]` is the hard stop (default: `C` + 10, at most 90, at least `C` + 3): at
 `C2` (3 readings in a row, or one 5 C above) the GPU stops mining until it has cooled to `C` - 6 (or to `C` - 3 after 60 s), then it restarts at
-30 %. Pearl and NOID, NVIDIA; **not for CMFD** (its engine is an external program that cannot be duty-cycled: use a power limit or
+30 %. Pearl, NOID and PROX, NVIDIA; **not for CMFD** (its engine is an external program that cannot be duty-cycled: use a power limit or
 `--lock-cclock`). Not ported from ffgs: memory/hotspot sensors, lowering the core clock lock before adding idle gaps, AMD. A duty cycle keeps
 the GPU at its boost clock during the launches, so it costs hashrate and efficiency: a lower `--lock-cclock` is the better cooling where
 the clocks can be set.
@@ -1024,6 +1033,305 @@ Secure Boot must be off; the build is a third-party modification of the driver, 
 the installation the rig can start without a working driver, so do it when you can reach the rig. To go back, install another driver version with
 `nvidia-driver-update` and reboot.
 
+
+### 21. Proxima (PROX), new in 1.7.8
+
+**Connect & install.** HiveOS: *Flight sheet* → Coin `PROX` (add it as a custom coin if it is not in the list), Wallet: your PROX
+address (on InnovLab: your holder id, 64 hex), Pool: *Configure in miner*, Miner: *Custom* → *Setup Miner Config*:
+
+![HiveOS flight sheet: coin, wallet, pool "Configure in miner", miner Custom](docs/img/hiveos-prox-1-flightsheet.png)
+
+| Field | proximamine | InnovLab | solo (your node) |
+|---|---|---|---|
+| Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz` | same | same |
+| Hash algorithm | leave `----` (HiveOS has no `proxima` in its list) | same | same |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
+| Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (or `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://NODE_IP:PORT` (the node's `mine.seeker.listen`) |
+| Pass | your proximamine secret | `x` | the node's `mine.seeker.token` |
+| Extra config arguments | `--auto-uv --lock-cclock 1500` | same | same |
+
+![HiveOS: Miner name, Installation URL, Hash algorithm](docs/img/hiveos-prox-2-miner.png)
+![HiveOS: Wallet and worker template, Pool URL, Pass](docs/img/hiveos-prox-3-pool.png)
+![HiveOS: Extra config arguments](docs/img/hiveos-prox-4-extra.png)
+
+**Recommended Extra config:** `--auto-uv --lock-cclock <MHz>` (one value for all cards, or a comma list per GPU). It locks the core
+clock and lets auto-uv find a lower voltage for that clock (every step checked bit-exactly; the first run takes a few minutes per GPU).
+You can simply delete the line: the miner then runs at the card's own clocks.
+
+| GPU | `--lock-cclock` | measured (memory at its lowest clock, 0 wrong hashes at every point) |
+|---|---|---|
+| RTX 3070 | `1500` | 2.66 GH/s, 87 W, 0.031 GH/W (final 1.7.8 build, auto-lock run with `--uv-offset 120`). Higher locks cost efficiency: 1700 3.03 GH/s, 111 W, 0.027 GH/W; 1900 3.37 GH/s, 160 W, 0.021 GH/W |
+| RTX 3070 Laptop | `1500` | +270: 2.23 GH/s, 53 W, 0.042 GH/W (1650 +270 0.040, 1800 +270 0.033 GH/W); the watts are what the laptop driver reports (GPU only) |
+| RTX 3080 Ti | `1500` | +210: 4.40 GH/s, 147 W, 0.030 GH/W (at 1500 the offset does not lower the power: the voltage is already at its minimum). For speed `1800`, +270: 5.28 GH/s, 201 W, 0.026 GH/W |
+| RTX 4070 Ti | `2450` | +270: 5.47 GH/s, 142 W, 0.0385 GH/W: 37 % more hashrate than at 1800 (4.00 GH/s, 102 W, 0.039 GH/W) for almost the same efficiency. On Ada the efficiency hardly depends on the lock (1500 +270 0.038, 1650 0.037, 2200 0.037 GH/W) |
+| RTX 4070 Laptop | — | about 3.22 GH/s at stock clocks; not tuned yet |
+| CMP 50HX and other cards | — | not measured (on CMP the memory clock cannot be locked, "Not Supported") |
+
+The offsets are what `--auto-uv` looks for on its own; a fixed `--uv-offset` with the same lock gives the figures above. Stock for
+comparison: RTX 3070 at a 200 W power limit 3.26 GH/s, 199 W; RTX 4070 Ti 5.90 GH/s (prefix 369).
+
+Windows: `start-prox.bat` (edit `WALLET`, `POOL`, `PASSWORD` or `SOLO` + `TOKEN`; `AUTO_UV=1` and `LOCK_CCLOCK=1500` are the same
+recommendation, run it as Administrator for them). Linux:
+`sudo ./freeforgem --algo prox --pool stratum+ssl://pool.proximamine.com:3334 --wallet ADDRESS --worker rig1 --password SECRET --auto-uv --lock-cclock 1500`.
+
+**HiveOS applies its own OC.** `nvidia-oc` of HiveOS writes the OC profile of the web UI over the clocks at every miner start and at
+every OC change: the core / memory lock and the offset set by the miner are reset. Since 1.7.8 the miner puts them back, every
+GPU on its own: every 15 s it looks at the clock under load; a core clock steadily above the lock (a memory clock off its lock) means the
+lock was lost and it is set again (`clocks: GPU bus ...: the core clock lock 1500 MHz was reset by an OC apply ... set again`, all coins).
+The core offset (`--auto-uv` result or `--uv-offset N`) is read back every 30 s: the value of the HiveOS profile (or 0) means an OC
+apply, and the verified offset is set again (after a 20 s check of that GPU with `--auto-uv`); a different value means another tool
+and the miner leaves that GPU alone. At most 4 re-applies per GPU per hour, then the miner stands down on it and says so in the log.
+
+**What it is.** `--algo prox` mines Proxima with its transaction-hash proof of work (library upgrade 6, since slot 196000):
+`h = BLAKE2b-256(message || nonce)`, a share needs `k` zero low bits in the last 8 bytes of `h`. NVIDIA only (GTX 10 / RTX 20/30/40/50,
+sm_61+). The kernel is in `libproxgpu.so` / `proxgpu.dll` (closed source, as for Pearl and NOID); every candidate is hashed again on the
+CPU before it is sent. A pool host with `prox` in its name, an `innov+tls://` URL, an InnovLab host on port 19701 or `--solo` select PROX
+without `--algo`.
+
+**Pools.** proximamine (suprnova-format stratum, login `ADDRESS.WORKER`, password = the secret of your account), InnovLab (its own
+protocol, `innov+tls://HOST:19701` or `innov+tcp://`, login `HOLDER_ID.WORKER`, password `x`). proxi.suprnova.cc accepts only its own
+miner's user agent; FreeForGem sends its own name (`FreeForGem/<version>`) and does not pretend to be another miner.
+**Solo:** `--solo http://127.0.0.1:8100 --token <mine.seeker.token>` (seeker protocol v2 of `proxi node mine`; `--seeker-name NAME`).
+
+**auto-uv for PROX** (`--auto-uv`, off unless given): checks every step in a child process that runs the mining kernel on 8 fixed
+jobs with a low k and re-hashes the candidates on the CPU; the kernel's answer must repeat exactly. Result = the last good step minus one
+step, confirmed, saved in `uv.json` (section `prox`) per GPU, driver, miner version and core lock; re-checked every 6 h (`--uv-reval-hours`),
+stepped back on a wrong candidate while mining, the owner's offset put back on exit. Without a core lock the profile is keyed by the clock
+under load (as for Pearl), so a lock is recommended. `--uv-min/--uv-max/--uv-step/--uv-reset/--uv-reset-all/--uv-keep-last` work as for
+Pearl; `--uv-offset N` sets a fixed offset instead.
+
+**Clocks.** By default the memory clock is locked at the lowest value that still allows the full core clock range (BLAKE2b does not use
+the video memory: several W less); `--no-mem-lock`, `--lock-mclock` or `--moffset` leave it to you. `--lock-cclock`, `--temp-limit`,
+`--devices`, `--minutes`, `--no-color` as for Pearl.
+
+Log line: `[ 60s] GPU0 2.657 (87 W, 0.0307 GH/W) | total 2.657 GH/s, 87 W, 0.0307 GH/W | user sub N acc N rej 0 (stale 0, low-diff 0)`.
+Tests: `--self-test --algo prox`, `--algo prox --hash-bench 10 --hash-prefix-len 369`.
+
+**Dev fee 1%** (60 s every 100 min), as for Pearl/NOID a second login on the pool you mine on (proximamine, InnovLab, any other stratum
+pool); the developer's account on proximamine is used when you mine solo or on suprnova, and when the fee login on your pool is refused,
+gets no job or its shares are rejected. The log names the pool of every fee slot.
+
+### 22. Pool lists: failover and failback, new in 1.7.8
+
+**Backup pools.** Give `--pool` several entries of **one coin** — a comma separated list or `--pool` repeated; the first entry is
+the **primary**, the others are backups:
+
+    freeforgem --pool pearl-eu2.luckypool.io:3360,prl-eu.kryptex.network:7048 --wallet prl1...
+    freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --pool stratum+ssl://noid.suprnova.cc:3340 --wallet o1...
+    freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701,innov+tls://eu2.innovlab.cc:19701 --wallet ...
+    freeforgem --pool cmfd+tls://IP1:PORT?pin=HEX1,cmfd+tls://IP2:PORT?pin=HEX2 --wallet cmfd1...
+
+One list, one coin and one protocol: Pearl `HOST:PORT` entries; NOID `stratum+ssl://` / `stratum+tcp://` entries; PROX all stratum or all
+InnovLab (the wallet and the password are the same on every entry); CMFD `cmfd+tls://` entries, each with its own `?pin=`. Solo
+(`--solo`) is one node: no list. A single `--pool` behaves exactly as before.
+
+**Failover.** A pool that cannot be reached, refuses the login or sends no job moves the miner to the next entry within seconds (the log
+says `pool 1 of 2 (host:port) is not usable: failing over to pool 2 of 2`); after the last entry the primary is tried again, with
+waits growing to 60 s as for a single pool. A connection that lived for more than a minute is retried on the same entry first.
+
+**A pool that went silent (dead link).** A pool that stops answering without closing the connection (a cable pulled, a route lost, a firewall DROP) is noticed in **about 60 seconds** (it used to take 180-300 s with no work done): then the miner reconnects, and if the entry does not come back, fails over to the next one. How: InnovLab (PROX) answers the miner's `keepalive` (every 20 s), NOID the hashrate report (every 30 s); the Pearl and PROX stratum have no keepalive, so after 20 s of silence (and once 20 s after connecting, even if jobs keep coming) the miner sends a `mining.ping` (an unknown method, which those pools answer with an error: that is an answer too). Once the pool has answered such a probe on this connection, 60 s with **no byte at all** (three missed probes) means the link is dead. Until the first answer, and for a pool that never answers probes, the old long limit applies (InnovLab / PROX stratum 180 s, Pearl 240 s, NOID 300 s), so a pool that only talks when it has a job (Pearl: one every 30-60 s) is never cut off by mistake; a pool that drops the connection right after a probe switches the probes off for the rest of the run. CMFD: the engine keeps its own pool connection (the miner only restarts the engines when none has its pool for 60 s, see above), its timeouts are the engine's.
+
+**Failback (back to the primary).** While the miner is on a backup, the primary is checked every `--failback-minutes` (default **10**,
+`0` = off) on a **separate connection** that submits nothing: connect, login (the same wallet and worker) and a usable job — the
+same code the mining session uses (CMFD: certificate-pinned TLS, login and the first job). After **2 good checks in a row** (the second
+one 60 s after the first, so a pool that flaps is not trusted) the miner goes back to the primary:
+
+    [pool:user] failback: the primary pool (host:port) answers again (check 1 of 2), checking again in 60 s
+    [pool:user] the primary pool (host:port) answered 2 checks in a row: switching back to it: now pool 1 of 2 (host:port)
+
+Nothing mining is lost on the way: the GPUs keep working on their current job while the connection moves; the shares found in the
+first second after the decision still go to the old pool, then the miner waits (1-3 s in all) for the old pool's answers to every
+share in flight, and only then connects to the primary; the first job of the primary replaces the old one. The few shares found in
+the last second or two before the connection moves belong to a job of the old pool and are not sent. A primary that was left again
+within five minutes of a failback is checked less often (x2, up to x16 of `--failback-minutes`; back to normal after 2 hours on it).
+A failed check is logged (`the primary pool is still not usable (...)`), the miner stays on the backup.
+
+**Dev fee.** The 1% fee connection goes to **the pool you are on**: whenever a fee slot starts it connects to your current entry, so the
+fee follows a failover and returns with a failback. (PROX: the fee on proximamine / InnovLab uses that pool's entry; a list with a
+suprnova entry uses the developer's proximamine account for the whole run, as a single suprnova pool does.)
+
+**CMFD.** The engine (`cmfd-miner`) knows one pool and retries it for ever, so for CMFD this side does it: when no engine has its pool
+for 60 seconds (or the pool refuses the login) the engines are stopped and restarted one by one with the next entry's `--pool` (while no pool works at all the wait doubles each round, up to 8 minutes); the same
+restart goes back to the primary after the failback checks. A restart reloads the 6.4 GB model: expect about a minute without mining
+per switch; the engine's own dev fee (36 s per hour, same pool) restarts its schedule with the engine. The failback check repeats the
+engine's handshake (pinned TLS, address-only login, first job) in the miner itself.
+
+**CMFD: a silent connection.** The engine keeps its pool connection itself, and a link that dies without a reset (a firewall DROP in
+both directions, a lost route) is not noticed by it for many minutes: it shows its hash rate and "connected" while the block height never
+changes (Rig05, DROP both ways: 6 min 41 s without noticing, no failover). So the miner also watches the **block height the engines
+report**: when it has not changed for **12 times the mean block interval** (measured on this run from the blocks seen, 60 s until 4 blocks
+are known; never less than **8 minutes**, never more than 30), the connection is taken as dead and the engines restart on the **next
+`--pool` entry**, exactly as for "no engine has the pool for 60 s" (with a single pool: on the same entry, a new connection). Log:
+`pool: pool 1 of 2 (...) is not usable (the engines report the same block height for 8.0 min: the pool connection is silent): failing over`.
+The threshold is long on purpose: CMFD finds a block about every 60 s (Rig05: 63157 -> 63178 in 22 min, gaps of 20-190 s) and block times
+are random, so 3x the mean (3 min) would be exceeded after 5 % of the blocks, dozens of times a day, while 12x happens about once in two
+weeks. The count does not run while the engines load, are paused (idle mode), are in the engine's fee slot or have no pool; if a restart
+brings no new height, the next threshold is twice as long (up to 4x), so a chain that really stands is not restarted every few minutes.
+Test hook: `FFGP_CMFD_STALL_S` (seconds).
+
+| Option | Meaning |
+|---|---|
+| `--pool A,B,C` / `--pool A --pool B` | the list; the first entry is the primary |
+| `--failback-minutes N` | on a backup, check the primary every N minutes and return after 2 good checks (default 10, 0 = off; fractions are fine) |
+| `--noshare-minutes M` | no accepted share for M minutes (and at least 10 expected): reconnect, then the next pool (default 15, 0 = off) |
+| `--reject-minutes K` | only rejected shares for K minutes: the same (default 5, 0 = off) |
+| `--pool-check` | log in to every `--pool` entry (connect, login, a job), print one verdict per entry, exit 0 / 1; no GPU needed, handy before a flight sheet |
+
+**A pool that credits nothing (accepted-shares watchdog).** A pool can take the connection and the login, send jobs and still not credit
+shares. While the GPUs hash for you, the miner reconnects when there is **no accepted share of yours for `--noshare-minutes`** (default
+**15**, `0` = off) **and at least 10 shares were expected** in that time at your measured hash rate and the pool's share difficulty (so rare
+big-difficulty shares never trigger it), or when there are **only rejected shares for `--reject-minutes`** (default **5**; at least 5
+rejects, none accepted). If the same happens again on the new connection, the miner moves to the **next entry** of the list (the primary
+that was left this way is checked for failback less and less often: x2 up to x16, as for a flapping primary); with a single pool it
+reconnects again with a warning in the log and never exits. Log: `[pool:user] watchdog: no accepted share for 15.0 min while ~60 were
+expected (12 sent, 0 rejected): reconnecting`. It does not act: during the dev fee minute and the 10 s after it (the fee has its own
+connection; its shares are never counted as yours), while the GPUs do not hash for you (paused, tuning, disconnected), when the GPUs found
+**no share at all** although shares were expected (a GPU problem, hardware errors or clocks: only a warning, the pool is kept), and in solo
+mode. CMFD: the engine does not tell the share difficulty, so shares are expected at the rate seen so far (one per 6 minutes until there
+are 3 of them, counted per pool entry and started over on every pool change: the easy shares of one pool never set the expectation for
+another): with no share at all a CMFD pool is left after about an hour. A failback check does not submit shares; a primary that
+credits nothing again after a failback is left again and checked less often.
+
+Names and defaults are those of ffgs 0.5.4 (`--failback-minutes`, 10 minutes, 2 good checks, 60 s between them). **HiveOS:** the flight
+sheet's *Pool URL* field takes several URLs separated by spaces or commas; **Windows:** `POOL` in the `start*.bat` files takes the
+comma separated list (the same coin in one list).
+
+Limits: the check logs in with your own wallet and worker name (a pool that refuses two connections of one worker would fail the
+check; none of the supported pools does); the watchdog needs a working hash rate and a known share difficulty to judge rare shares (CMFD: estimated).
+### 23. Automatic core clock lock `--auto-lock` (optional, new in 1.7.8)
+
+The miner picks the core clock lock of each NVIDIA GPU itself: it mines at several locks, each at its own undervolt profile (auto-uv,
+sections 12 and 17), measures hash rate and power and keeps the most efficient lock that loses at most 10 % of the top hash rate.
+**Off unless asked:** without `--auto-lock` nothing changes. The options are those of our SASEUL miner ffgs 0.5.4.
+
+    sudo ./freeforgem --pool HOST:PORT --wallet ADDRESS --lock-mclock 810 --auto-lock
+
+- **Coins:** Pearl, NOID, PROX. **NVIDIA only, root / Administrator.** Not for CMFD (its engine is a separate program with a start of
+  minutes per process; the miner stops with a message) and not for AMD.
+- `--auto-lock` turns on `--auto-uv` (with `--uv-offset N` every lock is measured at that fixed offset instead). It excludes `--idle` and
+  `--auto-uv-dry-run`.
+- **Locks tried:** by default 1800, 1700 ... 1200 MHz, nothing above the card's maximum graphics clock (a card that cannot reach 1600 gets
+  the 5 locks below its maximum). **Mining cards (CMP) start lower: the default top is 1500 MHz** (1500 ... 1100), because the first
+  step at 2000 MHz on a CMP 50HX (NVML maximum 2250) only ran into the power limit and the 4-card rig drew 894 W; the log says
+  `default range ... (safe top 1500 MHz for this card type ...)`. **GeForce RTX 30 (and RTX A) start at 1800 MHz** (1800 ... 1200)
+  for the same reason: on an RTX 3080 Ti (350 W limit) the steps at 2000 and 1900 MHz sat at the limit 150-170 MHz under their lock. An
+  explicit `--auto-lock-range` always wins.
+  **A step that sits at the power limit is not measured to the end:** when the card draws about its power limit (90 % or more) and the clock
+  stays below the lock for 20 s of mining in a row (a pause for an auto-uv check does not reset the count), it is decided in the first
+  half minute of the step, before any offset is searched, the step ends at once as *PL-limited* (`not valid: the clock did not hold the lock ... - PL-limited:
+  219 W at the 225 W power limit, 1650 MHz below the lock`) and the sweep goes on with the next lower lock without waiting for auto-uv or
+  the measurement. The miner only reads the power limit, it never sets one. `--auto-lock-range 1300-1600:100` (from-to[:step], step 100 by default, 15..1000) or a list
+  `--auto-lock-range 1350,1450,1530`.
+- A GPU with its own `--lock-cclock` value keeps that lock and is not swept (`--lock-cclock 1400,-` sweeps only the second GPU).
+  `--lock-mclock`, `--moffset`, `--temp-limit` work as before; the memory lock is part of the saved key.
+- **The sweep, highest lock first, all GPUs in parallel.** Each round is a miner process of its own with the same options and a per-GPU
+  `--lock-cclock` (the GPUs under test at their next lock, the others at their chosen or own lock); its log goes to the same console / log
+  and HiveOS keeps showing the hash rate. At each lock auto-uv applies the verified profile of that lock, or checks / tunes it (a new lock
+  starts from the profile of the lock above minus 30; ~5-12 min; only that GPU pauses), then the GPU **mines** at it: 45 s to settle, then
+  120 s measured (hash rate from the miner's stats line, average NVML watts, median core clock). **Shares found meanwhile go to the pool
+  as usual.** Between rounds the miner process restarts (a few seconds without hashing; every GPU's saved profile is re-applied after its
+  quick check).
+- **Early stop:** once a lock is more than the allowed loss below the top hash rate, the lower locks are not measured.
+- **Choice:** `--auto-lock-goal eff` (default) = the best TH/W (NOID: MH/W, PROX: GH/W) among the locks within `--auto-lock-max-loss` %
+  (10, 0..90) of the top hash rate measured; `--auto-lock-goal speed` = the top hash rate; `--auto-lock-goal profit` = the most US$ per day (23.1).
+- **Points that do not count:** the clock did not hold the lock (median more than max(45 MHz, 3 %) below it: power / thermal limit; or
+  as far above it: the lock was reset by another tool / an OC apply) or the measurement was interrupted 3 times (auto-uv re-check, temperature limit, no job) -> `not valid`. A refused lock, a GPU that stops at it
+  or no steady mining within 60 min -> `FAILED`, next lock. If the miner dies during a lock (Xid, freeze, power cut), the next start marks
+  that lock `crashed` and never tries it again. A round whose miner process ends before mining (pool unreachable, start-up error) is
+  tried again after 30 s, 3 times; then the sweep waits for the next start (nothing is recorded as failed). A GPU without lock control
+  (`Not Supported`, some laptops) mines without a lock (saved). No permission: the sweep stops with a message.
+- **The result** is a table in the log (RTX 3070, Pearl, `--auto-lock-range 1500,1400`, test times; at 1500 another
+  program reset the card's OC during the test, so that point does not count):
+
+    auto-lock: GPU0 (bus 0d, RTX 3070) RESULT (goal eff, max loss 10%, top 63.325 TH/s):
+    auto-lock:   lock  offset      TH/s       W      TH/W
+    auto-lock:   1500     +90    81.535   199.4    0.4089  not valid: the clock ran above the lock (the lock was reset by another tool / OC apply)
+    auto-lock:   1400    +210    63.325    87.2    0.7263  ★ chosen
+    auto-lock: GPU0 (bus 0d, RTX 3070) mining at lock 1400 ★ (saved; --auto-lock-reset to sweep again)
+
+- **Saved** per GPU, coin (NOID: and its mode), board, driver, memory lock and mining kernel in `autolock.json` next to `uv.json`
+  (HiveOS: `/hive-config/freeforgem`, kept over miner updates). **The next start applies the saved lock at once** (one line
+  `lock 1500 ★ (saved ...)`), no sweep. A changed `--auto-lock-goal` / `--auto-lock-max-loss` is re-chosen from the saved points; a wider
+  range or a larger loss measures only the missing locks. `--auto-lock-reset` forgets the points of these GPUs and sweeps again (the
+  auto-uv profiles stay; `--uv-reset` in addition re-tunes the locks of the first round once). A new driver, another card or kernel = a new
+  sweep. `--uv-reset-all` does not touch `autolock.json`; an own restart after a GPU fault does not repeat `--auto-lock-reset`. A stop
+  during the sweep keeps the points measured so far; the next start goes on.
+- **Time:** the first sweep costs, per lock, the auto-uv tuning of a new lock plus ~3 min of measured mining; with the early stop
+  typically 3-5 locks, 30-90 min, all GPUs at once. Later starts: nothing. `--minutes` counts the mining after the sweep.
+- **HiveOS:** add `--auto-lock` to *Extra config arguments* (Pearl e.g. `--auto-lock --lock-mclock 810`). A core lock in the OC profile is
+  put back on exit as before. **Windows:** `set "EXTRA=--auto-lock"` in the start script, run it as Administrator.
+- Short test runs: `FFG_AL_TIMES=settle,measure[,max_wait]` (seconds).
+
+#### 23.1 Goal profit: `--auto-lock-goal profit` (new in 1.7.8)
+
+With cheap electricity the most profitable lock is not the most efficient one. Example (RTX 3070 on PROX, 0.034 $, electricity
+0.12 $ by day / 0.053 $ at night = 0.0977 $/kWh): goal eff keeps 1400 MHz, but 1500 MHz earns about 1.31 $/day and 1800 MHz
+about 1.52 $/day. `--auto-lock-goal profit` chooses by money:
+
+    sudo ./freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701 --wallet ADDRESS \
+        --auto-lock --auto-lock-goal profit --power-price 0.12,0.053@23-07
+
+- **Profit of a lock** = income − electricity, US$ per day:
+  - income = hash rate × coins per H/s per day (from the network) × coin price × 0.99 (miner fee 1 %) × (1 − pool fee);
+  - electricity = the NVML watts measured at that lock / 1000 × 24 h × the tariff averaged over the day.
+  The watts are the GPU board's only (not the PSU losses, CPU, fans): add your margin to `--power-price` if you want it in.
+- **`--power-price X`** in $ per kWh, **required** (without it goal profit stops with a message). Day / night:
+  `--power-price 0.12,0.053@23-07` = 0.053 from 23:00 to 07:00, 0.12 the other hours; more ranges may follow
+  (`0.12,0.053@23-07,0.08@13-15`, later ranges win). The miner mines around the clock, so it uses the average over the 24 hours
+  ((16 × 0.12 + 8 × 0.053) / 24 = 0.0977). The currency must be that of the coin price (US$ when the price comes from the tickers).
+- **Coins per H/s per day** (the unit is always the miner's own hash rate; Pearl's TH/s are the pool's TH/s, PROX's GH/s are
+  attempts):
+  - **Pearl:** 86400 × block reward / work per block. Work per block = 2^256 / network target, from the nbits of the pool's job header
+    (what the node counts as work); the block reward from the job's height (the node's formula 2.1·10^9 × E / ((h+E)(h−1+E)),
+    E = 650226; 2167 PRL at block 143 562). A pool that sends no height (Kryptex): LuckyPool's public `api/stats` (network
+    difficulty × 2^16 = the same work per block).
+  - **NOID:** 86400 × miner reward / work per block, work = 2^256 / the job's block target; reward of the v2 schedule (16 NOID gross
+    per block the first 1 051 200 blocks after 210 537, then 11.3, 8, ...; 10 % development allocation for 3 years → 14.4 NOID to the
+    miner). Transaction fees are left out. No public API: until the first job, the data saved by the last run.
+  - **PROX:** 86400 × slot reward / network attempts per slot (one winner per 10.24 s slot, 95 PROX; the job's k says nothing about
+    the competition), from InnovLab's public stats API (`network.attempts_per_slot`, `reward_motes`, 1 PROX = 10^6 motes) — also when
+    you mine on another pool.
+  - **CMFD:** no `--auto-lock`, so no profit choice.
+- **Pool fee:** known LuckyPool (Pearl) 1 %, InnovLab (PROX) 0 %, solo 0; another pool: 0 % with a log line — set it with
+  `--pool-fee PCT`.
+- **Coin price:** the median of several public tickers, read once at the start (and at each re-choice). A ticker more than 15 % from
+  the median is left out (`OUTLIER`); a ticker with less than 1000 $ of 24 h volume is `THIN` and only used when nothing else answers;
+  a price from one ticker only gives a WARNING. If none answers, the last saved price (up to 7 days) is used, else the choice is made
+  by efficiency until a price is there. **`--coin-price X`** (US$) sets it by hand: then no exchange is asked at all.
+
+  | coin | tickers (checked 15.11.2026) |
+  |---|---|
+  | Pearl (PRL) | SafeTrade, Gate, LBank, BigONE, Coinbase, Kraken (PEARL/USDT, PEARL/USD), CoinGecko `pearl-2`, CoinPaprika `prl-pearl-1` (thin), LuckyPool `api/stats` |
+  | PROX | SafeTrade PROX/USDT only (a warning each time: use `--coin-price` if it looks wrong) |
+  | NOID | SafeTrade NOID/USDT, CoinGecko `parano1d`, CoinPaprika `noid-parano1d` (both mirror SafeTrade) |
+  | CMFD | none (no auto-lock anyway) |
+
+  Some exchanges are not reachable from every country (Coinbase, Kraken, BigONE did not answer from Uzbekistan; SafeTrade sometimes
+  answers 403 from behind Cloudflare): the other tickers carry the median. The table is `SOURCES` in `host/src/profit.rs`.
+- **Locks measured:** goal profit has no early stop (a dearer coin or cheaper power moves the best lock), the default range is
+  2000 .. 1200 MHz step 100 (nothing above the card's maximum; CMP cards 1500 .. 1100): up to 9 locks, each tuned by auto-uv once (expect 1-2 h for the first
+  sweep). Points measured for goal eff / speed are reused: switching the goal measures only the missing locks.
+- **The table** in the log gets income / power / profit per day:
+
+        auto-lock: GPU0 (bus 0d, RTX 3070) RESULT (goal profit: PROX 0.03790 $, 1.7158e-8 PROX per H/s per day, fees 1% miner + 0% pool, power 0.0977 $/kWh):
+        auto-lock:   lock  offset      GH/s       W      GH/W   income   power   profit $/day
+
+- **Re-choice while mining:** every `--auto-lock-reprice-hours` (6; 0 = never) the price (and the network data the pool's jobs do not
+  give) is fetched again and every GPU is re-chosen from its measured points, **without new measurements**. A switch needs more than
+  `--auto-lock-hysteresis` % (3) more profit than the current lock; one log line either way
+  (`GPU0: lock 1500 -> 1800: profit 1.310 -> 1.520 $/day (+16.0% > 3%)` / `keeps lock 1500 ...`). For this the miner started with
+  goal profit mines in a miner process of its own (as the rounds of the sweep; its log follows unchanged, HiveOS sees the hash rate) and
+  restarts it at the new locks (a few seconds without hashing). With `--auto-lock-reprice-hours 0` the miner mines in its own process
+  as with goal eff, the choice is made at each start.
+- **Privacy.** Without goal profit the miner connects only to your pool (and, unless `--no-update-check`, to github.com once in 12 h for
+  the release check). With goal profit it also sends **plain HTTPS GET requests** to the tickers above and to the network
+  APIs (LuckyPool `api/stats` for Pearl, InnovLab `proxima/v1/stats` for PROX): at the start and every `--auto-lock-reprice-hours`. A
+  request carries only the URL of the public ticker, `Host` and `User-Agent: FreeForGem/1.7.8` — no wallet, worker, pool, hash rate
+  or anything else of yours, no cookies; nothing is posted. Of course every server sees your IP address. `--coin-price X` turns the
+  ticker requests off; the network API of PROX (and of Pearl on a pool without heights) is still asked.
+- Saved in `autolock.json` besides the points: the goal and, under `money`, the last price and network data per coin (time, source).
+
 ---
 
 ## Русский
@@ -1031,7 +1339,7 @@ the installation the rig can start without a working driver, so do it when you c
 ### 1. Что это
 
 FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work) для видеокарт NVIDIA с **комиссией разработчика 1%**.
-С 1.6.0 майнит также Common Foundry (CMFD, раздел 13), с 1.7.0 — **NOID** (Parano1d, раздел 15).
+С 1.6.0 майнит также Common Foundry (CMFD, раздел 13), с 1.7.0 — **NOID** (Parano1d, раздел 15), с 1.7.8 — **Proxima (PROX)** (раздел 21).
 
 **Название.** С 1.7.0 мульти-монетный майнер (Pearl + CMFD + NOID) называется **FreeForGem** (бинарь `freeforgem`, кастомный
 майнер HiveOS `freeforgem`, репозиторий `pepsykolya/FreeForGem`). **FreeForGemPear** остаётся майнером Pearl под своим именем.
@@ -1047,7 +1355,7 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 | RTX 30xx (Ampere, sm_86): 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **основная цель, оптимизировано: ~70 TH/s на RTX 3070 при ~107 Вт** |
 | RTX 40xx (Ada, sm_89) | своё SASS-ядро с 1.5.4 (RTX 4070 Ti: тот же хэшрейт, на ~10 Вт меньше, чем с ядром RTX 30xx) |
 | RTX 50xx (Blackwell, sm_120) | поддержка с 1.5.0, компилированное ядро (без оптимизации); нужен драйвер 570+ |
-| CMP 50HX (TU102) | работает, но **для Pearl не рекомендуется: ~2.6 TH/s на карту** (int8 тензорные ядра урезаны ~в 17 раз относительно CMP 40HX, на любом драйвере) |
+| CMP 50HX (TU102) | работает: **на драйвере 610.43.03 около 67 TH/s на карту при локе 1300 и около 77 TH/s при 1500** (166–176 Вт на карту, риг 4× CMP 50HX, 1.7.8). На старых драйверах 550.78 и 595.91.07 только ~2,6 TH/s (int8 тензорные ядра урезаны ~в 17 раз): обновите драйвер |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX (Turing, sm_75) | поддержка с 1.5.3, собственное SASS-ядро: ~49,9 TH/s на RTX 2060 SUPER @1605 МГц; **память лочить на 5001, не 810** |
 | AMD Radeon RX 6000 (RDNA2), Windows | **новое в 1.6.0**, своё ядро OpenCL: 34,4 TH/s на RX 6800 XT (раздел 14) |
 | Старые карты, A100 (sm_80), AMD в Linux / HiveOS | не поддерживаются |
@@ -1064,10 +1372,10 @@ FreeForGem — GPU-майнер **Pearl (PRL)** (pearlhash, proof-of-useful-work
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
 
-**Ссылка для установки (1.7.7):**
+**Ссылка для установки (1.7.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1091,15 +1399,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7
 4. **Применить.** *Apply changes*, *Create flight sheet*, затем применить лист к ригу.
 
 Лог майнера: `/var/log/miner/freeforgem/freeforgem.log` и консоль майнера в HiveOS.
-На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера; с 1.7.5 там же — вышедшая новая версия (`1.7.7 0.652 TH/W, need update!!`: майнер проверяет GitHub через ~1 мин после старта и раз в ~12 ч, сам ничего не устанавливает; `--no-update-check` выключает).
+На панели видны хэшрейт по картам и общий, температура, вентиляторы, принятые и отклонённые шары; с 1.7.2 — эффективность рига (TH/Вт для Pearl, MH/Вт для NOID) рядом с версией майнера; с 1.7.5 там же — вышедшая новая версия (`1.7.8 0.652 TH/W, need update!!`: майнер проверяет GitHub через ~1 мин после старта и раз в ~12 ч, сам ничего не устанавливает; `--no-update-check` выключает).
 Для обновления смените Installation URL на новую версию. То же подробнее: [HIVEOS.md](HIVEOS.md).
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
 
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
-cd freeforgem-1.7.7
+tar xzf freeforgem-1.7.8-linux-x86_64.tar.gz
+cd freeforgem-1.7.8
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1120,8 +1428,8 @@ cd freeforgem-1.7.7
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.7.7-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
+1. Скачайте **`freeforgem-1.7.8-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1172,7 +1480,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.7-windows-x64
+cd /d C:\Mining\freeforgem-1.7.8-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1264,7 +1572,7 @@ AlphaPool `eu1.alphapool.tech:5571` (также `us1`, `us2`, `ru1`, `sg1`), Him
 | RTX 5060, 5060 Ti, 5080, 5090 | 1900–2500 | лок `810` | +390..480 | оценка |
 | RTX 2060 SUPER, RTX 2070/2080 (вкл. SUPER), GTX 1660/1650 | 1500–1650 | лок `5001` (**не 810**: на 810 Turing теряет ~25%) | +200..260; предел auto-uv +225 по умолчанию (с 1.6.2) | опорное (2060 SUPER: замер) |
 | CMP 40HX | 1400 | лок `5001` | +150; предел auto-uv +150 по умолчанию (с 1.6.2) | риги пользователей; CMP 40HX ловила Xid на +255 |
-| CMP 50HX (TU102) | — | лок `5001` | +220 и выше; предел auto-uv +330 по умолчанию (`--uv-max 330`) | риги пользователей. **Для Pearl не рекомендуется: ~2.6 TH/s на карту** (int8 тензорные ядра урезаны ~в 17 раз относительно 40HX; от драйвера не зависит: 550.78 и 595.91.07 одинаково, риг 3× CMP 50HX) |
+| CMP 50HX (TU102) | — | лок `5001` | +220 и выше; предел auto-uv +330 по умолчанию (`--uv-max 330`) | риги пользователей. Лок **1300–1500** (верх по умолчанию у `--auto-lock` для CMP — 1500). **Pearl на драйвере 610.43.03: ~67 TH/s на карту при 1300, ~77 TH/s при 1500** (166–176 Вт на карту, риг 4× CMP 50HX); на старых драйверах 550.78 / 595.91.07 только ~2,6 TH/s (int8 тензорные ядра урезаны ~в 17 раз) |
 
 RTX 40 и 50 работают на гораздо более высоком локе ядра (**1900–2500 МГц**) и держат больший offset, чем RTX 30; поэтому
 auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300 (RTX 30 — с +120).
@@ -1275,8 +1583,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 на карту в порядке `--devices`: `--uv-max 225,495,150` (`-` = значение по умолчанию для этой карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
 **Карты CMP (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX майнят Pearl на Turing-ядре (память лочить на 5001, предел auto-uv +150).
-**CMP 50HX для Pearl не рекомендуется** — всего ~2,6 TH/s на карту (int8 тензорные ядра урезаны ~в 17 раз относительно CMP 40HX,
-на любом драйвере). **Для Common Foundry (CMFD) CMP 50HX подходит:** ~13 FW/s на карту при ~220 Вт (лимит мощности 225 Вт,
+**CMP 50HX и Pearl:** на драйвере 610.43.03 карта даёт около 67 TH/s при локе ядра 1300 и около 77 TH/s при 1500
+(166–176 Вт на карту; риг 4× CMP 50HX, FreeForGem 1.7.8); на старых драйверах 550.78 и 595.91.07 только ~2,6 TH/s
+(там int8 тензорные ядра урезаны ~в 17 раз), поэтому сначала обновите драйвер. **Для Common Foundry (CMFD) CMP 50HX подходит:** ~13 FW/s на карту при ~220 Вт (лимит мощности 225 Вт,
 лок ядра 1410 МГц, память без лока; риг 4× CMP 50HX, пул Aria), с `--auto-uv` (подбор под CMFD, +225) — около 13,2 FW/s при
 196–203 Вт (+8–11 % FW/kWh); см. раздел 13. CMFD нужно ~7 ГБ свободной видеопамяти, на картах с 6 ГБ (CMP 30HX) он не
 запустится. **Разблокировка CMP не входит в FreeForGem:** драйверов и программ, снимающих ограничения CMP-карт, мы не
@@ -1307,9 +1616,9 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.7.8-linux-x86_64.tar.gz freeforgem-1.7.8_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.7.8-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.7.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1318,7 +1627,7 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 `devfee: back to user`. Первый слот приходится на случайный момент первых 100 минут. Если логин комиссии не обслуживается, слот
 пропускается; ваш майнинг не блокируется. На LuckyPool логин комиссии с 1.4.2 майнит заодно и NOCK разработчика
 (`prl1...+NOCK`); если пул не примет такой логин, майнер вернётся к обычному кошельку PRL. Время комиссии остаётся 1%. Комиссия — условие лицензии: убирать, уменьшать или перенаправлять её нельзя
-(см. [LICENSE](LICENSE), пункт 3).
+(см. [LICENSE](LICENSE), пункт 3). При списке пулов (раздел 22) соединение комиссии следует за вами: на старте слота оно идёт на тот пул, где вы сейчас.
 
 ### 11. Проблемы и решения
 
@@ -1510,6 +1819,12 @@ set "UV_MAX=495"
 предупреждение (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Пример для 2× RTX 2060 SUPER,
 3× RTX 3070 Laptop и CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (то же, что по умолчанию).
 
+**Списки по картам (1.7.8, все монеты):** каждая опция со значением на карту (`--devices`, `--lock-cclock`, `--lock-mclock`, `--moffset`,
+`--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`, `--temp-stop`) принимает запятые, точки с запятой или пробелы, в том числе вперемешку:
+`--lock-cclock 1500,1650`, `1500;1650`, `"1500 1650"`, `1500, 1650 1800` и без кавычек `--lock-cclock 1500 1650 1800` (числа после опции —
+её значения до следующей опции; отрицательные тоже: `--uv-offset -100 50`). Так же в *Extra config* HiveOS и в `.bat`-файлах. Пустое поле
+между запятыми / точками с запятой (или `-`) — значение по умолчанию для этой карты; неверное число значений — ошибка.
+
 **Управление частотами GPU (по желанию, через NVML; нужен root / администратор, работает в Windows — с 1.4.9).** `--lock-cclock N` фиксирует частоту ядра на N МГц (как `nvidia-smi -lgc N,N`), `--lock-mclock N` фиксирует частоту памяти на N МГц (как `-lmc`), `--moffset N` задаёт смещение частоты памяти в МГц, может быть отрицательным (нужен драйвер 555+). Каждая опция принимает одно значение для всех GPU или список через запятую в порядке `--devices` (по одному на карту). Настройки применяются при старте и снимаются при выходе (Ctrl-C / SIGTERM / сбой). **С 1.7.1 прежний лок возвращается, а не снимается:** в HiveOS — лок из профиля разгона (*Lock Core Clock* / *Lock Memory Clock*, читается из `/hive-config/nvidia-oc.conf`; до 1.7.1 тестовый запуск с `--lock-cclock` оставлял риг без лока HiveOS); вне HiveOS NVML не умеет читать лок, поэтому укажите его в `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` (имена FreeForGemPear `FFGP_RESTORE_*` тоже работают; одно значение или список по картам, 0 = лока не было), иначе частота, как и раньше, сбрасывается по умолчанию. В логе видно, что происходит: `core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`, при выходе `core clock lock 1470 MHz put back`. После сбоя или `kill -9` то же делает следующий запуск. В Windows задайте `LOCK_CCLOCK`, `LOCK_MCLOCK`, `MOFFSET` в `.bat`-файле. Пример: `--lock-cclock 1500 --lock-mclock 810 --moffset -200`. **Подсказка для RTX 30 (1.7.7):** для Pearl на RTX 30 (Ampere) лучший TMAC/Дж на локе ядра около 1530 МГц (+3,6 % TMAC/Дж за -1,9 % скорости против 1560, замер на RTX 3070; 1515 и ниже — плато). Майнер только подсказывает: если RTX 30 работает без лока ядра или выше 1530, в логе при старте одна строка `clocks: hint: ... try --lock-cclock 1530`; сам ничего не ставит. С `--auto-uv` новый лок означает отдельный подбор (профили хранятся по локу ядра; поиск стартует от профиля ближайшего более высокого лока). После первой минуты майнинга майнер несколько раз читает фактическую частоту памяти каждой карты с локом под нагрузкой и пишет одно жёлтое предупреждение, если она не равна локу (например `--lock-mclock 405` на RTX 3070: карта считает на 810 МГц, ниже под нагрузкой она не опускается); сам лок майнер не меняет.
 
 Файлы по умолчанию лежат рядом с программой (Windows — в папке майнера), в HiveOS — `/hive-config/freeforgem`
@@ -1544,7 +1859,7 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD), новое в 1.6.0
 
 Тот же бинарник майнит и **Common Foundry (CMFD, ForgeMatrix V4)**. Работу по CMFD делает движок **FreeForgeMiner**
-(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.4), он лежит в папке `cmfd/` пакета: в Windows —
+(MIT, <https://github.com/pepsykolya/freeforgeminer>, релиз 1.2.5), он лежит в папке `cmfd/` пакета: в Windows —
 релизные файлы без изменений, в Linux/HiveOS — собранные из того же закреплённого исходника на Ubuntu 20.04, чтобы работать на любом
 HiveOS (образы на Ubuntu 20.04 и 22.04).
 FreeForGem готовит модель, запускает по процессу движка на каждую GPU, применяет ваши настройки частот, печатает свою
@@ -1997,7 +2312,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 и наращивается; в лог ничего не пишется, пока GPU не подойдёт к пределу. Показываемый и отправляемый хешрейт — реальный (считаются только
 завершённые запуски), строка статуса заканчивается `[temp-limit 72%]`. `--temp-stop C2[,C2]` — жёсткий останов (по умолчанию `C` + 10, не больше 90, не меньше
 `C` + 3): при `C2` (3 показания подряд или одно на 5 C выше) GPU перестаёт майнить, пока не остынет до `C` - 6 (или до `C` - 3 через 60 с), затем
-снова стартует с 30 %. Pearl и NOID, NVIDIA; **не для CMFD** (его движок — внешняя программа, её нельзя гонять скважностью: используйте лимит
+снова стартует с 30 %. Pearl, NOID и PROX, NVIDIA; **не для CMFD** (его движок — внешняя программа, её нельзя гонять скважностью: используйте лимит
 мощности или `--lock-cclock`). Из ffgs не перенесено: датчики памяти/hotspot, снижение лока частоты ядра перед паузами, AMD. Такой цикл держит
 GPU на буст-частоте во время запусков, поэтому стоит хешрейта и эффективности: где частоты можно задать, лучше охлаждает пониженный `--lock-cclock`.
 
@@ -2042,6 +2357,297 @@ Secure Boot должен быть выключен; сборка — сторо�
 питание, риг может загрузиться без рабочего драйвера, поэтому ставьте, когда можете добраться до рига. Чтобы вернуться, поставьте другую версию
 драйвера через `nvidia-driver-update` и перезагрузитесь.
 
+
+### 21. Proxima (PROX), новое в 1.7.8
+
+**Подключение и установка.** HiveOS: *Полётный лист* → монета `PROX` (если её нет в списке — добавьте как свою), кошелёк: ваш адрес PROX
+(на InnovLab — holder id, 64 hex), пул: *Configure in miner*, майнер: *Custom* → *Setup Miner Config*:
+
+![HiveOS: полётный лист — монета, кошелёк, пул «Configure in miner», майнер Custom](docs/img/hiveos-prox-1-flightsheet.png)
+
+| Поле | proximamine | InnovLab | соло (своя нода) |
+|---|---|---|---|
+| Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz` | то же | то же |
+| Hash algorithm | оставить `----` (в списке HiveOS нет `proxima`) | так же | так же |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
+| Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (или `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://IP_НОДЫ:ПОРТ` (`mine.seeker.listen` ноды) |
+| Pass | secret вашего аккаунта proximamine | `x` | `mine.seeker.token` ноды |
+| Extra config arguments | `--auto-uv --lock-cclock 1500` | то же | то же |
+
+![HiveOS: Miner name, Installation URL, Hash algorithm](docs/img/hiveos-prox-2-miner.png)
+![HiveOS: Wallet and worker template, Pool URL, Pass](docs/img/hiveos-prox-3-pool.png)
+![HiveOS: Extra config arguments](docs/img/hiveos-prox-4-extra.png)
+
+**Рекомендуемый Extra config:** `--auto-uv --lock-cclock <МГц>` (одно значение для всех карт или список через запятую по GPU). Лочит
+частоту ядра, а auto-uv подбирает для неё пониженное напряжение (каждый шаг проверяется бит в бит; первый запуск — несколько минут на
+карту). Строку можно просто удалить: тогда майнер работает на родных частотах карты.
+
+| GPU | `--lock-cclock` | замер (память на минимальной частоте, на каждой точке 0 неверных хешей) |
+|---|---|---|
+| RTX 3070 | `1500` | 2,66 GH/s, 87 Вт, 0,031 GH/W (финальная сборка 1.7.8, прогон auto-lock с `--uv-offset 120`). Выше лок — хуже эффективность: 1700 3,03 GH/s, 111 Вт, 0,027 GH/W; 1900 3,37 GH/s, 160 Вт, 0,021 GH/W |
+| RTX 3070 Laptop | `1500` | +270: 2,23 GH/s, 53 Вт, 0,042 GH/W (1650 +270 0,040, 1800 +270 0,033 GH/W); ватты — то, что отдаёт драйвер ноутбука (только GPU) |
+| RTX 3080 Ti | `1500` | +210: 4,40 GH/s, 147 Вт, 0,030 GH/W (на 1500 оффсет мощность не снижает: напряжение уже на минимуме). Для скорости `1800`, +270: 5,28 GH/s, 201 Вт, 0,026 GH/W |
+| RTX 4070 Ti | `2450` | +270: 5,47 GH/s, 142 Вт, 0,0385 GH/W: хешрейт на 37 % выше, чем на 1800 (4,00 GH/s, 102 Вт, 0,039 GH/W), при почти той же эффективности. На Ada эффективность почти не зависит от лока (1500 +270 0,038, 1650 0,037, 2200 0,037 GH/W) |
+| RTX 4070 Laptop | — | около 3,22 GH/s на стоковых частотах; пока не подбиралась |
+| CMP 50HX и остальные карты | — | не замерено (на CMP лок памяти недоступен, «Not Supported») |
+
+Оффсеты — то, что `--auto-uv` ищет сам; фиксированный `--uv-offset` с тем же локом даёт приведённые цифры. Для сравнения, сток:
+RTX 3070 при лимите 200 Вт 3,26 GH/s, 199 Вт; RTX 4070 Ti 5,90 GH/s (prefix 369).
+
+Windows: `start-prox.bat` (впишите `WALLET`, `POOL`, `PASSWORD` или `SOLO` + `TOKEN`; `AUTO_UV=1` и `LOCK_CCLOCK=1500` — та же
+рекомендация, для них запускайте от администратора). Linux:
+`sudo ./freeforgem --algo prox --pool stratum+ssl://pool.proximamine.com:3334 --wallet АДРЕС --worker rig1 --password SECRET --auto-uv --lock-cclock 1500`.
+
+**HiveOS применяет свой разгон.** `nvidia-oc` в HiveOS записывает профиль разгона из веб-интерфейса поверх частот при каждом старте майнера и
+при каждой смене разгона: лок ядра / памяти и оффсет, выставленные майнером, сбрасываются. С 1.7.8 майнер возвращает их сам, каждую
+GPU по отдельности: раз в 15 с он смотрит частоту под нагрузкой; частота ядра, устойчиво выше лока (частота памяти мимо лока), значит лок
+потерян, и он ставится заново (`clocks: GPU bus ...: the core clock lock 1500 MHz was reset by an OC apply ... set again`, для всех монет).
+Оффсет ядра (результат `--auto-uv` или `--uv-offset N`) перечитывается раз в 30 с: значение профиля HiveOS (или 0) — это применение
+разгона, и проверенный оффсет ставится заново (с `--auto-uv` после 20-секундной проверки этой GPU); другое значение — чужой инструмент,
+майнер эту GPU не трогает. Не больше 4 возвратов на GPU в час, потом майнер на ней уступает и пишет об этом в лог.
+
+**Что это.** `--algo prox` майнит Proxima на PoW по хешу транзакции (library upgrade 6, со слота 196000): `h = BLAKE2b-256(message || nonce)`,
+шаре нужно `k` нулевых младших бит в последних 8 байтах `h`. Только NVIDIA (GTX 10 / RTX 20/30/40/50, sm_61+). Ядро — в `libproxgpu.so` /
+`proxgpu.dll` (закрытое, как у Pearl и NOID); каждый кандидат перед отправкой пересчитывается на CPU. PROX включается без `--algo`, если в
+хосте пула есть `prox`, адрес `innov+tls://`, хост InnovLab на порту 19701 или задан `--solo`.
+
+**Пулы.** proximamine (stratum формата suprnova, логин `АДРЕС.ВОРКЕР`, пароль — secret аккаунта), InnovLab (свой протокол,
+`innov+tls://ХОСТ:19701` или `innov+tcp://`, логин `HOLDER_ID.ВОРКЕР`, пароль `x`). proxi.suprnova.cc пускает только user agent своего
+майнера; FreeForGem называет себя своим именем (`FreeForGem/<версия>`) и чужим майнером не притворяется.
+**Соло:** `--solo http://127.0.0.1:8100 --token <mine.seeker.token>` (seeker v2 у `proxi node mine`; `--seeker-name ИМЯ`).
+
+**auto-uv для PROX** (`--auto-uv`, выключен, пока не задан): каждый шаг проверяется в отдельном процессе — ядро майнинга на 8 фиксированных
+заданиях с низким k, кандидаты пересчитываются на CPU, ответ ядра должен повторяться бит в бит. Результат — последний хороший шаг минус один
+шаг, с подтверждением, сохраняется в `uv.json` (раздел `prox`) по GPU, драйверу, версии майнера и локу ядра; перепроверка раз в 6 ч
+(`--uv-reval-hours`), шаг назад при неверном кандидате в майнинге, исходный оффсет владельца возвращается при выходе. Без лока профиль
+привязан к частоте под нагрузкой (как у Pearl), поэтому лок рекомендуется. `--uv-min/--uv-max/--uv-step/--uv-reset/--uv-reset-all/
+--uv-keep-last` — как у Pearl; `--uv-offset N` ставит фиксированный оффсет.
+
+**Частоты.** По умолчанию память лочится на самой низкой частоте, при которой ядру доступен весь диапазон частот (BLAKE2b видеопамять не
+использует: на несколько ватт меньше); `--no-mem-lock`, `--lock-mclock` или `--moffset` оставляют это вам. `--lock-cclock`, `--temp-limit`,
+`--devices`, `--minutes`, `--no-color` — как у Pearl.
+
+Строка лога: `[ 60s] GPU0 2.657 (87 W, 0.0307 GH/W) | total 2.657 GH/s, 87 W, 0.0307 GH/W | user sub N acc N rej 0 (stale 0, low-diff 0)`.
+Проверки: `--self-test --algo prox`, `--algo prox --hash-bench 10 --hash-prefix-len 369`.
+
+**Комиссия 1 %** (60 с раз в 100 мин), как у Pearl/NOID — второй логин на том же пуле, где майните (proximamine, InnovLab, любой другой
+stratum-пул); аккаунт разработчика на proximamine используется в соло и на suprnova, а также если fee-логин на вашем пуле отклонён, не
+получил задания или его шары отклоняются. В логе указан пул каждого слота комиссии.
+
+### 22. Списки пулов: переход на резервный и возврат на основной, новое в 1.7.8
+
+**Резервные пулы.** В `--pool` можно указать несколько адресов **одной монеты** — через запятую или повторяя `--pool`; первый — **основной**,
+остальные — резервные:
+
+    freeforgem --pool pearl-eu2.luckypool.io:3360,prl-eu.kryptex.network:7048 --wallet prl1...
+    freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --pool stratum+ssl://noid.suprnova.cc:3340 --wallet o1...
+    freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701,innov+tls://eu2.innovlab.cc:19701 --wallet ...
+    freeforgem --pool cmfd+tls://IP1:PORT?pin=HEX1,cmfd+tls://IP2:PORT?pin=HEX2 --wallet cmfd1...
+
+Один список — одна монета и один протокол: Pearl — записи `HOST:PORT`; NOID — `stratum+ssl://` / `stratum+tcp://`; PROX — все stratum или все
+InnovLab (кошелёк и пароль одни на все записи); CMFD — `cmfd+tls://`, у каждой свой `?pin=`. Соло (`--solo`) — одна нода, списка нет.
+Один `--pool` работает как раньше.
+
+**Переход на резервный (failover).** Пул недоступен, отказал в логине или не прислал задание — майнер за секунды переходит к следующей записи
+(в логе `pool 1 of 2 (host:port) is not usable: failing over to pool 2 of 2`); после последней снова пробуется основной, паузы растут до
+60 с, как у одиночного пула. Соединение, прожившее больше минуты, сначала переподключается к той же записи.
+
+**Пул замолчал (мёртвая связь).** Пул, который перестал отвечать, не закрыв соединение (выдернут кабель, пропал маршрут, DROP в файрволе), обнаруживается примерно за **60 секунд** (раньше — 180-300 с простоя): майнер переподключается, а если запись не возвращается, переходит на следующую. Как: InnovLab (PROX) отвечает на `keepalive` майнера (каждые 20 с), NOID — на отчёт о хешрейте (каждые 30 с); у stratum Pearl и PROX своего keepalive нет, поэтому после 20 с тишины (и один раз через 20 с после подключения, даже если задания идут) майнер шлёт `mining.ping` (неизвестный метод, на который эти пулы отвечают ошибкой, а это тоже ответ). Как только пул ответил на такую проверку на этом соединении, 60 с **без единого байта** (три пропущенные проверки) означают мёртвую связь. До первого ответа и для пула, который на проверки не отвечает, действует прежний длинный предел (InnovLab / PROX stratum 180 с, Pearl 240 с, NOID 300 с), поэтому пул, говорящий только когда есть задание (Pearl: одно в 30-60 с), никогда не отключается по ошибке; пул, который рвёт соединение сразу после проверки, отключает проверки до конца запуска. CMFD: своё соединение с пулом держит движок (майнер лишь перезапускает движки, когда ни у одного нет пула 60 с, см. выше), его таймауты — таймауты движка.
+
+**Возврат на основной (failback).** Пока майнер на резервном, основной проверяется раз в `--failback-minutes` (по умолчанию **10**, `0` —
+выключить) **отдельным соединением**, которое ничего не отправляет: подключение, login (тот же кошелёк и воркер) и годное задание — тем же
+кодом, что и майнинг (CMFD: TLS с пином сертификата, login и первое задание). После **2 удачных проверок подряд** (вторая через 60 с после
+первой — нестабильному пулу не доверяем) майнер возвращается на основной:
+
+    [pool:user] failback: the primary pool (host:port) answers again (check 1 of 2), checking again in 60 s
+    [pool:user] the primary pool (host:port) answered 2 checks in a row: switching back to it: now pool 1 of 2 (host:port)
+
+Работа не теряется: GPU продолжают считать текущее задание, пока соединение переезжает; шары, найденные в первую секунду после решения,
+ещё уходят на старый пул, затем майнер ждёт (1-3 с всего) ответов старого пула на все шары «в полёте» и только после этого подключается к
+основному; первое задание основного заменяет старое. Несколько шар, найденных за последние 1-2 с до переезда, относятся к заданию старого
+пула и не отправляются. Основной пул, который снова покинули в течение пяти минут после возврата, проверяется реже (×2 до ×16 от
+`--failback-minutes`; после 2 часов на нём — как обычно). Неудачная проверка пишется в лог (`the primary pool is still not usable (...)`),
+майнер остаётся на резервном.
+
+**Комиссия.** Соединение комиссии 1 % идёт **на тот пул, где вы сейчас**: в начале каждого слота оно подключается к вашей текущей записи,
+то есть следует за failover и возвращается вместе с failback. (PROX: комиссия на proximamine / InnovLab идёт на запись этого пула; список
+с записью suprnova использует аккаунт разработчика на proximamine весь запуск, как и одиночный suprnova.)
+
+**CMFD.** Движок (`cmfd-miner`) знает один пул и бесконечно к нему переподключается, поэтому для CMFD это делает майнер: если ни у одного
+движка нет пула 60 секунд (или пул отказал в логине), движки останавливаются и по одному запускаются с `--pool` следующей записи (пока не работает ни один пул, ожидание удваивается каждый круг, до 8 минут); тот же
+перезапуск возвращает на основной после проверок failback. Перезапуск заново загружает модель 6.4 ГБ: около минуты без майнинга на каждое
+переключение; собственная комиссия движка (36 с в час, тот же пул) начинает расписание заново вместе с движком. Проверку failback
+(TLS с пином, login по адресу, первое задание) майнер делает сам, повторяя рукопожатие движка.
+
+**CMFD: молчащее соединение.** Соединение с пулом держит сам движок, и обрыв без reset (firewall DROP в обе стороны, пропавший маршрут)
+он не замечает много минут: показывает хэшрейт и «connected», а высота блока не меняется (Rig05, DROP в обе стороны: 6 мин 41 с без
+реакции, failover не было). Поэтому майнер следит ещё и за **высотой блока, которую сообщают движки**: если она не меняется дольше
+**12 средних интервалов между блоками** (измеряются в этом запуске по увиденным блокам, до 4 блоков 60 с; не меньше **8 минут** и не
+больше 30), соединение считается мёртвым и движки перезапускаются на **следующей записи `--pool`**, как при «ни у одного движка нет пула
+60 с» (с одним пулом: на той же записи, новое соединение). Строка лога: `pool: pool 1 of 2 (...) is not usable (the engines report the
+same block height for 8.0 min: the pool connection is silent): failing over`. Порог намеренно длинный: CMFD находит блок примерно раз в
+60 с (Rig05: 63157 -> 63178 за 22 мин, паузы 20-190 с), время блока случайное, и 3 средних (3 мин) превышались бы после 5 % блоков, то
+есть десятки раз в сутки, а 12 средних — примерно раз в две недели. Счёт не идёт, пока движки загружаются, на паузе (режим простоя), в
+слоте комиссии движка или без пула; если после перезапуска высота так и не пошла, следующий порог вдвое длиннее (до 4x), чтобы реально
+стоящую цепочку не перезапускать каждые несколько минут. Тестовый параметр: `FFGP_CMFD_STALL_S` (секунды).
+
+| Параметр | Значение |
+|---|---|
+| `--pool A,B,C` / `--pool A --pool B` | список; первая запись — основной |
+| `--failback-minutes N` | на резервном проверять основной раз в N минут, вернуться после 2 удачных проверок (по умолчанию 10, 0 — выкл.; дроби допустимы) |
+| `--noshare-minutes M` | нет принятой шары M минут (и ожидалось ≥10): переподключение, затем следующий пул (по умолчанию 15, 0 — выкл.) |
+| `--reject-minutes K` | одни отказы K минут: то же (по умолчанию 5, 0 — выкл.) |
+| `--pool-check` | проверить каждую запись `--pool` (подключение, login, задание), вывести вердикт по каждой, выйти с кодом 0 / 1; GPU не нужен, удобно перед полётным листом |
+
+**Пул, который ничего не засчитывает (watchdog принятых шар).** Пул может принять соединение и логин, слать задания и всё равно не
+засчитывать шары. Пока GPU хешируют на вас, майнер переподключается, если **нет принятой вашей шары `--noshare-minutes`** (по умолчанию
+**15**, `0` — выкл.) **при ≥10 ожидаемых** за это время по измеренному хешрейту и сложности шары пула (редкие шары большой сложности его
+не вызывают), либо **одни отказы `--reject-minutes`** (по умолчанию **5**; не меньше 5 отказов, ни одной принятой). Повторилось на новом
+соединении — майнер переходит на **следующую запись** списка (покинутый так основной проверяется для failback всё реже: ×2 до ×16, как
+нестабильный основной); с одним пулом переподключается снова с предупреждением в логе и не завершается. Лог: `[pool:user] watchdog: no
+accepted share for 15.0 min while ~60 were expected (12 sent, 0 rejected): reconnecting`. Не срабатывает: в минуту комиссии и 10 с после
+неё (у комиссии своё соединение, её шары никогда не считаются вашими), пока GPU не хешируют на вас (пауза, тюнинг, нет соединения), если
+GPU **вообще не нашли шар**, хотя ждали (проблема GPU — ошибки или частоты: только предупреждение, пул не меняется), и в соло. CMFD:
+движок не сообщает сложность, поэтому шары ожидаются по уже виденной частоте (одна в 6 минут, пока их нет трёх; считается отдельно по
+каждому пулу списка и начинается заново при каждой смене пула: частые шары одного пула не задают ожидание для другого): без единой шары пул CMFD
+покидается примерно через час. Проверка failback шар не отправляет; основной, который после возврата снова ничего не засчитывает, снова
+покидается и проверяется реже.
+
+Имена и значения по умолчанию — как в ffgs 0.5.4 (`--failback-minutes`, 10 минут, 2 удачные проверки, 60 с между ними). **HiveOS:** поле
+*Pool URL* полётного листа принимает несколько URL через пробел или запятую; **Windows:** `POOL` в `start*.bat` принимает список через
+запятую (одна монета в списке).
+
+Ограничения: проверка входит с вашим кошельком и именем воркера (пул, не допускающий двух соединений одного воркера, провалил бы проверку;
+из поддерживаемых так не делает ни один); watchdog для редких шар опирается на хешрейт и сложность шары (CMFD: оценка).
+### 23. Автовыбор лока частоты ядра `--auto-lock` (по желанию, новое в 1.7.8)
+
+Майнер сам выбирает лок частоты ядра каждой карты NVIDIA: майнит на нескольких локах, каждый со своим профилем андервольта (auto-uv,
+разделы 12 и 17), меряет хешрейт и мощность и оставляет самый экономичный лок, теряющий не более 10 % от максимального хешрейта.
+**Выключено, пока не задано:** без `--auto-lock` ничего не меняется. Опции — те же, что у нашего SASEUL-майнера ffgs 0.5.4.
+
+    sudo ./freeforgem --pool ХОСТ:ПОРТ --wallet АДРЕС --lock-mclock 810 --auto-lock
+
+- **Монеты:** Pearl, NOID, PROX. **Только NVIDIA, root / администратор.** Не для CMFD (его движок — отдельная программа со стартом в
+  минуты на каждый процесс; майнер останавливается с сообщением) и не для AMD.
+- `--auto-lock` включает `--auto-uv` (с `--uv-offset N` каждый лок меряется на этом фиксированном оффсете). Не сочетается с `--idle` и
+  `--auto-uv-dry-run`.
+- **Какие локи:** по умолчанию 1800, 1700 ... 1200 МГц, не выше максимальной частоты карты (карта, не достающая 1600, получает 5 локов
+  ниже своего максимума). **Майнинговые карты (CMP) начинают ниже: верх по умолчанию 1500 МГц** (1500 ... 1100): первый шаг 2000 МГц
+  на CMP 50HX (максимум NVML 2250) просто упирался в лимит мощности, и риг из 4 карт потреблял 894 Вт; в логе строка `default range ...
+  (safe top 1500 MHz for this card type ...)`. **GeForce RTX 30 (и RTX A) начинают с 1800 МГц** (1800 ... 1200): на RTX 3080 Ti (лимит 350 Вт) шаги 2000 и 1900 МГц упирались в лимит с частотой на 150-170 МГц ниже лока. Явный `--auto-lock-range` всегда главнее.
+  **Шаг, упёршийся в лимит мощности, до конца не меряется:** если карта потребляет лимит мощности (от 90 %), а частота 20 с работы подряд
+  ниже лока (пауза на проверку auto-uv счёт не сбрасывает), это решается в первые полминуты шага, до подбора оффсета, и шаг сразу заканчивается как *PL-limited* (`not valid: the clock did not hold the lock ... - PL-limited: 219 W at the 225 W
+  power limit, 1650 MHz below the lock`), и перебор идёт к следующему, более низкому локу, не дожидаясь auto-uv и замера. Майнер лимит
+  мощности только читает, сам не выставляет. `--auto-lock-range 1300-1600:100` (от-до[:шаг], шаг по умолчанию 100, 15..1000) или список
+  `--auto-lock-range 1350,1450,1530`.
+- Карта со своим значением `--lock-cclock` оставляет этот лок и не перебирается (`--lock-cclock 1400,-` перебирает только вторую карту).
+  `--lock-mclock`, `--moffset`, `--temp-limit` работают как раньше; лок памяти входит в ключ сохранения.
+- **Перебор — сверху вниз, все карты параллельно.** Каждый раунд — отдельный процесс майнера с теми же опциями и `--lock-cclock` по картам
+  (проверяемые карты — на следующем локе, остальные — на выбранном или своём); его лог идёт в ту же консоль / лог, HiveOS продолжает
+  показывать хешрейт. На каждом локе auto-uv применяет проверенный профиль этого лока или проверяет / подбирает его (новый лок стартует
+  от профиля лока выше минус 30; ~5-12 мин; на паузе только эта карта), затем карта **майнит** на нём: 45 с на установление, затем 120 с
+  замера (хешрейт из строки статистики майнера, средние ватты NVML, медиана частоты ядра). **Шары, найденные во время замера, уходят в пул
+  как обычно.** Между раундами процесс майнера перезапускается (несколько секунд без хеширования; сохранённый профиль каждой карты
+  применяется после быстрой проверки).
+- **Ранний останов:** как только лок ниже максимума больше допустимой потери, локи ниже не меряются.
+- **Выбор:** `--auto-lock-goal eff` (по умолчанию) — лучший TH/W (NOID: MH/W, PROX: GH/W) среди локов в пределах `--auto-lock-max-loss` %
+  (10, 0..90) от максимального хешрейта; `--auto-lock-goal speed` — максимальный хешрейт; `--auto-lock-goal profit` — максимум $ в сутки (23.1).
+- **Не в зачёт:** частота не удержала лок (медиана ниже больше чем на max(45 МГц, 3 %): лимит мощности / температуры; или настолько же
+  выше: лок сбросила другая программа / применение OC) или замер прерывался 3 раза (перепроверка auto-uv, лимит температуры, нет задания) -> `not valid`. Лок отвергнут драйвером, карта остановилась на нём или нет
+  ровного майнинга за 60 мин -> `FAILED`, следующий лок. Если майнер умер на локе (Xid, зависание, питание), следующий старт помечает его
+  `crashed` и больше не пробует. Раунд, процесс которого завершился до майнинга (пул недоступен, ошибка старта), повторяется через 30 с,
+  3 раза; затем перебор ждёт следующего старта (ничего не записывается как сбой). Карта без управления локом (`Not Supported`, часть
+  ноутбуков) майнит без лока (сохраняется). Нет прав — перебор останавливается с сообщением.
+- **Итог** — таблица в логе (RTX 3070, Pearl, `--auto-lock-range 1500,1400`, укороченные времена теста; на 1500
+  другая программа сбросила OC карты во время теста, поэтому эта точка не в зачёт):
+
+    auto-lock: GPU0 (bus 0d, RTX 3070) RESULT (goal eff, max loss 10%, top 63.325 TH/s):
+    auto-lock:   lock  offset      TH/s       W      TH/W
+    auto-lock:   1500     +90    81.535   199.4    0.4089  not valid: the clock ran above the lock (the lock was reset by another tool / OC apply)
+    auto-lock:   1400    +210    63.325    87.2    0.7263  ★ chosen
+    auto-lock: GPU0 (bus 0d, RTX 3070) mining at lock 1400 ★ (saved; --auto-lock-reset to sweep again)
+
+- **Сохраняется** по карте, монете (NOID — и режиму), модели, драйверу, локу памяти и ядру майнинга в `autolock.json` рядом с `uv.json`
+  (HiveOS: `/hive-config/freeforgem`, переживает обновления майнера). **Следующий старт сразу ставит сохранённый лок** (одна строка
+  `lock 1500 ★ (saved ...)`), без перебора. Смена `--auto-lock-goal` / `--auto-lock-max-loss` — перевыбор из сохранённых точек; более
+  широкий диапазон или большая потеря — меряются только недостающие локи. `--auto-lock-reset` забывает точки этих карт и перебирает заново
+  (профили auto-uv остаются; `--uv-reset` вдобавок один раз переподберёт локи первого раунда). Новый драйвер, другая карта или ядро —
+  новый перебор. `--uv-reset-all` не трогает `autolock.json`; собственный перезапуск после сбоя GPU не повторяет `--auto-lock-reset`.
+  Остановка во время перебора сохраняет замеренные точки; следующий старт продолжает.
+- **Время:** первый перебор — на каждый лок подбор auto-uv нового лока плюс ~3 мин замера в майнинге; с ранним остановом обычно 3-5 локов,
+  30-90 мин, все карты сразу. Последующие старты — ничего. `--minutes` считает майнинг после перебора.
+- **HiveOS:** `--auto-lock` — в *Extra config arguments* (Pearl, например, `--auto-lock --lock-mclock 810`). Лок ядра из OC-профиля, как и
+  раньше, возвращается при выходе. **Windows:** `set "EXTRA=--auto-lock"` в стартовом скрипте, запуск от администратора.
+- Короткие тестовые прогоны: `FFG_AL_TIMES=установление,замер[,макс_ожидание]` (секунды).
+
+#### 23.1 Цель «прибыль»: `--auto-lock-goal profit` (новое в 1.7.8)
+
+При дешёвом электричестве самый прибыльный лок — не самый эффективный. Пример (RTX 3070 на PROX, 0,034 $, электричество днём
+0,12 $, ночью 0,053 $ = 0,0977 $/кВт·ч): goal eff оставляет 1400 МГц, а 1500 МГц приносит около 1,31 $/сут, 1800 МГц — около
+1,52 $/сут. `--auto-lock-goal profit` выбирает по деньгам:
+
+    sudo ./freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701 --wallet АДРЕС \
+        --auto-lock --auto-lock-goal profit --power-price 0.12,0.053@23-07
+
+- **Прибыль лока** = доход − электричество, $ в сутки:
+  - доход = хешрейт × монет на H/s в сутки (из данных сети) × цена монеты × 0,99 (комиссия майнера 1 %) × (1 − комиссия пула);
+  - электричество = ватты NVML, замеренные на этом локе / 1000 × 24 ч × тариф, усреднённый по суткам.
+  Ватты — только платы GPU (без потерь БП, процессора, вентиляторов): если хотите их учесть, заложите запас в `--power-price`.
+- **`--power-price X`** — $ за кВт·ч, **обязателен** (без него goal profit останавливается с понятным сообщением). День / ночь:
+  `--power-price 0.12,0.053@23-07` = 0,053 с 23:00 до 07:00, 0,12 в остальные часы; можно добавить ещё диапазоны
+  (`0.12,0.053@23-07,0.08@13-15`, более поздние перекрывают). Майнер работает круглосуточно, поэтому берётся среднее за 24 часа
+  ((16 × 0,12 + 8 × 0,053) / 24 = 0,0977). Валюта — та же, что у цены монеты (доллары, если цена из тикеров).
+- **Монет на H/s в сутки** (единица — всегда собственный хешрейт майнера; TH/s Pearl = TH/s пула, GH/s PROX — попытки):
+  - **Pearl:** 86400 × награда за блок / работа на блок. Работа = 2^256 / цель сети из nbits заголовка задания пула (то, что нода
+    считает работой); награда — по высоте из задания (формула ноды 2,1·10^9 × E / ((h+E)(h−1+E)), E = 650226; 2167 PRL на блоке
+    143 562). Пул без высоты в задании (Kryptex) — публичный `api/stats` LuckyPool (сложность сети × 2^16 = та же работа на блок).
+  - **NOID:** 86400 × награда майнеру / работа на блок, работа = 2^256 / block target задания; награда по расписанию v2 (16 NOID брутто
+    первые 1 051 200 блоков после 210 537, затем 11,3, 8, …; 10 % фонда разработки 3 года → 14,4 NOID майнеру). Комиссии транзакций
+    не учитываются. Публичного API нет: до первого задания — данные, сохранённые прошлым запуском.
+  - **PROX:** 86400 × награда слота / попыток сети за слот (один победитель на слот 10,24 с, 95 PROX; k в задании ничего не говорит о
+    конкуренции) — из публичного API статистики InnovLab (`network.attempts_per_slot`, `reward_motes`, 1 PROX = 10^6 motes), даже если
+    вы майните на другом пуле.
+  - **CMFD:** `--auto-lock` нет, значит и выбора по прибыли нет.
+- **Комиссия пула:** известны LuckyPool (Pearl) 1 %, InnovLab (PROX) 0 %, соло 0; другой пул — 0 % со строкой в логе, задайте
+  `--pool-fee PCT`.
+- **Цена монеты:** медиана нескольких публичных тикеров, один раз при старте (и при каждом перевыборе). Тикер дальше 15 % от медианы
+  отбрасывается (`OUTLIER`); тикер с объёмом за сутки меньше 1000 $ — `THIN`, используется только если больше никто не ответил;
+  цена по единственному тикеру — с WARNING. Если не ответил никто — последняя сохранённая цена (до 7 суток), иначе выбор по
+  эффективности, пока цены нет. **`--coin-price X`** ($) задаёт цену вручную: тогда к биржам не обращается вообще.
+
+  | монета | тикеры (проверено 15.11.2026) |
+  |---|---|
+  | Pearl (PRL) | SafeTrade, Gate, LBank, BigONE, Coinbase, Kraken (PEARL/USDT, PEARL/USD), CoinGecko `pearl-2`, CoinPaprika `prl-pearl-1` (тонкий), LuckyPool `api/stats` |
+  | PROX | только SafeTrade PROX/USDT (предупреждение каждый раз: при сомнении `--coin-price`) |
+  | NOID | SafeTrade NOID/USDT, CoinGecko `parano1d`, CoinPaprika `noid-parano1d` (оба повторяют SafeTrade) |
+  | CMFD | нет (и auto-lock нет) |
+
+  Часть бирж доступна не из всех стран (Coinbase, Kraken, BigONE не отвечали из Узбекистана; SafeTrade иногда отвечает 403 из-за
+  Cloudflare): медиану держат остальные. Таблица — `SOURCES` в `host/src/profit.rs`.
+- **Какие локи меряются:** у goal profit нет раннего останова (дороже монета или дешевле электричество — сдвигается лучший лок),
+  диапазон по умолчанию 2000 … 1200 МГц шаг 100 (не выше максимума карты; CMP 1500 … 1100): до 9 локов, каждый один раз подбирается auto-uv (первый
+  перебор — 1-2 ч). Точки, замеренные для goal eff / speed, используются повторно: при смене цели меряются только недостающие.
+- **Таблица** в логе дополняется доходом / электричеством / прибылью в сутки:
+
+        auto-lock: GPU0 (bus 0d, RTX 3070) RESULT (goal profit: PROX 0.03790 $, 1.7158e-8 PROX per H/s per day, fees 1% miner + 0% pool, power 0.0977 $/kWh):
+        auto-lock:   lock  offset      GH/s       W      GH/W   income   power   profit $/day
+
+- **Перевыбор во время майнинга:** раз в `--auto-lock-reprice-hours` (6; 0 — никогда) цена (и данные сети, которых нет в заданиях
+  пула) запрашивается заново, и каждая карта перевыбирается по уже замеренным точкам, **без новых замеров**. Переключение — только если
+  прибыль больше текущего лока на `--auto-lock-hysteresis` % (3); в любом случае одна строка в логе
+  (`GPU0: lock 1500 -> 1800: profit 1.310 -> 1.520 $/day (+16.0% > 3%)` / `keeps lock 1500 ...`). Для этого майнер с goal profit майнит
+  в отдельном процессе майнера (как раунды перебора; его лог идёт без изменений, HiveOS видит хешрейт) и перезапускает его на новых
+  локах (несколько секунд без хеширования). С `--auto-lock-reprice-hours 0` майнинг идёт в собственном процессе, как с goal eff, выбор —
+  при каждом старте.
+- **Конфиденциальность.** Без goal profit майнер соединяется только с вашим пулом (и, если нет `--no-update-check`, раз в 12 ч с
+  github.com для проверки новой версии). С goal profit он дополнительно делает **простые HTTPS GET-запросы** к тикерам выше и к API сети
+  (LuckyPool `api/stats` для Pearl, InnovLab `proxima/v1/stats` для PROX): при старте и раз в `--auto-lock-reprice-hours`. Запрос
+  содержит только URL публичного тикера, `Host` и `User-Agent: FreeForGem/1.7.8` — ни кошелька, ни воркера, ни пула, ни хешрейта, ничего
+  вашего, без cookies; ничего не отправляется методом POST. IP-адрес, конечно, видит любой сервер. `--coin-price X` отключает запросы к
+  тикерам; API сети PROX (и Pearl на пуле без высоты) запрашивается всё равно.
+- В `autolock.json` кроме точек сохраняются цель и в разделе `money` — последняя цена и данные сети по монете (время, источник).
+
 ---
 
 ## 中文
@@ -2049,7 +2655,7 @@ Secure Boot должен быть выключен; сборка — сторо�
 ### 1. 这是什么
 
 FreeForGem 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用工作量证明）GPU 矿工，开发者抽水 **1%**。
-自 1.6.0 起也可挖 Common Foundry（CMFD，第 13 节），自 1.7.0 起可挖 **NOID**（Parano1d，第 15 节）。
+自 1.6.0 起也可挖 Common Foundry（CMFD，第 13 节），自 1.7.0 起可挖 **NOID**（Parano1d，第 15 节），自 1.7.8 起可挖 **Proxima (PROX)**（第 21 节）。
 
 **名称。** 自 1.7.0 起，多币种矿工（Pearl + CMFD + NOID）更名为 **FreeForGem**（程序 `freeforgem`，HiveOS 自定义矿工
 `freeforgem`，代码仓库 `pepsykolya/FreeForGem`）。**FreeForGemPear** 作为 Pearl 矿工以原名继续存在。从 FreeForGemPear 迁移：
@@ -2064,7 +2670,7 @@ FreeForGem 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用工作
 | RTX 30xx（Ampere，sm_86）：3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090 | **主要目标，已调优：RTX 3070 约 70 TH/s，约 107 W** |
 | RTX 40xx（Ada，sm_89） | 自 1.5.4 起使用专用 SASS 内核（RTX 4070 Ti：算力相同，功耗比 RTX 30xx 内核低约 10 W） |
 | RTX 50xx（Blackwell，sm_120） | 自 1.5.0 起支持，使用编译内核（未调优）；需要驱动 570+ |
-| CMP 50HX（TU102） | 可以运行，但**不建议用于 Pearl：每卡约 2.6 TH/s**（int8 张量核心相比 CMP 40HX 被削减约 17 倍，与驱动无关） |
+| CMP 50HX（TU102） | 可以运行：**驱动 610.43.03 下，锁频 1300 时每卡约 67 TH/s，锁频 1500 时约 77 TH/s**（每卡 166–176 W，4× CMP 50HX 矿机，1.7.8）。旧驱动 550.78 与 595.91.07 下仅约 2.6 TH/s（int8 张量核心被削减约 17 倍）：请更新驱动 |
 | RTX 20xx / GTX 16xx / CMP 30HX–50HX（Turing，sm_75） | 自 1.5.3 起支持，专用 SASS 内核：RTX 2060 SUPER @1605 MHz 约 49.9 TH/s；**显存必须锁定 5001，不是 810** |
 | AMD Radeon RX 6000（RDNA2），Windows | **1.6.0 新增**，自有 OpenCL 内核：RX 6800 XT 上 34.4 TH/s（第 14 节） |
 | 更老的显卡、A100（sm_80）、Linux / HiveOS 上的 AMD | 不支持 |
@@ -2081,10 +2687,10 @@ FreeForGem 是面向 NVIDIA 显卡的 **Pearl (PRL)**（pearlhash，有用工作
 
 FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手动安装。
 
-**安装链接 (1.7.7)：**
+**安装链接 (1.7.8)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -2108,15 +2714,15 @@ https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7
 4. **应用。** *Apply changes*，*Create flight sheet*，然后应用到矿机。
 
 矿工日志位于 `/var/log/miner/freeforgem/freeforgem.log`，也可在 HiveOS 矿工控制台查看。
-仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）；自 1.7.5 起还显示已发布的新版本（`1.7.7 0.652 TH/W, need update!!`：矿工在启动约 1 分钟后及每约 12 小时检查 GitHub，不会自动安装；`--no-update-check` 关闭）。更新时把 Installation URL 改成新版本即可。
+仪表盘显示每块显卡和总算力、温度、风扇，以及已接受和被拒绝的份额；自 1.7.2 起在矿工版本旁显示整机能效（Pearl 为 TH/W，NOID 为 MH/W）；自 1.7.5 起还显示已发布的新版本（`1.7.8 0.652 TH/W, need update!!`：矿工在启动约 1 分钟后及每约 12 小时检查 GitHub，不会自动安装；`--no-update-check` 关闭）。更新时把 Installation URL 改成新版本即可。
 更详细的同一指南：[HIVEOS.md](HIVEOS.md)。
 HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同，因此请始终粘贴新版本的链接。
 
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
-cd freeforgem-1.7.7
+tar xzf freeforgem-1.7.8-linux-x86_64.tar.gz
+cd freeforgem-1.7.8
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -2137,8 +2743,8 @@ cd freeforgem-1.7.7
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.7.7-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.7.8-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -2180,7 +2786,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.7.7-windows-x64
+cd /d C:\Mining\freeforgem-1.7.8-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2254,7 +2860,7 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 | RTX 5060、5060 Ti、5080、5090 | 1900–2500 | 锁定 `810` | +390..480 | 估计 |
 | RTX 2060 SUPER、RTX 2070/2080（含 SUPER）、GTX 1660/1650 | 1500–1650 | 锁定 `5001`（**不是 810**：Turing 在 810 下损失约 25%） | +200..260；自 1.6.2 起 auto-uv 默认上限 +225 | 参考（2060 SUPER：实测） |
 | CMP 40HX | 1400 | 锁定 `5001` | +150；自 1.6.2 起 auto-uv 默认上限 +150 | 用户矿机；CMP 40HX 在 +255 出现 Xid |
-| CMP 50HX（TU102） | — | 锁定 `5001` | +220 及以上；auto-uv 默认上限 +330（`--uv-max 330`） | 用户矿机。**不建议用于 Pearl：每卡约 2.6 TH/s**（int8 张量核心相比 40HX 被削减约 17 倍；与驱动无关：550.78 与 595.91.07 相同，3× CMP 50HX 矿机实测） |
+| CMP 50HX（TU102） | — | 锁定 `5001` | +220 及以上；auto-uv 默认上限 +330（`--uv-max 330`） | 用户矿机。锁频 **1300–1500**（`--auto-lock` 对 CMP 卡的默认上限为 1500）。**驱动 610.43.03 下的 Pearl：1300 时每卡约 67 TH/s，1500 时约 77 TH/s**（每卡 166–176 W，4× CMP 50HX 矿机）；旧驱动 550.78 / 595.91.07 下仅约 2.6 TH/s（int8 张量核心被削减约 17 倍） |
 
 RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高；因此 auto-uv 在 RTX 40 上从 +200、在 RTX 50 上从 +300 开始搜索（RTX 30 从 +120）。
 
@@ -2264,7 +2870,8 @@ RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承�
 Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
 **CMP 显卡（CMP 30HX / 40HX / 50HX）。** CMP 30HX/40HX 使用 Turing 内核挖 Pearl（显存锁定 5001，auto-uv 上限 +150）。**CMP 50HX
-不建议用于 Pearl**——每卡仅约 2.6 TH/s（int8 张量核心相比 CMP 40HX 被削减约 17 倍，与驱动无关）。**CMP 50HX 挖 Common Foundry
+与 Pearl：** 驱动 610.43.03 下，锁频 1300 时每卡约 67 TH/s，锁频 1500 时约 77 TH/s（每卡 166–176 W；4× CMP 50HX 矿机，FreeForGem 1.7.8）；
+旧驱动 550.78 与 595.91.07 下仅约 2.6 TH/s（int8 张量核心被削减约 17 倍），请先更新驱动。**CMP 50HX 挖 Common Foundry
 （CMFD）表现良好：** 每卡约 13 FW/s、约 220 W（功耗限制 225 W，核心锁定 1410 MHz，显存不锁定；4× CMP 50HX 矿机，Aria 矿池），
 使用 `--auto-uv`（CMFD 调校，+225）约 13.2 FW/s、196–203 W（FW/kWh +8–11 %）；见第 13 节。CMFD 需要约 7 GB 空闲显存，6 GB 显卡
 （CMP 30HX）无法运行。**FreeForGem 不提供 CMP 解锁：** 我们不提供也不支持解除 CMP 显卡限制的驱动或工具；这里的所有数据均为显卡原状下的结果。
@@ -2294,9 +2901,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.7.7-linux-x86_64.tar.gz freeforgem-1.7.7_hiveos.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.7.7-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.7.7-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.7.8-linux-x86_64.tar.gz freeforgem-1.7.8_hiveos.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.7.8-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.7.8-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -2304,6 +2911,7 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 日志显示 `devfee: next slot in N min`、`devfee: mining 60s for FreeForGem dev (1%)` 和 `devfee: back to user`。
 第一个时段出现在最初 100 分钟内的随机时刻。如果抽水登录无法服务，该时段会被跳过；你的挖矿不会被阻塞。
 自 1.4.2 起，在 LuckyPool 上抽水登录同时为开发者合并挖 NOCK（`prl1...+NOCK`）；若矿池拒绝该登录，矿工会退回普通的 PRL 抽水钱包。抽水时间仍为 1%。
+使用矿池列表（第 22 节）时，抽水连接会跟随你：时段开始时总是连到你当前所在的矿池。
 抽水是许可证的条件：不得移除、降低或重定向（见 [LICENSE](LICENSE) 第 3 条）。
 
 ### 11. 故障排除
@@ -2494,7 +3102,7 @@ auto-uv: GPU0 (bus 0d, RTX 3070) offset +195 -> +150 restored
 ### 13. Common Foundry (CMFD)，1.6.0 新增
 
 同一个程序也可以挖 **Common Foundry（CMFD，ForgeMatrix V4）**。CMFD 的计算由 **FreeForgeMiner** 引擎完成
-（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.4 版），放在软件包的 `cmfd/` 文件夹中：Windows 使用原版发布文件；Linux/HiveOS 使用在 Ubuntu 20.04 上由同一固定源码编译的
+（MIT 许可，<https://github.com/pepsykolya/freeforgeminer>，1.2.5 版），放在软件包的 `cmfd/` 文件夹中：Windows 使用原版发布文件；Linux/HiveOS 使用在 Ubuntu 20.04 上由同一固定源码编译的
 文件，可在所有 HiveOS（Ubuntu 20.04 和 22.04 镜像）上运行。
 FreeForGem 负责准备模型、为每块 GPU 启动一个引擎进程、应用您的频率设置、打印常规统计行，并在引擎退出时重新启动。
 
@@ -2868,7 +3476,7 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 `-` 或 `0` = 关闭）：控制器每秒读取温度并设置工作比例 `u`（10..100 %，每秒最多 +5 % / -20 %），使温度保持在 `C` 以下 1-2 C；工作线程执行一次计算后休息（与第 18 节 `light` 相同的占空比）。
 挖矿从 30 % 平滑启动并逐步提高；GPU 未接近上限时不输出日志。显示和上报的算力是真实值（只计已完成的计算），状态行以 `[temp-limit 72%]` 结尾。
 `--temp-stop C2[,C2]` 为硬停止（默认 `C` + 10，不超过 90，至少 `C` + 3）：达到 `C2`（连续 3 次读数，或一次高出 5 C）时 GPU 停止挖矿，直到冷却到 `C` - 6（60 秒后降到 `C` - 3），然后从 30 % 重新开始。
-适用于 Pearl 和 NOID（NVIDIA）；**不适用于 CMFD**（其引擎是无法按占空比控制的外部程序：请用功率限制或 `--lock-cclock`）。ffgs 中未移植的部分：显存/热点传感器、先降低核心锁频再加空闲间隔、AMD。
+适用于 Pearl、NOID 和 PROX（NVIDIA）；**不适用于 CMFD**（其引擎是无法按占空比控制的外部程序：请用功率限制或 `--lock-cclock`）。ffgs 中未移植的部分：显存/热点传感器、先降低核心锁频再加空闲间隔、AMD。
 占空比使 GPU 在计算期间保持加速频率，会损失算力和效率：在可以设置频率的机器上，降低 `--lock-cclock` 是更好的降温办法。
 
 **1.7.6 中 `--auto-uv` 的变化**（统一的爬升、统一的配置存储，Pearl、NOID、CMFD 一致）：
@@ -2894,3 +3502,189 @@ NVIDIA CMP 挖矿卡（CMP 50HX 等）在官方驱动下只能发挥很小一部
 
 使用前请注意：**这会替换整台矿机的 NVIDIA 内核驱动**并需要**重启**；必须关闭 Secure Boot；该版本是第三方修改的驱动，非 NVIDIA 官方，风险自负；安装中断电可能导致无可用驱动，请在能接触到矿机时操作。
 回退：用 `nvidia-driver-update` 安装其他版本并重启。
+
+### 21. Proxima (PROX)，1.7.8 新增
+
+**连接与安装。** HiveOS：*Flight sheet（飞行表）* → 币种 `PROX`（列表中没有就添加为自定义币种），钱包：您的 PROX 地址
+（InnovLab 上填 holder id，64 位十六进制），矿池：*Configure in miner*，矿工：*Custom* → *Setup Miner Config*：
+
+![HiveOS：飞行表——币种、钱包、矿池 “Configure in miner”、矿工 Custom](docs/img/hiveos-prox-1-flightsheet.png)
+
+| 字段 | proximamine | InnovLab | 单机（自己的节点） |
+|---|---|---|---|
+| Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz` | 同左 | 同左 |
+| Hash algorithm | 保持 `----`（HiveOS 列表中没有 `proxima`） | 同左 | 同左 |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%`（WAL = holder id） | `%WORKER_NAME%` |
+| Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701`（或 `global.`、`us3.`、`hk.innovlab.cc:19701`） | `http://节点IP:端口`（节点的 `mine.seeker.listen`） |
+| Pass | 您的 proximamine 账户 secret | `x` | 节点的 `mine.seeker.token` |
+| Extra config arguments | `--auto-uv --lock-cclock 1500` | 同左 | 同左 |
+
+![HiveOS：Miner name、Installation URL、Hash algorithm](docs/img/hiveos-prox-2-miner.png)
+![HiveOS：Wallet and worker template、Pool URL、Pass](docs/img/hiveos-prox-3-pool.png)
+![HiveOS：Extra config arguments](docs/img/hiveos-prox-4-extra.png)
+
+**推荐的 Extra config：** `--auto-uv --lock-cclock <MHz>`（所有显卡用同一个值，或按 GPU 用逗号分隔的列表）。它锁定核心频率，
+并让 auto-uv 为该频率找到更低的电压（每一步都逐位核对；首次运行每张卡需要几分钟）。也可以直接删掉这一行：矿工将按显卡自身的频率运行。
+
+| GPU | `--lock-cclock` | 实测（显存为最低频率，每个测试点 0 个错误哈希） |
+|---|---|---|
+| RTX 3070 | `1500` | 2.66 GH/s，87 W，0.031 GH/W（1.7.8 最终版，auto-lock 运行，`--uv-offset 120`）。锁频越高效率越低：1700 为 3.03 GH/s、111 W、0.027 GH/W；1900 为 3.37 GH/s、160 W、0.021 GH/W |
+| RTX 3070 Laptop | `1500` | +270：2.23 GH/s，53 W，0.042 GH/W（1650 +270 为 0.040，1800 +270 为 0.033 GH/W）；功耗为笔记本驱动报告的值（仅 GPU） |
+| RTX 3080 Ti | `1500` | +210：4.40 GH/s，147 W，0.030 GH/W（在 1500 时偏移不会降低功耗：电压已处于最低）。追求速度可用 `1800`、+270：5.28 GH/s，201 W，0.026 GH/W |
+| RTX 4070 Ti | `2450` | +270：5.47 GH/s，142 W，0.0385 GH/W：算力比 1800 高 37 %（4.00 GH/s，102 W，0.039 GH/W），效率几乎相同。在 Ada 上效率几乎与锁频无关（1500 +270 为 0.038，1650 为 0.037，2200 为 0.037 GH/W） |
+| RTX 4070 Laptop | — | 默认频率下约 3.22 GH/s；尚未调优 |
+| CMP 50HX 及其他显卡 | — | 尚未测量（CMP 无法锁定显存频率，显示 “Not Supported”） |
+
+偏移值是 `--auto-uv` 自己寻找的结果；用相同锁频加固定的 `--uv-offset` 可得到上表数据。作为对比，默认频率：RTX 3070 在 200 W 功耗限制下
+3.26 GH/s、199 W；RTX 4070 Ti 为 5.90 GH/s（前缀 369）。
+
+Windows：`start-prox.bat`（填写 `WALLET`、`POOL`、`PASSWORD`，或 `SOLO` + `TOKEN`；`AUTO_UV=1` 和 `LOCK_CCLOCK=1500` 即上述推荐设置，
+需要以管理员身份运行）。Linux：
+`sudo ./freeforgem --algo prox --pool stratum+ssl://pool.proximamine.com:3334 --wallet 地址 --worker rig1 --password SECRET --auto-uv --lock-cclock 1500`。
+
+**HiveOS 会应用自己的超频。** HiveOS 的 `nvidia-oc` 在每次矿工启动以及每次在网页中更改超频时，都会把网页中的超频配置写到频率上：
+矿工设置的核心 / 显存锁频和偏移会被重置。自 1.7.8 起矿工会自动恢复，每张 GPU 单独处理：每 15 秒查看负载下的频率；核心频率持续高于锁频
+（显存频率偏离锁频）说明锁频已丢失，于是重新设置（`clocks: GPU bus ...: the core clock lock 1500 MHz was reset by an OC apply ... set again`，所有币种）。
+核心偏移（`--auto-uv` 的结果或 `--uv-offset N`）每 30 秒读回一次：若为 HiveOS 配置中的值（或 0），说明是超频被应用，已验证的偏移会重新设置
+（使用 `--auto-uv` 时先对该 GPU 做 20 秒检查）；若为其他值，则是别的工具所为，矿工不再动这张 GPU。每张 GPU 每小时最多恢复 4 次，
+之后矿工在该卡上让步，并在日志中说明。
+
+**这是什么。** `--algo prox` 使用交易哈希工作量证明挖 Proxima（library upgrade 6，自 slot 196000 起）：
+`h = BLAKE2b-256(message || nonce)`，份额要求 `h` 最后 8 个字节中有 `k` 个低位为零。仅支持 NVIDIA（GTX 10 / RTX 20/30/40/50，sm_61+）。
+内核位于 `libproxgpu.so` / `proxgpu.dll`（闭源，与 Pearl 和 NOID 相同）；每个候选结果在发送前都会在 CPU 上重新计算哈希。
+矿池主机名含 `prox`、`innov+tls://` URL、端口 19701 的 InnovLab 主机或 `--solo` 都会自动选择 PROX，无需 `--algo`。
+
+**矿池。** proximamine（suprnova 格式的 stratum，登录名 `地址.矿工名`，密码为您账户的 secret），InnovLab（自有协议，
+`innov+tls://主机:19701` 或 `innov+tcp://`，登录名 `HOLDER_ID.矿工名`，密码 `x`）。proxi.suprnova.cc 只接受其自家矿工的 user agent；
+FreeForGem 使用自己的名称（`FreeForGem/<版本>`），不会冒充其他矿工。
+**单机（solo）：** `--solo http://127.0.0.1:8100 --token <mine.seeker.token>`（`proxi node mine` 的 seeker 协议 v2；`--seeker-name 名称`）。
+
+**PROX 的 auto-uv**（`--auto-uv`，不指定则关闭）：每一步都在单独的子进程中核对——用挖矿内核在 8 个固定任务上以较低的 k 运行，
+候选结果在 CPU 上重新计算，内核的答案必须逐位重复。结果 = 最后一个合格的步长减一步，经确认后按 GPU、驱动、矿工版本和核心锁频保存到
+`uv.json`（`prox` 部分）；每 6 小时复查一次（`--uv-reval-hours`），挖矿中出现错误候选则退一步，退出时恢复您原来的偏移。
+没有锁频时，配置按负载下的频率保存（与 Pearl 相同），因此建议使用锁频。`--uv-min/--uv-max/--uv-step/--uv-reset/--uv-reset-all/
+--uv-keep-last` 与 Pearl 相同；`--uv-offset N` 设置固定偏移。
+
+**频率。** 默认把显存锁在仍允许完整核心频率范围的最低频率（BLAKE2b 不使用显存：可省几瓦）；`--no-mem-lock`、`--lock-mclock` 或
+`--moffset` 则交由您自己决定。`--lock-cclock`、`--temp-limit`、`--devices`、`--minutes`、`--no-color` 与 Pearl 相同。
+
+日志行：`[ 60s] GPU0 2.657 (87 W, 0.0307 GH/W) | total 2.657 GH/s, 87 W, 0.0307 GH/W | user sub N acc N rej 0 (stale 0, low-diff 0)`。
+自检：`--self-test --algo prox`，`--algo prox --hash-bench 10 --hash-prefix-len 369`。
+
+**开发者抽水 1%**（每 100 分钟 60 秒），与 Pearl/NOID 相同，是在您挖矿的矿池上的第二个登录（proximamine、InnovLab 或任何其他 stratum
+矿池）；单机挖矿、在 suprnova 上挖矿，以及您矿池上的抽水登录被拒绝、收不到任务或其份额被拒绝时，会使用开发者在 proximamine 的账户。
+日志会写出每个抽水时段所用的矿池。
+
+### 22. 矿池列表：故障切换与自动回切，1.7.8 新增
+
+**备用矿池。** `--pool` 可填写**同一币种**的多个地址——用逗号分隔，或重复写 `--pool`；第一个为**主矿池**，其余为备用：
+
+    freeforgem --pool pearl-eu2.luckypool.io:3360,prl-eu.kryptex.network:7048 --wallet prl1...
+    freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --pool stratum+ssl://noid.suprnova.cc:3340 --wallet o1...
+    freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701,innov+tls://eu2.innovlab.cc:19701 --wallet ...
+    freeforgem --pool cmfd+tls://IP1:PORT?pin=HEX1,cmfd+tls://IP2:PORT?pin=HEX2 --wallet cmfd1...
+
+一个列表只能是一种币和一种协议：Pearl 为 `HOST:PORT`；NOID 为 `stratum+ssl://` / `stratum+tcp://`；PROX 要么全是 stratum、要么全是 InnovLab
+（各条目钱包与密码相同）；CMFD 为 `cmfd+tls://`，每条各带自己的 `?pin=`。单人挖矿（`--solo`）只有一个节点，不支持列表。只写一个 `--pool` 时行为与以前完全相同。
+
+**故障切换。** 矿池无法连接、拒绝登录或不发任务时，矿工在数秒内切换到下一条（日志：`pool 1 of 2 (host:port) is not usable: failing over to pool 2 of 2`）；
+最后一条之后重新尝试主矿池，等待时间与单个矿池一样逐步增加到 60 秒。已稳定连接超过一分钟的连接断开后，先在同一条目上重连。
+
+**矿池沉默（链路已死）。** 矿池停止应答但没有关闭连接（拔了网线、路由丢失、防火墙 DROP）时，矿工会在**约 60 秒**内发现（此前需要 180-300 秒，期间不干活）：随后重新连接，若该条目没有恢复，则切换到下一条。做法：InnovLab（PROX）应答矿工的 `keepalive`（每 20 秒），NOID 应答算力上报（每 30 秒）；Pearl 与 PROX 的 stratum 没有自己的 keepalive，因此静默 20 秒后（以及连接后 20 秒时发送一次，即使任务不断到来）矿工发送 `mining.ping`（未知方法，这些矿池会回一个错误，这同样算应答）。矿池在本连接上应答过一次这样的探测后，**一个字节都没有**持续 60 秒（错过三次探测）即视为链路已死。在第一次应答之前，以及对从不应答探测的矿池，沿用原来的长时限（InnovLab / PROX stratum 180 秒，Pearl 240 秒，NOID 300 秒），因此只有在有任务时才说话的矿池（Pearl：每 30-60 秒一个）绝不会被误断；探测后立即断开连接的矿池会让探测在本次运行余下时间内关闭。CMFD：矿池连接由引擎自己保持（只有当没有任何引擎连上矿池达 60 秒时矿工才重启引擎，见上文），其超时为引擎自身的超时。
+
+**自动回切（failback）。** 在备用矿池上时，每隔 `--failback-minutes`（默认 **10** 分钟，`0` = 关闭）用**单独的连接**检查主矿池，该连接不提交任何份额：
+连接、登录（同样的钱包和矿工名）并收到可用任务——与挖矿会话使用同一段代码（CMFD：带证书指纹的 TLS、登录和首个任务）。**连续 2 次检查成功**
+（第二次在第一次之后 60 秒，不信任忽好忽坏的矿池）后，矿工回到主矿池：
+
+    [pool:user] failback: the primary pool (host:port) answers again (check 1 of 2), checking again in 60 s
+    [pool:user] the primary pool (host:port) answered 2 checks in a row: switching back to it: now pool 1 of 2 (host:port)
+
+挖矿不会因此丢失：连接切换期间 GPU 继续计算当前任务；决定切换后的第一秒内找到的份额仍发往旧矿池，随后矿工等待旧矿池对所有在途份额的应答
+（总共 1–3 秒），再连接主矿池，主矿池的第一个任务替换旧任务。连接切换前最后一两秒内找到的少量份额属于旧矿池的任务，不再发送。回切后五分钟内又离开主矿池，
+则之后的检查间隔变长（×2，最多 ×16 的 `--failback-minutes`；在其上稳定 2 小时后恢复）。检查失败会写入日志（`the primary pool is still not usable (...)`），矿工留在备用矿池。
+
+**开发者费用。** 1% 费用连接发往**您当前所在的矿池**：每个费用时段开始时连接到您当前的条目，因此费用随故障切换而转移、随回切而返回。
+（PROX：proximamine / InnovLab 上的费用使用该矿池条目；含 suprnova 条目的列表整个运行期间使用开发者在 proximamine 的账户，与单个 suprnova 矿池相同。）
+
+**CMFD。** 引擎（`cmfd-miner`）只认识一个矿池并无限重试，因此 CMFD 由矿工这一侧处理：若所有引擎 60 秒都没有矿池（或矿池拒绝登录），引擎被停止并逐个以下一条目的
+`--pool` 重启（若所有矿池都不可用，等待时间每轮加倍，最多 8 分钟）；回切检查通过后同样的重启返回主矿池。重启会重新加载 6.4 GB 模型：每次切换约一分钟不挖矿；引擎自带的开发者费用（每小时 36 秒，同一矿池）随引擎重新计时。
+回切检查（带指纹的 TLS、按地址登录、首个任务）由矿工自己重复引擎的握手完成。
+
+**CMFD：连接静默。** 矿池连接由引擎自己维持，无复位的断链（双向防火墙 DROP、路由丢失）它会很多分钟都发现不了：它仍显示算力和“已连接”，但区块高度不再变化（Rig05，双向 DROP：6 分 41 秒未发现，没有故障切换）。因此矿工还会监视**引擎上报的区块高度**：若高度在 **12 倍平均出块间隔**内没有变化（按本次运行见到的区块测得，未满 4 个区块前按 60 秒；不少于 **8 分钟**，不超过 30 分钟），则认为连接已死，引擎在**下一个 `--pool` 条目**上重启，与“60 秒内没有引擎连上矿池”的处理相同（只有一个矿池时：在同一条目上重新连接）。日志：`pool: pool 1 of 2 (...) is not usable (the engines report the same block height for 8.0 min: the pool connection is silent): failing over`。阈值故意取得较长：CMFD 平均约每 60 秒出一个块（Rig05：22 分钟内 63157 -> 63178，间隔 20-190 秒），出块时间是随机的，3 倍平均值（3 分钟）会在 5 % 的区块后被超过，即每天几十次，而 12 倍约两周一次。引擎加载、暂停（空闲模式）、处于引擎的开发者费用时段或没有矿池时不计时；若重启后高度仍不变，下一次阈值加倍（最多 4 倍），以免对确实停滞的链每隔几分钟重启一次。测试参数：`FFGP_CMFD_STALL_S`（秒）。
+
+| 选项 | 含义 |
+|---|---|
+| `--pool A,B,C` / `--pool A --pool B` | 列表；第一个为主矿池 |
+| `--failback-minutes N` | 在备用矿池上每 N 分钟检查主矿池，连续 2 次成功后回切（默认 10，0 = 关闭，可用小数） |
+| `--noshare-minutes M` | M 分钟内没有已接受份额（且本应至少 10 个）：重连，再次发生则换下一个矿池（默认 15，0 = 关闭） |
+| `--reject-minutes K` | K 分钟内全部被拒：同上（默认 5，0 = 关闭） |
+| `--pool-check` | 检查每个 `--pool` 条目（连接、登录、任务），逐条输出结论，退出码 0 / 1；无需 GPU，适合在配置飞行表前使用 |
+
+**不记账的矿池（已接受份额看门狗）。** 矿池可能接受连接和登录、下发任务，却不记录份额。在 GPU 为你计算期间，若**在 `--noshare-minutes`
+（默认 **15** 分钟，`0` = 关闭）内没有你的已接受份额**，**且按实测算力和矿池份额难度本应至少有 10 个份额**（因此高难度的稀有份额不会触发），
+或者**在 `--reject-minutes`（默认 **5** 分钟；至少 5 次被拒、无一接受）内全部被拒**，矿工会重连。在新连接上再次发生则切换到列表中的**下一个条目**
+（以这种方式离开的主矿池，回切检查间隔逐次加长：×2 至 ×16）；只有一个矿池时再次重连并在日志中警告，矿工不会退出。日志：
+`[pool:user] watchdog: no accepted share for 15.0 min while ~60 were expected (12 sent, 0 rejected): reconnecting`。以下情况不触发：
+开发者费用时段及其后 10 秒（费用用单独连接，其份额从不算作你的）、GPU 未为你计算（暂停、调优、断线）、GPU **完全没有找到份额**
+而本应有份额（GPU 问题：硬件错误或频率，仅警告，保留矿池）、单人挖矿。CMFD：引擎不告知份额难度，因此按已见到的速率预期份额
+（在有 3 个份额之前每 6 分钟一个；按矿池条目分别统计，每次换矿池都重新开始：一个矿池的高频份额不会成为另一个矿池的预期）：一个份额都没有时约一小时后离开该 CMFD 矿池。回切检查不提交份额；回切后又不记账的主矿池会再次被离开，并且检查更稀疏。
+
+名称与默认值与 ffgs 0.5.4 一致（`--failback-minutes`、10 分钟、连续 2 次成功、间隔 60 秒）。**HiveOS：** 飞行表的 *Pool URL* 字段可填写多个以空格或逗号分隔的 URL；
+**Windows：** `start*.bat` 中的 `POOL` 可填逗号分隔的列表（同一币种）。
+
+限制：检查使用您自己的钱包和矿工名登录（若矿池拒绝同一矿工的两个连接，检查会失败，目前支持的矿池都不会）；看门狗判断稀有份额依赖算力和份额难度（CMFD 为估计值）。
+### 23. 自动选择核心锁频 `--auto-lock`（可选，1.7.8 新增）
+
+矿工为每张 NVIDIA 显卡自动选择核心锁频：在多个锁频下挖矿，每个锁频使用自己的降压配置（auto-uv，第 12、17 节），测量算力和功耗，
+保留在最高算力的 10 % 损失以内效率最好的锁频。**默认关闭**：不加 `--auto-lock` 时行为不变。选项与我们的 SASEUL 矿工 ffgs 0.5.4 相同。
+
+- 适用于 Pearl、NOID、PROX；仅 NVIDIA，需 root / 管理员。不适用于 CMFD（引擎为独立程序，每次启动需数分钟；矿工会提示并停止）和 AMD。
+  `--auto-lock` 会自动开启 `--auto-uv`（若给出 `--uv-offset N`，则所有锁频都在该固定偏移下测量）；不能与 `--idle`、`--auto-uv-dry-run` 同用。
+- 锁频：默认 1800、1700 … 1200 MHz，不超过显卡最高频率；**矿卡（CMP）起点更低：默认上限 1500 MHz**（1500 … 1100）——CMP 50HX（NVML 最大 2250）在 2000 MHz 的第一步只会撞上功耗限制，4 卡矿机曾耗电 894 W；日志会显示 `default range ... (safe top 1500 MHz for this card type ...)`。**GeForce RTX 30（及 RTX A）默认上限 1800 MHz**（1800 … 1200）：RTX 3080 Ti（功耗限制 350 W）在 2000 和 1900 MHz 的步骤会贴着限制运行，频率比锁频低 150-170 MHz。显式给出的 `--auto-lock-range` 始终优先。**撞上功耗限制的步骤不会测到最后：** 显卡功耗接近功耗限制（90 % 以上）且挖矿时频率连续 20 秒低于锁频（为 auto-uv 检查而暂停不会清零计数）时，会在该步骤的前半分钟、在搜索任何偏移之前判定，该步骤立即以 *PL-limited* 结束（`... - PL-limited: 219 W at the 225 W power limit, 1650 MHz below the lock`），并继续测下一个更低的锁频，不再等待 auto-uv 和测量。矿工只读取功耗限制，不会设置。`--auto-lock-range 1300-1600:100` 或列表 `1350,1450,1530`。给出自己
+  `--lock-cclock` 值的显卡保持该锁频、不参与测量（`--lock-cclock 1400,-` 只测第二张卡）。显存锁频是保存键的一部分。
+- 从高到低、所有显卡并行。每一轮是一个独立的矿工进程（相同选项，按卡的 `--lock-cclock`），日志照常输出，HiveOS 照常显示算力。
+  每个锁频先由 auto-uv 应用 / 检查 / 调校该锁频的配置（新锁频从上一锁频的配置 -30 开始，约 5-12 分钟，只有该卡暂停），然后该卡**正常挖矿**：
+  45 秒稳定 + 120 秒测量（矿工状态行的算力、NVML 平均功耗、核心频率中位数），份额照常提交。两轮之间矿工进程会重启几秒。
+- 选择：`--auto-lock-goal eff`（默认）= 在最高算力 `--auto-lock-max-loss`（10 %）范围内 TH/W（NOID: MH/W，PROX: GH/W）最好的锁频；
+  `speed` = 最高算力。低于该阈值后不再测更低的锁频。频率未保持（低于或高于锁频：功耗/温度限制，或锁频被其他工具重置）、测量被打断 3 次的点无效；驱动拒绝、显卡停止、60 分钟内无稳定挖矿记为 FAILED；
+  测量中矿工死机的锁频下次启动记为 crashed，不再尝试。
+- 结果按显卡、币种（NOID 含模式）、型号、驱动、显存锁频和内核保存在 `uv.json` 旁的 `autolock.json`（HiveOS：`/hive-config/freeforgem`），
+  下次启动直接应用；`--auto-lock-reset` 重新测量（auto-uv 配置保留）。首次测量通常 3-5 个锁频、30-90 分钟。
+- HiveOS：在 *Extra config arguments* 中加入 `--auto-lock`；Windows：启动脚本中 `set "EXTRA=--auto-lock"`，以管理员运行。
+
+#### 23.1 按收益选择：`--auto-lock-goal profit`（1.7.8 新增）
+
+电价便宜时，收益最高的锁频并不是能效最高的锁频。例：RTX 3070 挖 PROX（0.034 $，电价白天 0.12 $、夜间 0.053 $ = 平均 0.0977 $/kWh），
+goal eff 选 1400 MHz，而 1500 MHz 每天约 1.31 $，1800 MHz 约 1.52 $。`--auto-lock-goal profit` 按收益选择：
+
+    sudo ./freeforgem --algo prox --pool innov+tls://eu3.innovlab.cc:19701 --wallet 地址 \
+        --auto-lock --auto-lock-goal profit --power-price 0.12,0.053@23-07
+
+- **锁频的收益** = 收入 − 电费（美元/天）：收入 = 算力 × 每 H/s 每天的币数（来自网络数据）× 币价 × 0.99（矿工抽成 1 %）×（1 − 矿池费）；
+  电费 = 该锁频测得的 NVML 功耗 / 1000 × 24 小时 × 全天平均电价。功耗只是显卡本身（不含电源损耗、CPU、风扇），需要的话在
+  `--power-price` 中加余量。
+- **`--power-price X`**（美元/kWh）**必填**，缺少时 goal profit 报错退出。峰谷电价：`--power-price 0.12,0.053@23-07`（23:00-07:00 为
+  0.053，其余 0.12；可再加时段，后写的优先）。按 24 小时平均计算：(16 × 0.12 + 8 × 0.053) / 24 = 0.0977。货币须与币价一致。
+- **每 H/s 每天的币数**（单位总是矿工自己的算力单位）：
+  - Pearl：86400 × 区块奖励 / 每块工作量。工作量 = 2^256 / 网络目标（矿池任务区块头的 nbits）；奖励按任务中的高度计算（节点公式，
+    143 562 块为 2167 PRL）。任务中没有高度的矿池（Kryptex）使用 LuckyPool 公共 `api/stats`（网络难度 × 2^16）。
+  - NOID：86400 × 矿工奖励 / 每块工作量，工作量 = 2^256 / 任务的 block target；v2 奖励（前三年开发分配 10 %，矿工得 14.4 NOID）。
+    不计交易手续费。无公共 API：首个任务之前使用上次保存的数据。
+  - PROX：86400 × 每个时隙奖励 / 全网每时隙尝试次数（每 10.24 秒一个赢家，95 PROX），来自 InnovLab 公共统计 API。
+  - CMFD：没有 `--auto-lock`，因此也没有按收益选择。
+- **矿池费：** 已知 LuckyPool (Pearl) 1 %、InnovLab (PROX) 0 %、solo 0；其他矿池按 0 % 并在日志提示，用 `--pool-fee PCT` 设置。
+- **币价：** 启动时（以及每次重新选择时）取多个公共行情的中位数；偏离中位数超过 15 % 的剔除（OUTLIER），24 小时成交额低于 1000 $ 的标为
+  THIN，仅在没有其他行情时使用；只有一个来源时给出 WARNING。都无响应时使用 7 天内保存的价格，否则暂按能效选择。
+  **`--coin-price X`**（美元）手动设置，此时完全不访问交易所。来源（2026-11-15 核实）：Pearl — SafeTrade、Gate、LBank、BigONE、Coinbase、
+  Kraken、CoinGecko、CoinPaprika（THIN）、LuckyPool；PROX — 仅 SafeTrade；NOID — SafeTrade、CoinGecko、CoinPaprika；CMFD — 无。
+  列表在 `host/src/profit.rs` 的 `SOURCES` 中。
+- **测量的锁频：** profit 不提前停止，默认 2000 … 1200 MHz（步长 100，不超过显卡最高频率；CMP 卡为 1500 … 1100），首次测量约 1-2 小时；eff / speed 测过的点可复用。
+- **日志表格** 增加每天的收入 / 电费 / 收益列（`income  power  profit $/day`）。
+- **挖矿中重新选择：** 每 `--auto-lock-reprice-hours`（6，0 = 不）重新获取币价（及矿池任务未提供的网络数据），按已测点重新选择，不再测量；
+  只有收益提高超过 `--auto-lock-hysteresis`（3 %）才切换，日志写明数字。为此 profit 模式下挖矿在单独的矿工进程中进行（日志原样输出），
+  切换时重启该进程（几秒无算力）。
+- **隐私：** 不用 goal profit 时，矿工只连接你的矿池（以及除非 `--no-update-check`，每 12 小时访问一次 github.com 检查新版本）。
+  使用 goal profit 时，矿工在启动时和每 `--auto-lock-reprice-hours` 向上述行情及网络 API（Pearl: LuckyPool `api/stats`，PROX: InnovLab
+  `proxima/v1/stats`）发送**普通 HTTPS GET 请求**，只包含公共行情 URL、`Host` 和 `User-Agent: FreeForGem/1.7.8`，不含钱包、矿工名、矿池、
+  算力等任何你的数据，无 cookie，无 POST。服务器当然能看到你的 IP。`--coin-price X` 关闭行情请求；PROX 的网络 API 仍会访问。

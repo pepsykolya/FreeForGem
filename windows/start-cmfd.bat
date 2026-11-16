@@ -12,6 +12,8 @@ rem Your CMFD wallet address: cmfd1... (wallet 1.0.16+) or the 64-hex form; both
 set "WALLET="
 rem Pool URL: cmfd+tls://IP:PORT?pin=64_HEX exactly as your pool publishes it. Default: Aria / AriaBrain (pool.ariabrain.com).
 set "POOL=cmfd+tls://159.69.194.46:29445?pin=9dfb51083f287726117f689f87bc7a878792efcca58ca8b6f6e7c05ac5d152e9"
+rem Backup pools (1.7.8): several URLs separated by a comma, the first one is the primary: set "POOL=cmfd+tls://...,cmfd+tls://..." (the
+rem miner restarts its engines on the next pool when none has its pool for a minute and goes back to the primary when it works again).
 rem Other pools (remove "rem" from ONE line to use it instead; MANUAL.md has the full list):
 rem   Midas Mining (midasmining.net, 1 %):
 rem set "POOL=cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e"

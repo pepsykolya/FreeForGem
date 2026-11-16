@@ -56,6 +56,11 @@ if ($root -match '\s|[^\x00-\x7F]') {
     Write-Host "WARNING: the folder path contains spaces or non-English letters: $root" -ForegroundColor Yellow
     Write-Host "         If the miner fails to start, move the folder to e.g. C:\FreeForGem" -ForegroundColor Yellow
 }
+# 1.7.8: POOL may be a list "primary,backup1,backup2" (commas or spaces): the miner moves to the next entry when a pool is unusable and
+# returns to the primary when it works again; the checks below run on the first entry, the others are checked after them
+$PoolList = @($Pool -split '[,\s]+' | Where-Object { $_ })
+if ($PoolList.Count -eq 0) { Fail 'POOL is empty.' }
+$Pool = $PoolList[0]
 # Common Foundry (CMFD): the coin follows the pool URL (cmfd+tls://IP:PORT?pin=HEX), see start-cmfd.bat
 $Cmfd = $Pool -match '^cmfd\+tls://'
 # NOID (Parano1d): start-noid.bat passes -Algo noid; the pool is stratum+ssl://HOST:PORT (TLS) or stratum+tcp://HOST:PORT
@@ -103,6 +108,11 @@ if (-not $Cmfd -and -not $Noid -and $Wallet.Split('+')[0] -ceq 'prl1pjcsjdpjzhcc
     Start-Sleep -Seconds 15
 }
 if (-not $Cmfd -and -not $Noid -and $Pool -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail 'POOL must look like HOST:PORT, e.g. pearl-eu2.luckypool.io:3360.' }
+foreach ($p in ($PoolList | Select-Object -Skip 1)) {
+    if ($Cmfd) { if ($p -cnotmatch '^cmfd\+tls://[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}\?pin=[0-9A-Fa-f]{64}$') { Fail "Backup pool $p must look like cmfd+tls://IP:PORT?pin=64_HEX." } }
+    elseif ($Noid) { if ($p -cnotmatch '^(stratum\+(ssl|tls|tcp)://)?[A-Za-z0-9._-]+:[0-9]{1,5}(\?insecure)?$') { Fail "Backup pool $p must look like stratum+ssl://HOST:PORT or stratum+tcp://HOST:PORT." } }
+    elseif ($p -cnotmatch '^[A-Za-z0-9._-]+:[0-9]{1,5}$') { Fail "Backup pool $p must look like HOST:PORT." }
+}
 if (-not $Cmfd -and -not $Noid -and $Wallet.Contains('+') -and $Pool -notmatch '(^|\.)luckypool\.io:') {
     Write-Host 'NOTE: PRL+NOCK merge mining works on LuckyPool only: on this pool the miner mines PRL to the prl1... part and ignores +NOCK.' -ForegroundColor Yellow
 }
@@ -121,7 +131,8 @@ $amd = @()
 try { $amd = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { $_.Name -match 'Radeon|AMD' -and $_.Name -notmatch '^AMD Radeon\(TM\) Graphics$' }) } catch {}
 if (-not $smi -and $amd.Count -eq 0) { Fail 'nvidia-smi.exe not found - install the NVIDIA driver (version 525 or newer); for an AMD Radeon card install the AMD Adrenalin driver.' }
 if ($amd.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $root 'pearlgpu_amd.dll'))) { Fail 'pearlgpu_amd.dll is missing - unpack the whole archive again.' }
-Write-Host "FreeForGem for Windows - pool $Pool, wallet $($Wallet.Substring(0,[Math]::Min(8,$Wallet.Length)))..., worker $Worker"
+$PoolShown = if ($PoolList.Count -gt 1) { "$Pool (+$($PoolList.Count - 1) backup)" } else { $Pool }
+Write-Host "FreeForGem for Windows - pool $PoolShown, wallet $($Wallet.Substring(0,[Math]::Min(8,$Wallet.Length)))..., worker $Worker"
 if ($smi) {
     try { & $smi.Source --query-gpu=index,name,memory.free --format=csv,noheader 2>$null | ForEach-Object { Write-Host "  GPU $_" } } catch {}
 }
@@ -134,7 +145,7 @@ Get-ChildItem -LiteralPath $logs -Filter 'miner-*.log' | Sort-Object LastWriteTi
 
 $exe = Join-Path $root 'freeforgem.exe'
 # a CMFD URL (with '?' and '=') needs no quoting: cmd passes it to the miner as is; more quotes would make cmd /c strip the outer pair
-$cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, $Pool, $Wallet, $Worker
+$cmdLine = '"{0}" --pool {1} --wallet {2} --worker {3}' -f $exe, ($PoolList -join ','), $Wallet, $Worker
 if ($Cmfd -and $CmfdMode) { $cmdLine += " --cmfd-mode $CmfdMode" }
 if ($Noid) { $cmdLine += ' --algo noid'; if ($NoidMode) { $cmdLine += " --noid-mode $NoidMode" } }
 if ($Devices) { $cmdLine += " --devices $Devices" }
@@ -174,7 +185,7 @@ if ($Extra) {
     if ($Extra -match '[&|<>^"]') { Fail 'EXTRA must not contain & | < > ^ or quotes' }
     $cmdLine += " $Extra"
 }
-if ($AutoUv -eq '1' -or $UvOffset -or $LockCclock -or $LockMclock -or $Moffset) {
+if ($AutoUv -eq '1' -or $UvOffset -or $LockCclock -or $LockMclock -or $Moffset -or $Extra -match '--auto-lock') {
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $admin) { Write-Host 'WARNING: AUTO_UV / clock settings need Administrator: run start.bat as Administrator, otherwise the miner cannot change the GPU and will mine at the current clocks.' -ForegroundColor Yellow }
 }

@@ -25,6 +25,8 @@ pub const ALGO_NAME: &str = "parano1d";
 
 pub struct Opts {
     pub pool: String,
+    /// every --pool entry (primary first, then backups); `pool` is the first
+    pub pools: Vec<String>,
     pub wallet: String,
     pub worker: String,
     pub password: String,
@@ -610,7 +612,9 @@ struct SrcState {
 }
 
 pub fn mine(o: Opts) -> Result<()> {
-    let url = pool::parse_url(&o.pool).map_err(anyhow::Error::msg)?;
+    let pool_list = if o.pools.is_empty() { vec![o.pool.clone()] } else { o.pools.clone() };
+    let urls: Vec<pool::PoolUrl> = pool_list.iter().map(|p| pool::parse_url(p)).collect::<Result<_, _>>().map_err(anyhow::Error::msg)?;
+    let url = urls[0].clone();
     ensure!(!o.wallet.is_empty(), "--wallet is required: your NOID address (o1...)");
     crate::wintune::process(false);
     let stop = Arc::new(AtomicBool::new(false));
@@ -638,22 +642,39 @@ pub fn mine(o: Opts) -> Result<()> {
     let buses: Vec<String> = devices.iter().map(|&d| gpu::device_pci_bus_id(d)).collect::<Result<_>>()?;
     o.temp.validate(devices.len())?;
     println!(
-        "{} {} | NOID ({ALGO_NAME}) | pool {url} | worker {} | {} GPU(s) {:?} | mode {}",
+        "{} {} | NOID ({ALGO_NAME}) | pool {} | worker {} | {} GPU(s) {:?} | mode {}",
         crate::PRODUCT,
         env!("CARGO_PKG_VERSION"),
+        if urls.len() > 1 { format!("{url} (primary; backup: {})", urls[1..].iter().map(|u| u.to_string()).collect::<Vec<_>>().join(", ")) } else { url.to_string() },
         o.worker,
         devices.len(),
         devices,
         mode_name(o.mode)
     );
     // clocks (as for Pearl), then the core offsets: owner's values recorded first, restored on any exit
+    clocks::set_bus_resolver(gpu::device_pci_bus_id); // the clock code must not load pearlgpu for this coin
     clocks::recover(&dir);
-    let clock_opts = clocks::ClockOpts {
+    let mut clock_opts = clocks::ClockOpts {
         core_mhz: match &o.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &o.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &o.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
         no_hive_mem: false,
     };
+    // --auto-lock (1.7.8): the saved / measured core lock per GPU (a sweep runs here, before this run touches any clock)
+    let mut o = o;
+    if crate::autolock::active() {
+        let cards: Vec<crate::autolock::Card> = devices.iter().enumerate().map(|(p, &d)| crate::autolock::Card { dev: d, bus: buses[p].clone(), kernel: gpu::kernel_label_for(d, o.mode) }).collect();
+        match crate::autolock::resolve(&format!("noid-{}", mode_name(o.mode)), &cards, &mut clock_opts.core_mhz, &clock_opts.mem_mhz, true, &dir, &dir, &stop) {
+            crate::autolock::Outcome::Stop => return Ok(()),
+            crate::autolock::Outcome::Done(r) => return r.map_err(anyhow::Error::msg),
+            crate::autolock::Outcome::Mine { swept } => {
+                if swept {
+                    (o.uv.reset, o.uv.reset_all) = (false, false); // the profiles of the chosen locks were just checked / tuned
+                    o.minutes = crate::autolock::remaining_minutes(o.minutes); // --minutes counts from the start, the sweep included
+                }
+            }
+        }
+    }
     let _clock_guard = clocks::apply(&devices, &clock_opts, &dir);
     offset::recover(&dir);
     let nv = offset::begin(&buses, &dir);
@@ -676,17 +697,40 @@ pub fn mine(o: Opts) -> Result<()> {
     let fee_enabled = Arc::new(AtomicBool::new(false));
     let hashrate = [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))];
     let login = if o.wallet.contains('.') || o.worker.is_empty() { o.wallet.clone() } else { format!("{}.{}", o.wallet, o.worker) };
-    pool::spawn(
-        pool::Login { name: "user", url: url.clone(), login, password: o.password.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone(), hashrate: hashrate[0].clone() },
-        Src::User,
-        ev_tx.clone(),
-        user_rx,
-        stats[0].clone(),
-    );
+    if urls.len() > 1 {
+        let fb = crate::failover::opts().failback_min;
+        println!(
+            "pool list: {} entries, the first is the primary; failover to the next entry when a pool is unusable, {}",
+            urls.len(),
+            if fb > 0.0 { format!("back to the primary after 2 good checks (checked every {fb} min while on a backup, --failback-minutes)") } else { "failback is off (--failback-minutes 0)".to_string() }
+        );
+    }
+    let user_link = crate::failover::Link::new(urls.len());
+    let mk_user = |name: &'static str, link: Arc<crate::failover::Link>| pool::Login {
+        name,
+        url: url.clone(),
+        urls: urls.clone(),
+        link,
+        follow: None,
+        login: login.clone(),
+        password: o.password.clone(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop: stop.clone(),
+        hashrate: hashrate[0].clone(),
+    };
+    pool::spawn(mk_user("user", user_link.clone()), Src::User, ev_tx.clone(), user_rx, stats[0].clone());
+    {
+        let probe_login = mk_user("probe", crate::failover::Link::new(1));
+        let labels: Vec<String> = urls.iter().map(|u| format!("{}:{}", u.host, u.port)).collect();
+        crate::failover::spawn_prober("user", user_link.clone(), stop.clone(), move |e| labels[e].clone(), move |e| pool::probe(&probe_login, e, crate::failover::opts().probe_timeout));
+    }
     pool::spawn(
         pool::Login {
             name: "fee",
             url: url.clone(),
+            urls: urls.clone(),
+            link: crate::failover::Link::new(urls.len()),
+            follow: Some(user_link.clone()), // the fee goes to the pool the user mines on (failover and failback included)
             login: format!("{}.{}", devfee::FEE_WALLET_NOID, devfee::FEE_WORKER),
             password: "x".into(),
             enabled: fee_enabled.clone(),
@@ -756,6 +800,7 @@ pub fn mine(o: Opts) -> Result<()> {
     let mut published: Option<(Src, usize)> = None; // (src, job ptr)
     let mut last_n = vec![0u64; gstats.len()];
     let mut win = Instant::now();
+    let mut watchdog = crate::failover::Watch::default(); // accepted-shares watchdog of the user's session
     let mut last_bad = 0u64;
     if excluded.iter().all(|&e| e) {
         // every GPU is left out: wait here (no restart loop for HiveOS) until the first one may mine again, then start over
@@ -968,6 +1013,11 @@ pub fn mine(o: Opts) -> Result<()> {
             let pp = if all_w && tot_w > 0.0 { format!(", {:.0} W, {:.3} MH/W", tot_w, tot / tot_w) } else { String::new() };
             let bad: u64 = gstats.iter().map(|g| g.bad.load(Ordering::Relaxed)).sum();
             let (u, f) = (&stats[0], &stats[1]);
+            {
+                let hps = st[0].job.as_ref().and_then(|j| crate::failover::hps_from_target(j.share_target.iter().rev().fold(0.0f64, |a, b| a * 256.0 + *b as f64)));
+                let allowed = !fee.active() && im == crate::idle::Mode::Full && u.connected.load(Ordering::Relaxed) != 0;
+                crate::failover::watch_tick(&mut watchdog, &user_link, "user", el.as_secs_f64(), allowed, tot * 1e6, hps, u.accepted.load(Ordering::Relaxed), u.rejected.load(Ordering::Relaxed), u.submitted.load(Ordering::Relaxed));
+            }
             println!(
                 "[{:>4}s] {} | total {:.3} MH/s{} | hits {} (bad {}, stale {}) | user sub {} acc {} rej {} (stale {}, skipped {}) | fee sub {} acc {} rej {}{}{}{}",
                 start.elapsed().as_secs(),

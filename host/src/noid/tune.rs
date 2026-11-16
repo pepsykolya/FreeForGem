@@ -662,10 +662,16 @@ impl Tuner<'_> {
         // it (to the verified offset, or one step below the crash) after a quick check; without one it is tuned below it (1.7.2)
         let mut crash_at: Option<i32> = None;
         let mut crash_good: Option<i32> = None; // the highest step that had passed before it (1.7.6: in the marker)
+        let mut by_good: Option<i32> = None; // 1.7.8: a bystander of another card's fault keeps its passed steps, no failed offset
         if let Some(k) = self.db.take_trying(&c.uuid) {
-            lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): that offset counts as failed", c.label(), signed(k.at)));
-            crash_at = Some(k.at);
-            crash_good = k.good;
+            if let Some(by) = crate::faults::bystander(&self.db.dir, &c.uuid) {
+                lg(format!("{} the previous run died while this GPU checked NOID offset {}, but the fault was on {by}: this GPU did not fail, its offset is not counted as failed{}", c.label(), signed(k.at), k.good.map_or(String::new(), |g| format!("; the steps up to {} that passed are kept", signed(g)))));
+                by_good = k.good;
+            } else {
+                lg(format!("{} the previous run died while checking NOID offset {} (crash or kill): that offset counts as failed", c.label(), signed(k.at)));
+                crash_at = Some(k.at);
+                crash_good = k.good;
+            }
         }
         // a crash while mining at a tuned NOID offset (faults.rs, 1.7.2): that offset counts as failed
         if let Some(mut r) = crate::faults::get(&self.db.dir, &c.uuid) {
@@ -707,7 +713,7 @@ impl Tuner<'_> {
             lg(format!("{} --uv-reset: {} forgotten; the other NOID profiles are kept (--uv-reset-all forgets all)", c.label(), sel.as_deref().unwrap_or("no profile")));
             return self.tune(c, None);
         }
-        let crash = crash_at.map(|at| profiles::Crash { at, good: crash_good });
+        let crash = crash_at.map(|at| profiles::Crash { at, good: crash_good }).or(by_good.map(|g| profiles::Crash { at: profiles::NO_FAIL, good: Some(g) }));
         let Some(key) = sel else { return self.tune(c, crash) };
         self.db.use_key(&c.uuid, &key);
         let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash) };
@@ -957,10 +963,18 @@ impl Tuner<'_> {
         }
         let mut o = start.min(max).max(c.base + step);
         // the start step itself must hold; else one step lower until one does (or the base)
+        let mut rechecked = false;
         while o > c.base && !self.stopped() {
             let r = self.check(c, o, self.step_secs());
             if r.infra {
                 return self.abort(c, &r);
+            }
+            // 1.7.8 (1.7.7 plan, point 4): a failing start is checked once more before the search goes lower (one failure can be a
+            // transient one; PC_White: +135 failed once and the result was +105 instead of +225); not after a driver fault
+            if !r.ok && !r.fault && !rechecked {
+                rechecked = true;
+                lg(format!("{} {}: FAILED ({}); checking the start once more before going lower", c.label(), signed(o), r.reason));
+                continue;
             }
             if r.ok {
                 lg(format!("{} {}: ok ({})", c.label(), signed(o), r.brief()));

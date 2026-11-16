@@ -10,6 +10,7 @@ rem ================================================================
 rem Your NOID wallet address (o1...)
 set "WALLET="
 rem NOID pool: stratum+ssl://HOST:PORT (TLS, most NOID pools) or stratum+tcp://HOST:PORT. Default: InnovLab Europe.
+rem Backup pools (1.7.8): a comma separated list, the first one is the primary (the miner fails over and comes back, MANUAL.md "Pool lists")
 set "POOL=stratum+ssl://eu2.innovlab.cc:19601"
 rem Other pools (remove "rem" from ONE line to use it instead; MANUAL.md has the list):
 rem set "POOL=stratum+ssl://noid.suprnova.cc:3340"

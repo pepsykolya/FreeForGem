@@ -38,6 +38,7 @@ macro_rules! eprintln {
 }
 
 mod amd_uv;
+mod autolock;
 mod climb;
 mod clocks;
 mod cmfd;
@@ -47,6 +48,7 @@ mod cmpdrv;
 mod color;
 mod conout;
 mod devfee;
+mod failover;
 mod faults;
 mod gpu;
 mod hiveoc;
@@ -54,8 +56,12 @@ mod idle;
 mod mining;
 mod monitor;
 mod noid;
+mod oserr;
 mod profiles;
+mod profit;
+mod prox;
 mod nvml;
+mod silence;
 mod status;
 mod stratum;
 mod templimit;
@@ -101,6 +107,20 @@ fn test_header(seed: u8) -> Vec<u8> {
 enum TargetMode {
     Base,    // pool sends the per-unit base target, scaled by the adjustment factor
     Jackpot, // pool already sends the final jackpot threshold
+}
+
+/// Hashes per share of the pool's current job (difficulty x 2^32; a target = 2^256 / target x 2^32), for the accepted-shares watchdog.
+fn pearl_hps(job: &PoolJob, pool_diff: Option<f64>) -> Option<f64> {
+    let d = match (&job.target, job.difficulty.or(pool_diff)) {
+        (Some(t), _) => {
+            let v = U256::from_str_radix(t, 16).ok()?;
+            let f = v.0.iter().rev().fold(0.0f64, |a, w| a * 18446744073709551616.0 + *w as f64);
+            failover::hps_from_target(f)? // 2^256 / target = MAX / target (the pool's "difficulty")
+        }
+        (None, Some(d)) if d > 0.0 => d,
+        _ => return None,
+    };
+    Some(d * 4294967296.0)
 }
 
 /// Jackpot target for a kernel whose tile has `tile_rows` rows.  In `Base` mode the pool's per-unit base target is scaled by the tile size of
@@ -292,7 +312,8 @@ fn target_words_bytes(w: &[u32; 8]) -> [u8; 32] {
 }
 
 struct Args {
-    pool: String,
+    pool: String,           // the first --pool entry (the primary)
+    pools: Vec<String>,     // every --pool entry (a comma / space separated list or repeated --pool): primary first, then backups
     wallet: String,
     worker: String,
     password: String,
@@ -313,6 +334,13 @@ struct Args {
     per_gpu_workers: bool,
     cmfd_skip_prepare: bool,
     noid_mode: String,
+    pool_check: bool, // --pool-check: log in to every --pool entry (login + a job), print the verdicts, exit
+    solo: Option<String>,        // --solo http://HOST:PORT (PROX: a node's seeker endpoint)
+    token: String,               // --token (PROX solo: mine.seeker.token)
+    seeker_name: String,
+    hash_bench: Option<f64>,     // --hash-bench SECS (PROX)
+    hash_plen: usize,
+    no_mem_lock: bool, // --no-mem-lock (PROX: the lowest memory clock is the default)
     idle: idle::Opts,
     temp: templimit::Opts,
 }
@@ -443,7 +471,8 @@ fn mine(a: Args) -> Result<()> {
     } else {
         format!("m per device {device_ms:?} (SM {sms:?}){tile_desc}")
     };
-    println!("{PRODUCT} {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), a.pool, a.worker, devices.len(), gpu::backend().name(), k());
+    let pool_desc = if a.pools.len() > 1 { format!("{} (primary; backup: {})", a.pool, a.pools[1..].join(", ")) } else { a.pool.clone() };
+    println!("{PRODUCT} {} | pool {} | worker {} | {} GPU(s) [{}] | {m_desc} n={N} k={}", env!("CARGO_PKG_VERSION"), pool_desc, a.worker, devices.len(), gpu::backend().name(), k());
     // optional clock control (lock core/memory clock, memory offset): applied now, restored on any exit
     let clock_dir = a
         .uv
@@ -455,6 +484,7 @@ fn mine(a: Args) -> Result<()> {
     if !nv {
         ensure!(a.lock_cclock.is_none() && a.lock_mclock.is_none() && a.moffset.is_none(), "--lock-cclock/--lock-mclock/--moffset are NVIDIA-only (NVML); not available with the AMD backend");
         ensure!(!a.uv.fixed.is_set(), "--uv-offset is NVIDIA-only (NVML); with the AMD backend use --auto-uv (amduv)");
+        ensure!(!autolock::enabled(), "--auto-lock is NVIDIA-only (NVML core clock locks); not available with the AMD backend");
     }
     // AMD: --auto-uv runs the separate tuner amduv (apply the saved result, tune first if there is none); its guard process puts
     // the owner's settings back when the miner exits
@@ -470,12 +500,27 @@ fn mine(a: Args) -> Result<()> {
     if nv {
         clocks::recover(&clock_dir);
     }
-    let clock_opts = clocks::ClockOpts {
+    let mut clock_opts = clocks::ClockOpts {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
         no_hive_mem: false,
     };
+    // --auto-lock (1.7.8): the saved / measured core lock per GPU (a sweep runs here, before this run touches any clock)
+    let mut a = a;
+    if nv && autolock::active() {
+        let cards: Vec<crate::autolock::Card> = devices.iter().map(|&d| crate::autolock::Card { dev: d, bus: gpu::device_pci_bus_id(d).unwrap_or_default(), kernel: gpu::kernel_label_for(d) }).collect();
+        match crate::autolock::resolve("pearl", &cards, &mut clock_opts.core_mhz, &clock_opts.mem_mhz, true, &uv::state_dir(&a.uv), &clock_dir, &stop) {
+            crate::autolock::Outcome::Stop => return Ok(()),
+            crate::autolock::Outcome::Done(r) => return r.map_err(anyhow::Error::msg),
+            crate::autolock::Outcome::Mine { swept } => {
+                if swept {
+                    (a.uv.reset, a.uv.reset_all) = (false, false); // the profiles of the chosen locks were just checked / tuned
+                    a.minutes = crate::autolock::remaining_minutes(a.minutes); // --minutes counts from the start, the sweep included
+                }
+            }
+        }
+    }
     let _clock_guard = if nv { clocks::apply(&devices, &clock_opts, &clock_dir) } else { None };
     if nv {
         clocks::hint_ampere(&devices, &clocks::core_locks(devices.len()));
@@ -488,27 +533,67 @@ fn mine(a: Args) -> Result<()> {
     let uv_state = if nv { uv::start(&uv_opts, &devices, &stop) } else { None };
     println!("devfee: {}% (one {}s slot per {} min cycle, random position) on the same pool", devfee::FEE_PERCENT, devfee::Params::from_env().slot.as_secs(), devfee::Params::from_env().cycle.as_secs() / 60);
 
-    let (user_wallet, note) = stratum::login_wallet(&a.pool, &a.wallet, &a.worker);
-    if let Some(n) = note {
-        eprintln!("WARNING: {n}");
+    for p in &a.pools {
+        if let Some(n) = stratum::login_wallet(p, &a.wallet, &a.worker).1 {
+            eprintln!("WARNING: {}{n}", if a.pools.len() > 1 { format!("[{}] ", failover::label(p)) } else { String::new() });
+        }
     }
+    if a.pools.len() > 1 {
+        let fb = failover::opts().failback_min;
+        println!(
+            "pool list: {} entries, the first is the primary; failover to the next entry when a pool is unusable, {}",
+            a.pools.len(),
+            if fb > 0.0 { format!("back to the primary after 2 good checks (checked every {fb} min while on a backup, --failback-minutes)") } else { "failback is off (--failback-minutes 0)".to_string() }
+        );
+    }
+    let user_link = failover::Link::new(a.pools.len());
+    let user_wallet_fn: Arc<dyn Fn(&str) -> String + Send + Sync> = {
+        let (w, wk) = (a.wallet.clone(), a.worker.clone());
+        Arc::new(move |p: &str| stratum::login_wallet(p, &w, &wk).0)
+    };
+    let fee_wallet_fn: Arc<dyn Fn(&str) -> String + Send + Sync> = Arc::new(|p: &str| stratum::login_wallet(p, &devfee::fee_wallet(p), devfee::FEE_WORKER).0);
+    let user_login = |name: &'static str, link: Arc<failover::Link>, stop: Arc<AtomicBool>| Login {
+        name,
+        addr: a.pools[0].clone(),
+        pools: a.pools.clone(),
+        wallet: user_wallet_fn(&a.pools[0]),
+        wallet_fn: user_wallet_fn.clone(),
+        link,
+        follow: None,
+        fallback_wallet: None,
+        fallback: AtomicBool::new(false),
+        worker: a.worker.clone(),
+        password: a.password.clone(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop,
+    };
     let stats = [Arc::new(Stats::default()), Arc::new(Stats::default())];
     let (ev_tx, ev_rx) = mpsc::channel::<(Src, Event)>();
     let (user_sub_tx, user_sub_rx) = mpsc::channel::<Submit>();
     let (fee_sub_tx, fee_sub_rx) = mpsc::channel::<Submit>();
     let fee_enabled = Arc::new(AtomicBool::new(false));
     stratum::spawn(
-        Login { name: "user", addr: a.pool.clone(), wallet: user_wallet, fallback_wallet: None, fallback: AtomicBool::new(false), worker: a.worker.clone(), password: a.password.clone(), enabled: Arc::new(AtomicBool::new(true)), stop: stop.clone() },
+        user_login("user", user_link.clone(), stop.clone()),
         Src::User,
         ev_tx.clone(),
         user_sub_rx,
         stats[0].clone(),
     );
+    {
+        // failback: while on a backup entry the primary is checked on its own connection (connect + login + a job)
+        let probe_login = user_login("probe", failover::Link::new(1), stop.clone());
+        let pools = a.pools.clone();
+        failover::spawn_prober("user", user_link.clone(), stop.clone(), move |e| failover::label(&pools[e]), move |e| stratum::probe(&probe_login, e, failover::opts().probe_timeout));
+    }
     stratum::spawn(
         Login {
             name: "fee",
-            addr: a.pool.clone(),
-            wallet: stratum::login_wallet(&a.pool, &devfee::fee_wallet(&a.pool), devfee::FEE_WORKER).0,
+            addr: a.pools[0].clone(),
+            pools: a.pools.clone(),
+            wallet: fee_wallet_fn(&a.pools[0]),
+            wallet_fn: fee_wallet_fn.clone(),
+            link: failover::Link::new(a.pools.len()),
+            follow: Some(user_link.clone()), // the fee goes to the pool the user mines on (failover and failback included)
             fallback_wallet: Some(devfee::FEE_WALLET.into()),
             fallback: AtomicBool::new(false),
             password: "x".into(),
@@ -583,7 +668,6 @@ fn mine(a: Args) -> Result<()> {
     let (start, deadline) = (Instant::now(), a.minutes.map(|m| Duration::from_secs_f64(m * 60.0)));
     let mut mode = a.mode;
     let mut switched = false;
-    let test_switch = std::env::var("FFG_TEST_SWITCH_MODE_SECS").ok().and_then(|v| v.parse::<u64>().ok()).map(Duration::from_secs);
     let mut st = [SrcState::default(), SrcState::default()];
     let mut fee = DevFee::new(devfee::Params::from_env(), start);
     // idle mode: the fee schedule runs on the mining time (a pause stops its clock); `aside` = the owner's clocks and offsets
@@ -593,6 +677,7 @@ fn mine(a: Args) -> Result<()> {
     let mut published: Option<Arc<Assignment>> = None;
     let mut last_attempts = vec![0u64; gstats.len()];
     let mut win_start = Instant::now();
+    let mut watchdog = failover::Watch::default(); // accepted-shares watchdog of the user's session (failover.rs)
     // board power per mining GPU (NVML, read-only) for the TH/W figures of the periodic line; absent NVML = no power shown
     let power = if !nv { None } else { nvml::Nvml::load().ok() }.map(|nv| {
         let devs: Vec<Option<nvml::Dev>> =
@@ -722,6 +807,8 @@ fn mine(a: Args) -> Result<()> {
                 Event::Disconnected => {
                     if src == Src::Fee {
                         st[src.idx()] = SrcState::default(); // a fee job is only trusted on a live connection
+                    } else {
+                        st[src.idx()].pool_diff = None; // the difficulty belongs to the connection: the next pool says its own
                     }
                 }
             }
@@ -748,10 +835,7 @@ fn mine(a: Args) -> Result<()> {
         // "low difficulty" rejections with no accepts: try the other target interpretation once
         let low: u64 = stats.iter().map(|s| s.low_diff.load(Ordering::Relaxed)).sum();
         let acc: u64 = stats.iter().map(|s| s.accepted.load(Ordering::Relaxed)).sum();
-        // test hook: FFG_TEST_SWITCH_MODE_SECS=N flips the target mode once after N s (the switch the low-difficulty rule makes), to test the
-        // kernel change on the fly on a pool that never answers "low difficulty"
-        let forced = test_switch.is_some_and(|t| start.elapsed() >= t);
-        if !switched && ((low >= 2 && acc == 0) || forced) {
+        if !switched && low >= 2 && acc == 0 {
             switched = true;
             mode = if mode == TargetMode::Base { TargetMode::Jackpot } else { TargetMode::Base };
             println!("!! low-difficulty rejects -> switching target mode to {}", mode_name(mode));
@@ -852,6 +936,11 @@ fn mine(a: Args) -> Result<()> {
             }
             let power_part = if all_w && total_w > 0.0 { format!(" | {:.0} W, {:.3} TH/W", total_w, total_ths / total_w) } else { String::new() };
             let (u, f) = (&stats[0], &stats[1]);
+            {
+                let hps = st[0].cur.as_ref().and_then(|(pj, _)| pearl_hps(pj, st[0].pool_diff));
+                let allowed = !fee.active() && im == idle::Mode::Full && u.connected.load(Ordering::Relaxed) != 0;
+                failover::watch_tick(&mut watchdog, &user_link, "user", el.as_secs_f64(), allowed, total_ths * 1e12, hps, u.accepted.load(Ordering::Relaxed), u.rejected.load(Ordering::Relaxed), u.submitted.load(Ordering::Relaxed));
+            }
             println!(
                 "[{:>4}s] {} | total {:.3} TH/s ({:.2} att/s){} | hits {} (row0 dropped {}, bad {}, qdrop {}) | user sub {} acc {} rej {} | fee sub {} acc {} rej {}{}{}",
                 start.elapsed().as_secs(),
@@ -915,10 +1004,19 @@ USAGE:
     freeforgem --pool HOST:PORT --wallet ADDRESS [OPTIONS]                         Pearl (PRL)
     freeforgem --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]       Common Foundry (CMFD)
     freeforgem --algo noid --pool stratum+ssl://HOST:PORT --wallet o1... [OPTIONS] NOID (Parano1d)
+    freeforgem --algo prox --pool stratum+ssl://HOST:PORT --wallet ADDR --password SECRET   Proxima (PROX); --solo http://NODE:PORT --token T
     freeforgem --self-test [--algo cmfd|noid] [--devices N]
 
 OPTIONS:
-    --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360)
+    --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360); several entries of one coin = pool list:
+                         --pool A,B,C or --pool A --pool B (the first is the primary), see POOL LISTS below
+    --failback-minutes N  while on a backup pool, check the primary every N minutes (default 10, 0 = off) and go back
+                         after 2 good checks in a row (login + a job on a separate connection, nothing is submitted)
+    --noshare-minutes M  no accepted share of yours for M minutes while the GPUs hash (and at least 10 shares were expected at the
+                         measured hash rate and the pool's share difficulty): the pool is not crediting -> reconnect, the same
+                         again -> the next --pool entry (a single pool: reconnect with a warning). Default 15, 0 = off
+    --reject-minutes K   only rejected shares (at least 5, none accepted) for K minutes: the same. Default 5, 0 = off
+    --pool-check         log in to every --pool entry (connect + login + a job), print the verdicts and exit (no GPU needed)
     --wallet ADDRESS     your PRL wallet address (required)
     --worker NAME        worker name (default worker1)
     --password TEXT      stratum password (default x); Kryptex custom share difficulty: d=VALUE, e.g. d=8388608
@@ -998,6 +1096,29 @@ OPTIONS:
                          0 = none); else reset
                          --auto-uv (Pearl, CMFD, NOID): an OC apply (HiveOS) that resets the tuned offset while mining gets
                          it back after a quick check; a stop during a check is not a failure
+    --auto-lock          opt-in (1.7.8; Pearl, NOID, PROX; NVIDIA, root/Administrator; turns on --auto-uv): choose the core
+                         clock lock per GPU by measurement. Each lock of the range, highest first, is mined at its own auto-uv
+                         profile (a new lock is tuned first), then 45 s settle + 120 s measured (hash rate, NVML watts, clock);
+                         shares go to the pool as usual, the other GPUs mine at their locks. Chosen: the best TH/W (MH/W, GH/W)
+                         within --auto-lock-max-loss % of the top hash rate; lower locks are not measured once one is below
+                         that. Saved per GPU, coin, board, driver, memory lock and kernel in autolock.json (next to uv.json):
+                         later starts apply it at once. Each round runs as a miner process of its own (log lines follow).
+                         A GPU with its own --lock-cclock value is not swept (--lock-cclock 1400,- sweeps the second GPU only)
+    --auto-lock-range A-B[:S]|L,L..  locks to try (default 1800-1200 step 100, capped by the card's maximum clock; CMP cards: top 1500)
+    --auto-lock-max-loss PCT   allowed hash rate loss for efficiency (default 10)
+    --auto-lock-goal eff|speed|profit  best efficiency within the loss (default), the top hash rate, or the most
+                         US$ per day: income (hash rate x coins per H/s from the network x coin price x 0.99 dev fee x
+                         (1 - pool fee)) minus electricity (NVML watts x 24 h x --power-price). profit measures every lock of
+                         the range (default 2000-1200 step 100, capped by the card's maximum; CMP cards: top 1500) and needs --power-price
+    --power-price P[,P2@FROM-TO]  electricity in $ per kWh, e.g. 0.12 or day 0.12 / night 0.053 from 23 to 07 h:
+                         0.12,0.053@23-07 (averaged over the 24 hours: 0.0977)
+    --coin-price X       coin price in US$ by hand: no exchange is asked (default with profit: the median of public
+                         tickers, GET only, nothing of yours is sent; see MANUAL section 23)
+    --pool-fee PCT       the pool's fee for profit (known: LuckyPool 1, InnovLab PROX 0; else 0 unless given)
+    --auto-lock-reprice-hours N  profit: fetch the price (and network data) again every N h while mining and re-choose
+                         from the measured points, no new measurement (default 6, 0 = never)
+    --auto-lock-hysteresis PCT   profit: switch locks only for more than PCT % more profit (default 3)
+    --auto-lock-reset    forget the measured locks of these GPUs and sweep again (the auto-uv profiles stay)
     --help               show this text
     --version            show the version
 
@@ -1034,13 +1155,107 @@ NOID (Parano1d, Poseidon2b PoW; NVIDIA RTX 30/40/50 and A100/H100 only, driver R
     Every candidate is re-computed on the CPU (official noid_poseidon2b crate) before it is submitted; a failed check or a
     failed in-mining watchdog check (every 120 s) steps the card's offset back. Dev fee: 1% (60 s per 100 min, same pool).
 
+PROX (Proxima, transaction-hash PoW txid-blake2b since slot 196000; NVIDIA GTX 10 / RTX 20/30/40/50, sm_61+):
+    --algo prox          coin (default: prox for a pool host with prox in its name, or with --solo)
+    --pool stratum+ssl://pool.proximamine.com:3334 --wallet ADDRESS --worker RIG --password SECRET
+                         pool login ADDRESS.RIG (suprnova-format stratum, TLS or stratum+tcp://; extranonce1 2 + 6 bytes)
+    --solo http://HOST:PORT --token TOKEN   solo through `proxi node mine` (mine.seeker.listen / mine.seeker.token,
+                         seeker protocol v2); --seeker-name NAME (default freeforgem) is shown in the node's statistics
+    --hash-bench SECS [--hash-prefix-len N]   kernel throughput on a synthetic job (GH/s, W, GH/W), then exit (default N 600,
+                         the mainnet layout is ~369)
+    --self-test --algo prox   CPU vectors of the node and the pool + every GPU's candidate set vs the CPU, then exit
+    Every candidate is re-hashed on the CPU (BLAKE2b) before it is sent; --lock-cclock/--lock-mclock/--moffset/--temp-limit
+    as for Pearl; --auto-uv is not available for PROX (RTX 30: --lock-cclock 1400-1500 = ~74 % of the hash rate at ~43 %
+    of the power). The pool user agent is FreeForGem/<version>. Dev fee: 1% (60 s per 100 min) always on proximamine,
+    also when mining solo or on another pool.
+
+POOL LISTS (failover and failback; Pearl, NOID, PROX pools, CMFD; not --solo):
+    --pool A,B,C  The first entry is the primary, the others are backups of the same coin / protocol (PROX: all stratum or all
+                  InnovLab). A pool that cannot be reached, refuses the login or brings no job moves the miner to the next
+                  entry (after the last one: the primary again, with growing waits); a connection that lived a while is
+                  retried on the same entry first. On a backup the primary is checked every --failback-minutes on its own
+                  connection (connect + login + a job; CMFD: pinned TLS + login + a job); after 2 good checks in a row (the
+                  second 60 s later) the miner goes back: the GPUs keep their job, shares found in the first second still go to
+                  the old pool, the switch waits for its answers to everything in flight (1-3 s in all), then the connection
+                  moves. A primary
+                  that was left again soon after a failback is checked less often (x2 up to x16, back to normal after 2 h).
+                  The accepted-shares watchdog (--noshare-minutes / --reject-minutes) works with or without a list; it never
+                  counts the dev fee minute or the 10 s after it, shares the GPUs did not find at all (a GPU problem, only a
+                  warning) or rare big-difficulty shares (CMFD: expected at the rate seen so far, one per 6 min before the
+                  third share). The dev fee follows you: its connection goes to the pool you are on whenever its slot starts.
+                  CMFD: the engine has one pool; when no engine has its pool for 60 s the engines are restarted on the next
+                  entry, and again for the failback (each restart reloads the model, about a minute without mining).
+
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
-A 1% developer fee (Pearl and NOID: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool) is part of the license terms.
+A 1% developer fee (Pearl, NOID and PROX: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool; PROX: on proximamine) is part of the license terms.
 ";
+
+/// `--pool-check`: the failback check of every `--pool` entry, without a GPU: connect + login (+ the certificate pin for CMFD) + a job.
+fn run_pool_check(a: &Args) -> Result<()> {
+    ensure!(a.pool_given, "--pool-check needs --pool (one or several entries)");
+    ensure!(!a.wallet.is_empty(), "--pool-check needs --wallet (the login is the same as for mining)");
+    let timeout = failover::opts().probe_timeout;
+    let prox = match a.algo.as_deref() {
+        Some("prox") | Some("proxima") | Some("txid-blake2b") => true,
+        Some(_) => false,
+        None => prox::looks_like_prox_pool(&a.pool),
+    };
+    let noid = !prox
+        && match a.algo.as_deref() {
+            Some("noid") | Some("parano1d") | Some("poseidon2b") => true,
+            Some(_) => false,
+            None => noid::looks_like_noid_pool(&a.pool),
+        };
+    let cmfd_coin = !prox && !noid && (matches!(a.algo.as_deref(), Some("cmfd") | Some("forgematrix") | Some("forgematrix_v4")) || (a.algo.is_none() && cmfd::is_cmfd_url(&a.pool)));
+    let login = if a.wallet.contains('.') || a.worker.is_empty() { a.wallet.clone() } else { format!("{}.{}", a.wallet, a.worker) };
+    let t0 = std::time::Instant::now();
+    let (coin, res): (&str, Vec<Result<(), String>>) = if prox {
+        let mut urls = Vec::new();
+        let mut innov_proto = None;
+        for p in &a.pools {
+            let (u, k) = match prox::innov::transport_url(p) {
+                Some(t) => (prox::parse_pool(&t)?, prox::fee::Proto::Innov),
+                None => (prox::parse_pool(p)?, prox::fee::Proto::Stratum),
+            };
+            ensure!(innov_proto.is_none_or(|x| x == k), "--pool: the entries of one list must use the same protocol");
+            innov_proto = Some(k);
+            urls.push(u);
+        }
+        let sess: prox::pool::Session = if innov_proto == Some(prox::fee::Proto::Innov) { prox::innov::session } else { prox::pool::session_stratum };
+        ("PROX", prox::pool::check(&urls, &login, &a.password, timeout, sess))
+    } else if noid {
+        let urls: Vec<noid::pool::PoolUrl> = a.pools.iter().map(|p| noid::pool::parse_url(p)).collect::<Result<_, _>>().map_err(anyhow::Error::msg)?;
+        ("NOID", noid::pool::check(&urls, &login, &a.password, timeout))
+    } else if cmfd_coin {
+        for p in &a.pools {
+            cmfd::validate_pool(p)?;
+        }
+        let w = cmfd::wallet_hex(&a.wallet)?;
+        ("CMFD", a.pools.iter().map(|p| cmfd::probe_pool(p, &w, &a.worker, timeout)).collect())
+    } else {
+        let pools: Vec<String> = a.pools.iter().map(|p| stratum::pool_addr(p)).collect::<Result<_, _>>().map_err(anyhow::Error::msg)?;
+        ("Pearl", stratum::check(&pools, &a.wallet, &a.worker, &a.password, timeout))
+    };
+    let mut bad = 0;
+    for (i, (p, r)) in a.pools.iter().zip(&res).enumerate() {
+        match r {
+            Ok(()) => println!("pool {} of {} ({}): OK, login and a job ({coin})", i + 1, a.pools.len(), failover::label(p)),
+            Err(e) => {
+                bad += 1;
+                println!("pool {} of {} ({}): FAILED: {e} ({coin})", i + 1, a.pools.len(), failover::label(p));
+            }
+        }
+    }
+    println!("pool-check: {} of {} entries usable ({:.1} s)", res.len() - bad, res.len(), t0.elapsed().as_secs_f64());
+    if bad > 0 {
+        crate::conout::exit(1);
+    }
+    Ok(())
+}
 
 fn parse_devices(s: &str) -> Result<Vec<i32>> {
     let mut v = Vec::new();
-    for p in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+    for p in crate::uv::list_parts(s).into_iter().filter(|p| !p.is_empty()) {
         let d: i32 = p.parse().map_err(|_| anyhow::anyhow!("bad device id {p:?}"))?;
         ensure!(d >= 0, "bad device id {p:?}");
         // test hook (faults.rs scenario s5d): FFG_TEST_DUP_DEVICES=1 keeps a repeated id = two workers on one GPU, a simulated second device
@@ -1100,6 +1315,7 @@ fn mine_cmfd(a: Args) -> Result<()> {
     cmfd::mine(
         cmfd::Opts {
             pool: a.pool.trim().to_string(),
+            pools: a.pools.iter().map(|p| p.trim().to_string()).collect(),
             wallet: a.wallet.trim().to_string(),
             worker: a.worker,
             devices: a.devices,
@@ -1171,6 +1387,7 @@ fn import_legacy_uv(dir: &std::path::Path) {
 }
 
 fn main() {
+    oserr::english(); // Windows: the text of OS errors in English, not unreadable in the log
     let r = real_main();
     if let Err(e) = &r {
         eprintln!("Error: {e:?}");
@@ -1184,15 +1401,45 @@ fn main() {
 fn real_main() -> Result<()> {
     std::hint::black_box(&BUILD_LAYOUT_ID);
     // colours: never in the check child processes (the parent parses their lines), not with --no-color / NO_COLOR
-    if std::env::args().any(|x| x == "--uv-check" || x == "--noid-uv-check" || x == "--no-color") {
+    if std::env::args().any(|x| x == "--uv-check" || x == "--noid-uv-check" || x == "--prox-uv-check" || x == "--no-color") {
         color::disable();
     }
     if std::env::args().any(|x| x == "--noid-uv-check") {
         noid_check_main();
     }
-    let mut args = std::env::args().skip(1);
+    if std::env::args().any(|x| x == "--prox-uv-check") {
+        let v: Vec<String> = std::env::args().collect();
+        let get = |k: &str| v.iter().position(|x| x == k).and_then(|i| v.get(i + 1)).cloned();
+        let dev = get("--devices").and_then(|s| s.split(',').next().and_then(|x| x.trim().parse().ok())).unwrap_or(0);
+        let secs = get("--uv-secs").and_then(|s| s.parse().ok()).unwrap_or(15);
+        crate::conout::exit(prox::tune::check_child(dev, secs, &get("--uv-ref").unwrap_or_default()));
+    }
+    // per-GPU list options may be given without quotes (`--lock-cclock 1500 1650`, HiveOS Extra config / .bat values split on
+    // spaces): the numbers that follow such an option are joined to its value (uv::is_list_value)
+    const LIST_OPTS: [&str; 10] = ["--devices", "--device", "--uv-offset", "--uv-max", "--uv-min", "--temp-limit", "--temp-stop", "--lock-cclock", "--lock-mclock", "--moffset"];
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut joined: Vec<String> = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        joined.push(raw[i].clone());
+        if LIST_OPTS.contains(&raw[i].as_str()) && i + 1 < raw.len() {
+            let mut v = raw[i + 1].clone();
+            i += 2;
+            while i < raw.len() && uv::is_list_value(&raw[i]) {
+                v.push(' ');
+                v.push_str(&raw[i]);
+                i += 1;
+            }
+            joined.push(v);
+            continue;
+        }
+        i += 1;
+    }
+    let argv_joined = joined.clone(); // --auto-lock builds the command line of its sweep's miner processes from it
+    let mut args = joined.into_iter();
     let mut a = Args {
         pool: "pearl-eu2.luckypool.io:3360".into(),
+        pools: vec![],
         wallet: String::new(),
         worker: "worker1".into(),
         password: "x".into(),
@@ -1213,6 +1460,13 @@ fn real_main() -> Result<()> {
         per_gpu_workers: false,
         cmfd_skip_prepare: false,
         noid_mode: "eff".into(),
+        pool_check: false,
+        solo: None,
+        token: String::new(),
+        seeker_name: "freeforgem".into(),
+        hash_bench: None,
+        hash_plen: 600,
+        no_mem_lock: false,
         idle: idle::Opts::default(),
         temp: templimit::Opts { limit: uv::PerGpu::Unset, stop: uv::PerGpu::Unset },
     };
@@ -1221,6 +1475,7 @@ fn real_main() -> Result<()> {
     let mut update_check = true;
     let mut child: Option<uv::ChildArgs> = None;
     let mut uv_given = false;
+    let mut al = autolock::Opts::default();
     while let Some(arg) = args.next() {
         let mut val = || args.next().ok_or_else(|| anyhow::anyhow!("missing value for {arg}"));
         match arg.as_str() {
@@ -1235,9 +1490,17 @@ fn real_main() -> Result<()> {
             "--self-test" => test = true,
             "--cmp-driver" => crate::conout::exit(cmpdrv::install()),
             "--pool" => {
-                a.pool = val()?;
+                let v = val()?;
+                let list = failover::split_list(&v);
+                ensure!(!list.is_empty(), "--pool needs an address");
+                a.pools.extend(list);
+                a.pool = a.pools[0].clone();
                 a.pool_given = true;
             }
+            "--pool-check" => a.pool_check = true,
+            "--noshare-minutes" => failover::set_watchdog(Some(failover::parse_minutes(&val()?).map_err(|e| anyhow::anyhow!(e.replace("--failback-minutes", "--noshare-minutes")))?), None),
+            "--reject-minutes" => failover::set_watchdog(None, Some(failover::parse_minutes(&val()?).map_err(|e| anyhow::anyhow!(e.replace("--failback-minutes", "--reject-minutes")))?)),
+            "--failback-minutes" => failover::set_failback_minutes(failover::parse_minutes(&val()?).map_err(anyhow::Error::msg)?),
             "--algo" => a.algo = Some(val()?.to_ascii_lowercase()),
             "--cmfd-dir" => a.cmfd_dir = Some(val()?.into()),
             "--cmfd-model" => a.cmfd_model = Some(val()?.into()),
@@ -1245,6 +1508,12 @@ fn real_main() -> Result<()> {
             "--cmfd-batch" => a.cmfd_batch = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--cmfd-batch needs a number 1-64"))?),
             "--cmfd-skip-prepare" => a.cmfd_skip_prepare = true,
             "--noid-mode" => a.noid_mode = val()?.to_ascii_lowercase(),
+            "--solo" => a.solo = Some(val()?),
+            "--no-mem-lock" => a.no_mem_lock = true,
+            "--token" => a.token = val()?,
+            "--seeker-name" => a.seeker_name = val()?,
+            "--hash-bench" => a.hash_bench = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--hash-bench needs a number of seconds"))?),
+            "--hash-prefix-len" => a.hash_plen = val()?.parse().map_err(|_| anyhow::anyhow!("--hash-prefix-len needs a number of bytes"))?,
             "--per-gpu-workers" => a.per_gpu_workers = true,
             "--wallet" => a.wallet = val()?,
             "--worker" => a.worker = val()?,
@@ -1316,12 +1585,40 @@ fn real_main() -> Result<()> {
             "--idle-gpu" => a.idle.gpu_pct = idle::parse_pct(&val()?, "--idle-gpu")?,
             "--backend" => a.backend = Some(val()?),
             "--target-mode" => a.mode = if val()? == "jackpot" { TargetMode::Jackpot } else { TargetMode::Base },
+            x if x.starts_with("--auto-lock") || x == "--power-price" || x == "--coin-price" || x == "--pool-fee" => {
+                if !autolock::arg(&mut al, x, &mut val)? {
+                    bail!("unknown argument {arg} (see --help)");
+                }
+            }
             _ => bail!("unknown argument {arg} (see --help)"),
         }
     }
     let _ = uv_given;
+    // --auto-lock (1.7.8, off unless asked): choose the core lock per GPU by measurement (autolock.rs)
+    if al.sub && !al.on {
+        println!("auto-lock: WARNING --auto-lock-* options (and --power-price, --coin-price, --pool-fee) are ignored without --auto-lock");
+    } else if al.on && al.goal != autolock::Goal::Profit && (al.tariff.is_some() || al.coin_price.is_some() || al.pool_fee.is_some()) {
+        println!("auto-lock: WARNING --power-price / --coin-price / --pool-fee are used by --auto-lock-goal profit only");
+    }
+    if al.on && al.goal == autolock::Goal::Profit {
+        ensure!(
+            al.tariff.is_some(),
+            "--auto-lock-goal profit needs the price of electricity: --power-price X ($ per kWh), or day and night: --power-price 0.12,0.053@23-07 (0.053 from 23:00 to 07:00)"
+        );
+    }
+    if al.on && child.is_none() && !test && !gpu_state {
+        autolock::times_from_env(&mut al);
+        ensure!(!a.idle.on, "--auto-lock and --idle exclude each other (the sweep measures steady mining)");
+        ensure!(!a.uv.dry_run, "--auto-lock and --auto-uv-dry-run exclude each other");
+        if !a.uv.auto && !a.uv.fixed.is_set() {
+            println!("auto-lock: --auto-lock turns on --auto-uv: every lock is measured at its own undervolt profile");
+            a.uv.auto = true;
+            al.add_uv = true;
+        }
+    }
+    autolock::set(al, argv_joined);
     // a newer release -> a log line and update-available for HiveOS (update.rs); not for check processes / tests
-    if update_check && child.is_none() && !test && !gpu_state && !a.wallet.is_empty() {
+    if update_check && child.is_none() && !test && !gpu_state && (!a.wallet.is_empty() || a.solo.is_some()) {
         update::start();
     }
     if child.is_none() {
@@ -1334,6 +1631,46 @@ fn real_main() -> Result<()> {
             a.uv.check_counts(d.len())?; // without --devices: checked once the GPUs are counted
         }
     }
+    if a.pool_check && child.is_none() {
+        return run_pool_check(&a);
+    }
+    // PROX (Proxima): its own GPU library (proxgpu); the Pearl library is only used for --lock-cclock/--lock-mclock/--moffset
+    let prox_algo = match a.algo.as_deref() {
+        Some("prox") | Some("proxima") | Some("txid-blake2b") => true,
+        Some(_) => false,
+        None => a.solo.is_some() || (a.pool_given && prox::looks_like_prox_pool(&a.pool)),
+    };
+    if prox_algo && child.is_none() {
+        idle::start(&a.idle)?;
+        if test {
+            return prox::self_test(&a.devices);
+        }
+        if let Some(s) = a.hash_bench {
+            return prox::hash_bench(&a.devices, s, a.hash_plen);
+        }
+        ensure!(a.pool_given || a.solo.is_some(), "--algo prox needs --pool stratum+ssl://HOST:PORT (a Proxima pool) or --solo http://HOST:PORT (see --help)");
+        // --auto-uv is off unless asked, as for Pearl (owner's decision, 1.7.8)
+        let uvo = a.uv;
+        return prox::mine(prox::Opts {
+            no_mem_lock: a.no_mem_lock,
+            pool: a.pool_given.then_some(a.pool),
+            pools: if a.pool_given { a.pools } else { vec![] },
+            solo: a.solo,
+            token: a.token,
+            seeker_name: a.seeker_name,
+            wallet: a.wallet.trim().to_string(),
+            worker: a.worker,
+            password: a.password,
+            minutes: a.minutes,
+            devices: a.devices,
+            lock_cclock: a.lock_cclock,
+            lock_mclock: a.lock_mclock,
+            moffset: a.moffset,
+            temp: a.temp,
+            uv: uvo,
+        });
+    }
+    ensure!(a.solo.is_none() && a.hash_bench.is_none(), "--solo / --hash-bench are PROX options (--algo prox)");
     // NOID: its own GPU library (noidgpu); the Pearl library is not needed (only for --lock-cclock/--lock-mclock/--moffset)
     let noid_algo = match a.algo.as_deref() {
         Some("noid") | Some("parano1d") | Some("poseidon2b") => true,
@@ -1349,6 +1686,7 @@ fn real_main() -> Result<()> {
         ensure!(a.pool_given, "--algo noid needs --pool stratum+ssl://HOST:PORT (a NOID pool, see --help)");
         return noid::mine(noid::Opts {
             pool: a.pool,
+            pools: a.pools,
             wallet: a.wallet.trim().to_string(),
             worker: a.worker,
             password: a.password,
@@ -1401,7 +1739,7 @@ fn real_main() -> Result<()> {
             "pearl"
         }
         Some("cmfd") | Some("forgematrix") | Some("forgematrix_v4") => "cmfd",
-        Some(x) => bail!("unknown --algo {x:?} (pearl, cmfd or noid)"),
+        Some(x) => bail!("unknown --algo {x:?} (pearl, cmfd, noid or prox)"),
         None if cmfd::is_cmfd_url(&a.pool) => "cmfd",
         None => "pearl",
     };
@@ -1412,13 +1750,24 @@ fn real_main() -> Result<()> {
         }
         idle::start(&a.idle)?; // a session without a desktop refuses before any clock or offset is touched
         ensure!(!a.temp.on(), "--temp-limit: not available for CMFD (its engine is an external program that cannot be duty-cycled); use a power limit or --lock-cclock");
+        ensure!(
+            !autolock::enabled(),
+            "--auto-lock: not available for CMFD in 1.7.8 (its engine is an external program with a minutes-long start and model load per process; the sweep would restart it for every lock); use --lock-cclock with --auto-uv"
+        );
         return mine_cmfd(a);
     }
     if test {
         return self_test(a.devices.as_deref());
     }
     ensure!(!a.wallet.is_empty(), "--wallet is required (see --help)");
-    a.pool = stratum::pool_addr(&a.pool).map_err(anyhow::Error::msg)?;
-    ensure!(a.pool.contains(':'), "--pool must be HOST:PORT");
+    if !a.pool_given {
+        a.pools = vec![a.pool.clone()];
+    }
+    for p in a.pools.iter_mut() {
+        ensure!(!cmfd::is_cmfd_url(p), "--pool {}: a {} entry in a Pearl pool list (all entries must be of one coin)", failover::label(p), cmfd::SCHEME);
+        *p = stratum::pool_addr(p).map_err(anyhow::Error::msg)?;
+        ensure!(p.contains(':'), "--pool {p} must be HOST:PORT");
+    }
+    a.pool = a.pools[0].clone();
     mine(a)
 }

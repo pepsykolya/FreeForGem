@@ -4,11 +4,12 @@
 #   [ 270s] GPU0 68.318 | GPU1 68.2 | total 136.5 TH/s (...) | ... | user sub 6 acc 6 rej 0 | fee sub 0 acc 0 rej 0     (Pearl)
 #   [ 380s] GPU0 21.76 (237 W, 330742 FW/kWh)  GPU1 21.75 (...) | total 87.46 FW/s | ... | user sub 1 acc 1 rej 0 | ...   (CMFD)
 #   [  60s] GPU1 35.512 (77 W, 0.461 MH/W)  GPU2 ... | total 101.2 MH/s, 220 W, 0.460 MH/W | hits ... | user sub 4 acc 4 rej 0 | ...  (NOID)
+#   [  60s] GPU0 3.210 (199 W, 0.0161 GH/W)  GPU1 ... | total 6.420 GH/s, 398 W, 0.0161 GH/W | hits ... | user sub 9 acc 9 rej 0 (...) | ...  (PROX)
 _ffgp_dir=$(dirname "${BASH_SOURCE[0]}")
 . "$_ffgp_dir/h-manifest.conf"
 _log="${CUSTOM_LOG_BASENAME}.log"
 # ANSI colour codes (1.7.2 colours the log; the stats line itself is never coloured) are stripped before parsing
-_line=$(tail -n 400 "$_log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -aE ' total [0-9.]+ (TH|FW|MH)/s' | tail -n 1)
+_line=$(tail -n 400 "$_log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -aE ' total [0-9.]+ (TH|FW|MH|GH)/s' | tail -n 1)
 _age=$(( $(date +%s) - $(stat -c %Y "$_log" 2>/dev/null || echo 0) ))
 
 if [[ -z $_line || $_age -gt 60 ]]; then
@@ -20,9 +21,10 @@ else
   mapfile -t _ths < <(grep -oP 'GPU[0-9]+ \K[0-9.]+' <<< "$_line")
   _total=$(grep -oP 'total \K[0-9.]+' <<< "$_line")
   # Pearl: TH/s -> per-GPU khs x1e9, khs x1e9; CMFD (as FreeForgeMiner reports it): FW/s as hs 1:1, khs = FW/s / 1000
-  # NOID: MH/s -> per-GPU khs x1000, khs = MH/s x 1000, algo parano1d
+  # NOID: MH/s -> per-GPU khs x1000, khs = MH/s x 1000, algo parano1d; PROX: GH/s -> khs x1e6, algo proxima
   if [[ $_line == *' FW/s'* ]]; then _mul=1; _kmul=0.001; _fmt=%.2f; _units=hs; _algo=forgematrix_v4
   elif [[ $_line == *' MH/s'* ]]; then _mul=1000; _kmul=1000; _fmt=%.1f; _units=khs; _algo=parano1d
+  elif [[ $_line == *' GH/s'* ]]; then _mul=1e6; _kmul=1e6; _fmt=%.0f; _units=khs; _algo=proxima
   else _mul=1e9; _kmul=1e9; _fmt=%.0f; _units=khs; _algo=$CUSTOM_ALGO; fi
   _up=$(grep -oP '^\[\s*\K[0-9]+' <<< "$_line")
   _acc=$(grep -oP 'user sub [0-9]+ acc \K[0-9]+' <<< "$_line")
@@ -38,8 +40,8 @@ else
     _t+=("${_temp[$d]:-0}")
     f=${_fan[$d]:-0}; [[ $f =~ ^[0-9]+$ ]] || f=0; _f+=("$f")
   done
-  # rig efficiency (Pearl "1157 W, 0.560 TH/W", NOID "0.460 MH/W"): HiveOS shows it next to the miner version
-  _eff=$(grep -oP 'total .*?\K[0-9.]+ (TH|MH)/W' <<< "$_line" | head -n 1)
+  # rig efficiency (Pearl "1157 W, 0.560 TH/W", NOID "0.460 MH/W", PROX "0.0161 GH/W"): HiveOS shows it next to the miner version
+  _eff=$(grep -oP 'total .*?\K[0-9.]+ ((TH|MH)/W|GH/W)' <<< "$_line" | head -n 1)
   _ver=$CUSTOM_VERSION; [[ -n $_eff ]] && _ver="$CUSTOM_VERSION $_eff"
   # a newer release found by the miner (update.rs, 1.7.5): "1.7.5 0.652 TH/W, need update!!"
   _new=; [[ -f $_ffgp_dir/update-available ]] && _new=$(tr -cd '0-9A-Za-z.' < "$_ffgp_dir/update-available" | head -c 20)

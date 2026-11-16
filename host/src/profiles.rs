@@ -33,6 +33,7 @@ pub struct Sections {
 pub const PEARL: Sections = Sections { profiles: "profiles", trying: "trying", version: Some(2) };
 pub const NOID: Sections = Sections { profiles: "noid", trying: "noid_trying", version: None };
 pub const CMFD: Sections = Sections { profiles: "cmfd_profiles", trying: "cmfd_trying", version: None };
+pub const PROX: Sections = Sections { profiles: "prox", trying: "prox_trying", version: None };
 
 /// An entry type of a tuner: its JSON form and when two entries are the profile of the same clocks.
 pub trait Profile: Clone {
@@ -47,6 +48,23 @@ pub trait Profile: Clone {
 pub struct Crash {
     pub at: i32,
     pub good: Option<i32>,
+}
+
+/// `Crash::at` of a card that did not fail itself (1.7.8): the process died with an Xid on ANOTHER card of it, this card only lost
+/// its check.  No offset of it counts as failed; the steps that had passed (`good`) still count.
+pub const NO_FAIL: i32 = 1_000_000;
+
+impl Crash {
+    /// Does `at` name an offset that failed?  (false: see NO_FAIL)
+    pub fn failed(&self) -> bool {
+        self.at != NO_FAIL
+    }
+
+    /// The marker of a card that was only a bystander of another card's fault: no failed offset, the passed steps kept (None when
+    /// there are none: nothing to carry over).
+    pub fn bystander(self) -> Option<Crash> {
+        self.good.map(|g| Crash { at: NO_FAIL, good: Some(g) })
+    }
 }
 
 pub fn results_path(dir: &Path) -> PathBuf {
@@ -257,7 +275,7 @@ pub fn parse_marker(t: &Value) -> Option<Crash> {
 /// before a NOID run is as foreign to NOID as to Pearl).  Returns the offset recorded before the tuning.
 pub fn leftover_orig(db: &Value, uuid: &str, cur: i32) -> Option<i32> {
     let mut es: Vec<(i32, i32)> = Vec::new();
-    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles] {
+    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles, PROX.profiles] {
         for e in db[sec][uuid].as_object().into_iter().flat_map(|m| m.values()) {
             if let (Some(o), Some(orig)) = (e["offset"].as_i64(), e["orig_offset"].as_i64()) {
                 es.push((o as i32, orig as i32));
@@ -354,6 +372,10 @@ mod tests {
         assert_eq!(parse_marker(&json!(195)), Some(Crash { at: 195, good: None })); // 1.5.2: a bare number
         assert_eq!(parse_marker(&json!({"offset": 195})), Some(Crash { at: 195, good: None }));
         assert_eq!(parse_marker(&json!({"offset": 195, "good": 165})), Some(Crash { at: 195, good: Some(165) }));
+        // a bystander of another card's Xid keeps its passed steps, no failed offset
+        let by = Crash { at: 195, good: Some(165) }.bystander().unwrap();
+        assert!(!by.failed() && by.good == Some(165) && Crash { at: 195, good: Some(165) }.failed());
+        assert_eq!(Crash { at: 195, good: None }.bystander(), None);
         assert_eq!(parse_marker(&json!({"good": 1})), None);
     }
 

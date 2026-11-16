@@ -905,10 +905,18 @@ impl Tuner<'_> {
     }
 
     fn run_card(&self, c: &Card) -> Result<()> {
-        let crashed = self.sh.db.take_trying(&c.uuid);
-        if let Some((at, _)) = crashed {
-            lg(format!("{} the previous run died while checking CMFD offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(at)));
-            return self.tune(c, self.sh.db.entry(&c.uuid), crashed);
+        let mut crashed = self.sh.db.take_trying(&c.uuid);
+        if let Some((at, g)) = crashed {
+            // 1.7.8: a CUDA fault on one card ends the whole process; only the card with the Xid has a failed offset
+            if let Some(by) = crate::faults::bystander(&self.sh.db.dir, &c.uuid) {
+                lg(format!("{} the previous run died while this GPU checked CMFD offset {}, but the fault was on {by}: this GPU did not fail, its offset is not counted as failed{}", c.label(), signed(at), if g != i32::MIN { format!("; the steps up to {} that passed are kept", signed(g)) } else { String::new() }));
+                crashed = (g != i32::MIN).then_some((profiles::NO_FAIL, g));
+            } else {
+                lg(format!("{} the previous run died while checking CMFD offset {} (miner or driver crash): that offset counts as failed", c.label(), signed(at)));
+            }
+            if crashed.is_some() {
+                return self.tune(c, self.sh.db.entry(&c.uuid), crashed);
+            }
         }
         // 1.7.6 (as NOID since 1.7.2): a crash while mining at a tuned CMFD offset (faults.rs, Xid of this miner's own engine): that
         // offset counts as failed; with a profile of these clocks the card steps back from it after a quick check, without one
@@ -1089,7 +1097,7 @@ impl Tuner<'_> {
         }
         let step = self.o.step;
         let mut cap = c.max;
-        if let Some((at, _)) = crashed {
+        if let Some((at, _)) = crashed.filter(|k| k.0 != profiles::NO_FAIL) {
             cap = cap.min(at - uv::crash_back(step));
         }
         // --uv-min, else the card type's default start by the core lock (RTX 3070: +150 ...; RTX 40: at least +200, RTX 50: +300,
@@ -1178,6 +1186,7 @@ impl Tuner<'_> {
             }
         }
         // the start step itself must hold; a start that fails: 30 MHz lower, and the search stays below the failed start
+        let mut rechecked = false;
         while cand <= cap {
             if let Err(e) = self.set(c, cand) {
                 lg(format!("{} cannot set {} ({e:#}); stopping the search", c.label(), signed(cand)));
@@ -1197,6 +1206,12 @@ impl Tuner<'_> {
                 break;
             }
             lg(format!("{} step {}: FAILED ({})", c.label(), signed(cand), r.reason));
+            // 1.7.8 (1.7.7 plan, point 4): the failing start is checked once more before the search goes lower; not after a driver fault
+            if !r.driver_fault && !rechecked {
+                rechecked = true;
+                lg(format!("{} the start {} failed once: checking it again before going lower", c.label(), signed(cand)));
+                continue;
+            }
             if !r.driver_fault && cand - 30 > c.base {
                 lg(format!("{} the start {} fails: trying {} (30 MHz lower)", c.label(), signed(cand), signed(cand - 30)));
                 cap = cap.min(cand - step);
@@ -1259,7 +1274,7 @@ impl Tuner<'_> {
             }
         }
         // the cap below a crash (30 MHz under it) is the margin already
-        let crash_capped = failed.is_none() && crashed.is_some() && good == cap;
+        let crash_capped = failed.is_none() && crashed.is_some_and(|k| k.0 != profiles::NO_FAIL) && good == cap;
         if crash_capped {
             failed = crashed.map(|k| k.0);
         }

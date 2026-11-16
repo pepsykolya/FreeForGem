@@ -36,6 +36,233 @@ const RESTART_DELAYS: [u64; 5] = [15, 30, 60, 120, 300];
 const QUICK_FAIL: Duration = Duration::from_secs(120);
 const MAX_QUICK_FAILS: usize = 5;
 
+/// 1.7.8 pool lists: the engine has ONE pool and retries a lost / unreachable pool by itself for ever, so this side watches the
+/// engines' log lines and moves them to the next `--pool` entry (restart with the new `--pool`) when none of them has the pool for
+/// this long; the failback check of the primary is `probe_pool` (TLS with the pin + login + a job), the same restart goes back.
+const FAILOVER_AFTER: Duration = Duration::from_secs(60);
+
+/// What an engine says about its pool connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PoolSt {
+    Unknown,
+    Up,
+    Down,
+}
+
+/// `Connected to pool at height N.` = up; `Pool unavailable (..); retrying...` / `Pool connection lost (..); reconnecting...` = down.
+pub fn pool_line(line: &str) -> Option<PoolSt> {
+    if line.starts_with("Connected to pool at height") {
+        Some(PoolSt::Up)
+    } else if line.starts_with("Pool unavailable (") || line.starts_with("Pool connection lost (") {
+        Some(PoolSt::Down)
+    } else {
+        None
+    }
+}
+
+/// The pool refused address-only mining: the engine exits (it does not retry), another entry may allow it.
+pub fn pool_refused_line(line: &str) -> bool {
+    line.contains("does not allow address-only mining")
+}
+
+/// Fail over when no engine has its pool and at least one has been without it for `after` (engines that have not reported yet,
+/// e.g. still loading the model, do not count either way).
+pub fn failover_due(states: &[(PoolSt, Instant)], now: Instant, after: Duration) -> bool {
+    !states.iter().any(|s| s.0 == PoolSt::Up) && states.iter().any(|s| s.0 == PoolSt::Down && now.duration_since(s.1) >= after)
+}
+
+fn failover_after() -> Duration {
+    std::env::var("FFGP_CMFD_FAILOVER_S").ok().and_then(|v| v.parse::<f64>().ok()).map_or(FAILOVER_AFTER, |s| Duration::from_secs_f64(s.max(1.0)))
+}
+
+/// The connection the engine keeps itself can die silently (a dead route, a DROP rule: no reset, no error): the engine keeps its
+/// pool state "up" and shows its hash rate, but the block height it reports never changes again (Rig05, DROP in both directions:
+/// 6 min 41 s without noticing, no failover).  This watches the height the engines report: no change for STALL_MIN of the mean block
+/// interval times STALL_MEAN_MULT = the connection is taken as dead and the engines restart on the next `--pool` entry.
+///
+/// The threshold is long on purpose.  CMFD finds a block every ~60 s on average (Rig05: 63157 -> 63178 in 22 min, gaps of 20-190 s),
+/// and block times are random (exponential): a gap of 3x the mean (3 min) happens after 5 % of the blocks, i.e. dozens of times a
+/// day; 12x the mean (12 min) after 0.006 % (about once in 2 weeks), 8 min is the floor, 30 min the cap.  A false trigger only
+/// costs a restart (one minute of model loading), a real silence costs the rest of the session.
+const STALL_MEAN_MULT: f64 = 12.0;
+const STALL_MIN: Duration = Duration::from_secs(480);
+const STALL_MAX: Duration = Duration::from_secs(1800);
+const STALL_DEFAULT_MEAN: f64 = 60.0; // the mean block interval until the run has seen enough blocks of its own
+const STALL_SAMPLES: usize = 4; // block intervals seen before the measured mean replaces the default
+
+fn stall_override() -> Option<Duration> {
+    std::env::var("FFGP_CMFD_STALL_S").ok().and_then(|v| v.parse::<f64>().ok()).map(|s| Duration::from_secs_f64(s.max(1.0)))
+}
+
+#[derive(Debug)]
+pub struct HeightWatch {
+    height: u64,
+    since: Instant,
+    intervals: Vec<f64>, // seconds between height changes, newest last (at most 16)
+    mult: u32,           // x2 per restart that did not bring a new height (a chain that really stands is not restarted every 12 min)
+}
+
+impl HeightWatch {
+    pub fn new(now: Instant) -> HeightWatch {
+        HeightWatch { height: 0, since: now, intervals: Vec::new(), mult: 1 }
+    }
+
+    /// The engines restarted / are not mining for the user (paused, fee slot, loading): the clock starts over, the measured block
+    /// interval stays.
+    pub fn reset(&mut self, now: Instant) {
+        self.height = 0;
+        self.since = now;
+    }
+
+    /// How long without a new height counts as a dead connection.
+    pub fn threshold(&self) -> Duration {
+        if let Some(d) = stall_override() {
+            return d * self.mult;
+        }
+        let mean = if self.intervals.len() >= STALL_SAMPLES { self.intervals.iter().sum::<f64>() / self.intervals.len() as f64 } else { STALL_DEFAULT_MEAN };
+        Duration::from_secs_f64((mean * STALL_MEAN_MULT).clamp(STALL_MIN.as_secs_f64(), STALL_MAX.as_secs_f64())) * self.mult
+    }
+
+    /// Every status pass. `height`: the highest height the engines report (0 = none yet); `live`: at least one engine has its pool
+    /// and mines for the user.  Returns how long the height has stood when that passed the threshold (the caller restarts the engines).
+    pub fn tick(&mut self, now: Instant, height: u64, live: bool) -> Option<Duration> {
+        if !live || height == 0 {
+            self.reset(now);
+            return None;
+        }
+        if self.height == 0 {
+            self.height = height;
+            self.since = now;
+            return None;
+        }
+        if height != self.height {
+            let dt = now.duration_since(self.since).as_secs_f64();
+            if height > self.height && height - self.height == 1 && dt > 1.0 {
+                self.intervals.push(dt); // one block: its interval is a sample of the block time (a jump after a catch-up is not)
+                if self.intervals.len() > 16 {
+                    self.intervals.remove(0);
+                }
+            }
+            self.height = height;
+            self.since = now;
+            self.mult = 1;
+            return None;
+        }
+        let silent = now.duration_since(self.since);
+        (silent >= self.threshold()).then_some(silent)
+    }
+
+    /// The engines were restarted because of a silence: the clock starts over and the next threshold is longer (x2, up to x4).
+    pub fn restarted(&mut self, now: Instant) {
+        self.reset(now);
+        self.mult = (self.mult * 2).min(4);
+    }
+}
+
+#[derive(Debug)]
+struct PinVerifier {
+    pin: [u8; 32],
+    provider: Arc<rustls::crypto::CryptoProvider>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for PinVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _i: &[rustls::pki_types::CertificateDer<'_>],
+        _n: &rustls::pki_types::ServerName<'_>,
+        _o: &[u8],
+        _t: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        use sha2::{Digest, Sha256};
+        let actual: [u8; 32] = Sha256::digest(end_entity.as_ref()).into();
+        if actual != self.pin {
+            return Err(rustls::Error::General("pool certificate SHA-256 pin mismatch".into()));
+        }
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(&self, m: &[u8], c: &rustls::pki_types::CertificateDer<'_>, d: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(m, c, d, &self.provider.signature_verification_algorithms)
+    }
+    fn verify_tls13_signature(&self, m: &[u8], c: &rustls::pki_types::CertificateDer<'_>, d: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(m, c, d, &self.provider.signature_verification_algorithms)
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.provider.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+fn read_frame(s: &mut impl Read) -> Result<serde_json::Value, String> {
+    let mut len = [0u8; 4];
+    s.read_exact(&mut len).map_err(|e| format!("pool closed or silent: {e}"))?;
+    let n = u32::from_be_bytes(len) as usize;
+    if n == 0 || n > 1 << 22 {
+        return Err(format!("bad frame length {n}"));
+    }
+    let mut body = vec![0u8; n];
+    s.read_exact(&mut body).map_err(|e| format!("pool closed or silent: {e}"))?;
+    serde_json::from_slice(&body).map_err(|e| format!("bad frame: {e}"))
+}
+
+/// The failback check of a CMFD pool: connect, TLS 1.3 with the certificate pin, the pool's login challenge, the address-only login
+/// (the same Hello the engine sends: no payout signature), the acknowledgement and the first job. Nothing is mined or submitted.
+/// The pool protocol is the engine's (JSON frames behind a 4-byte length); only its handshake is repeated here.
+pub fn probe_pool(url: &str, wallet_hex: &str, worker: &str, timeout: Duration) -> Result<(), String> {
+    use std::io::Write;
+    let rest = url.strip_prefix(SCHEME).ok_or("not a cmfd+tls:// URL")?;
+    let (addr, query) = rest.split_once('?').ok_or("no ?pin=")?;
+    let pin_hex = query.split('&').find_map(|q| q.strip_prefix("pin=")).ok_or("no pin=")?;
+    let pin: [u8; 32] = crate::stratum::hex_decode(pin_hex).and_then(|b| b.try_into().ok()).ok_or("bad pin")?;
+    let payout: Vec<u8> = crate::stratum::hex_decode(wallet_hex).filter(|b| b.len() == 32).ok_or("bad wallet")?;
+    let sa: std::net::SocketAddr = addr.parse().map_err(|e| format!("bad address: {e}"))?;
+    let t0 = Instant::now();
+    let left = || timeout.saturating_sub(t0.elapsed()).max(Duration::from_millis(200));
+    let mut sock = std::net::TcpStream::connect_timeout(&sa, left().min(Duration::from_secs(5))).map_err(|e| format!("connect: {e}"))?;
+    sock.set_read_timeout(Some(left())).map_err(|e| e.to_string())?;
+    sock.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cfg = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| e.to_string())?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(PinVerifier { pin, provider }))
+        .with_no_client_auth();
+    let mut conn = rustls::ClientConnection::new(Arc::new(cfg), rustls::pki_types::ServerName::IpAddress(sa.ip().into())).map_err(|e| e.to_string())?;
+    while conn.is_handshaking() {
+        conn.complete_io(&mut sock).map_err(|e| format!("TLS: {e}"))?;
+    }
+    let mut st = rustls::StreamOwned::new(conn, sock);
+    let ch = read_frame(&mut st)?;
+    match ch.get("type").and_then(|v| v.as_str()) {
+        Some("auth_challenge") => {}
+        Some("error") => return Err(format!("pool error: {}", ch.get("message").and_then(|v| v.as_str()).unwrap_or("?"))),
+        _ => return Err("no login challenge from the pool".into()),
+    }
+    let hello = serde_json::json!({
+        "type": "hello",
+        "protocol_version": ch["protocol_version"],
+        "network_id": ch["network_id"],
+        "consensus_fingerprint": ch["consensus_fingerprint"],
+        "worker": worker,
+        "payout": payout,
+        "payout_signature": [],
+    });
+    let body = serde_json::to_vec(&hello).map_err(|e| e.to_string())?;
+    st.write_all(&(body.len() as u32).to_be_bytes()).and_then(|_| st.write_all(&body)).and_then(|_| st.flush()).map_err(|e| format!("send: {e}"))?;
+    let ack = read_frame(&mut st)?;
+    match ack.get("type").and_then(|v| v.as_str()) {
+        Some("hello_ack") => {}
+        Some("error") => return Err(format!("login refused: {}", ack.get("code").and_then(|v| v.as_str()).unwrap_or("?"))),
+        _ => return Err("no login acknowledgement from the pool".into()),
+    }
+    let job = read_frame(&mut st)?;
+    match job.get("type").and_then(|v| v.as_str()) {
+        Some("job") => Ok(()),
+        Some("error") => Err(format!("pool error: {}", job.get("code").and_then(|v| v.as_str()).unwrap_or("?"))),
+        _ => Err("no job from the pool".into()),
+    }
+}
+
 /// PIDs of the running engine processes, for the "second Ctrl-C: exit at once" path (no orphaned engines on the GPU).
 pub(crate) static CHILDREN: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
@@ -186,6 +413,8 @@ pub fn validate_worker(w: &str, per_gpu: bool) -> Result<()> {
 
 pub struct Opts {
     pub pool: String,
+    /// every --pool entry (primary first, then backups); `pool` is the first
+    pub pools: Vec<String>,
     pub wallet: String,
     pub worker: String,
     pub devices: Option<Vec<i32>>,
@@ -606,6 +835,7 @@ struct Slot {
     nv: Option<nvml::Dev>,
     mem_checked: bool, // memory-clock warning check done (once per GPU and run)
     uv_restart: bool,  // stopped here after an --auto-uv step back: restart soon, not counted as a failed start
+    pool: (PoolSt, Instant), // what the engine last said about its pool connection, and since when (pool lists, see FAILOVER_AFTER)
 }
 
 impl Slot {
@@ -650,6 +880,26 @@ fn worker_children(pid: u32) -> Vec<u32> {
 #[cfg(target_os = "linux")]
 fn is_worker(pid: u32) -> bool {
     std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| String::from_utf8_lossy(&c).split('\0').next().is_some_and(|a| a.contains("cmfd-v4-replay")))
+}
+
+/// Pool switch (failover / failback): every engine is stopped (all asked at once, see stop_children), then they restart one by one,
+/// 1.5 s apart, with the new `--pool` (the caller changed `cur_pool`). Not counted as a failed start.
+fn switch_pool(slots: &mut [Slot], stagger: u64) {
+    stop_children(slots);
+    for (k, s) in slots.iter_mut().enumerate() {
+        if s.child.take().is_some() {
+            s.base = s.totals();
+            s.last = None;
+            s.fee = false;
+            s.uv_restart = false;
+        }
+        s.pool = (PoolSt::Unknown, Instant::now());
+        if !s.disabled {
+            s.restart_at = Some(Instant::now() + Duration::from_millis(2000 + k as u64 * stagger));
+            s.restarts = 0;
+            s.quick_fails = 0;
+        }
+    }
 }
 
 fn stop_children(slots: &mut [Slot]) {
@@ -713,7 +963,10 @@ fn check_mem_clock(nv: &nvml::Nvml, d: nvml::Dev, dev: i32, own_lock: Option<u32
 }
 
 pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
-    validate_pool(&o.pool)?;
+    let pools: Vec<String> = if o.pools.is_empty() { vec![o.pool.clone()] } else { o.pools.clone() };
+    for p in &pools {
+        validate_pool(p)?;
+    }
     let wallet = wallet_hex(&o.wallet)?;
     if wallet != o.wallet.trim() {
         println!("cmfd: wallet {} = payout key {wallet}", o.wallet.trim());
@@ -730,11 +983,26 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         crate::PRODUCT,
         env!("CARGO_PKG_VERSION"),
         engine_label(&engine),
-        o.pool,
+        if pools.len() > 1 { format!("{} (primary; backup: {})", crate::failover::label(&pools[0]), pools[1..].iter().map(|p| crate::failover::label(p)).collect::<Vec<_>>().join(", ")) } else { o.pool.clone() },
         o.worker,
         gpus.len(),
         o.mode
     );
+    let link = crate::failover::Link::new(pools.len());
+    link.begin(0);
+    let mut cur_pool = 0usize; // the entry the engines are started with
+    let mut failback_at: Option<Instant> = None; // when the last failback to the primary was made
+    if pools.len() > 1 {
+        let fb = crate::failover::opts().failback_min;
+        println!(
+            "pool list: {} entries, the first is the primary; the engines move to the next entry when none of them has its pool for {} s (they are restarted with it), {}",
+            pools.len(),
+            failover_after().as_secs(),
+            if fb > 0.0 { format!("back to the primary after 2 good checks (login + job on a separate connection every {fb} min while on a backup, --failback-minutes)") } else { "failback is off (--failback-minutes 0)".to_string() }
+        );
+        let (labels, urls, w, wk) = (pools.clone(), pools.clone(), wallet.clone(), o.worker.clone());
+        crate::failover::spawn_prober("user", link.clone(), stop.clone(), move |e| crate::failover::label(&labels[e]), move |e| probe_pool(&urls[e], &w, &wk, crate::failover::opts().probe_timeout));
+    }
     println!("devfee: 1% inside the CMFD engine (36 s per hour per GPU, random slot, same pool, worker ffm-fee; log lines \"DEV FEE |\"); no other fee in CMFD mode");
     let model = model_dir(&o.model_dir);
     let bank = if o.skip_prepare {
@@ -824,6 +1092,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             nv: nv.as_ref().and_then(|n| gpu::device_pci_bus_id(*dev).ok().and_then(|b| n.by_bus(&b).ok())),
             mem_checked: false,
             uv_restart: false,
+            pool: (PoolSt::Unknown, Instant::now()),
         })
         .collect();
     for s in &slots {
@@ -839,6 +1108,11 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
     };
     let mut bursts: Vec<crate::monitor::RejectBurst> = slots.iter().map(|_| crate::monitor::RejectBurst::new(Instant::now())).collect();
     let mut mined_ok_done = false;
+    let mut pool_refused = false;
+    let mut watchdog = crate::failover::Watch::default();
+    let mut share_rate = crate::failover::ShareRate::default(); // seconds per share of the pool the session is on (the engine does not tell the difficulty)
+    let mut hw = HeightWatch::new(Instant::now()); // silent engine connection: the height the engines report stands (HeightWatch)
+    let mut fo_mult = 1u32; // failover waits failover_after() x this (grows while no pool works)
     let (tx, rx) = mpsc::channel::<(usize, String)>();
     let start = Instant::now();
     let deadline = o.minutes.map(|m| Duration::from_secs_f64(m * 60.0));
@@ -897,6 +1171,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     s.base = s.totals();
                     s.last = None;
                     s.fee = false;
+                    s.pool = (PoolSt::Unknown, Instant::now());
                     s.child = None;
                     if s.quick_fails >= MAX_QUICK_FAILS {
                         s.disabled = true;
@@ -923,7 +1198,7 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                 std::fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
                 let mut c = engine_cmd(&engine, "cmfd-miner", Some(&s.uuid), &o.mode);
                 c.arg("pool")
-                    .args(["--pool", &o.pool, "--miner", &wallet, "--worker", &o.worker, "--gpu", &s.uuid])
+                    .args(["--pool", &pools[cur_pool], "--miner", &wallet, "--worker", &o.worker, "--gpu", &s.uuid])
                     .arg("--production-v4-bank")
                     .arg(&bank)
                     .arg("--production-v4-replay-worker")
@@ -964,6 +1239,14 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
         while let Ok((i, line)) = rx.try_recv() {
             let s = &mut slots[i];
             let mut check_mem = false;
+            if let Some(st) = pool_line(&line) {
+                if s.pool.0 != st {
+                    s.pool = (st, Instant::now());
+                }
+            }
+            if pool_refused_line(&line) {
+                pool_refused = true;
+            }
             if let Some(sample) = parse_stats(&line) {
                 s.last = Some((Instant::now(), sample));
                 // the engine mines (model loaded, work running): the memory clock now is the one it really gets
@@ -1006,6 +1289,63 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
                     );
                 }
             }
+        }
+        // pool lists (1.7.8): failover when no engine has its pool; failback when the prober asks for the primary
+        if !paused && !in_use {
+            let now = Instant::now();
+            let states: Vec<(PoolSt, Instant)> = slots.iter().filter(|s| s.child.is_some()).map(|s| s.pool).collect();
+            let req = link.take();
+            // silent connection: engines with their pool "up" and mining for the user whose height has not changed for too long
+            let live = slots.iter().any(|s| s.child.is_some() && s.pool.0 == PoolSt::Up) && !slots.iter().any(|s| s.fee);
+            let height = slots.iter().filter(|s| s.child.is_some() && s.pool.0 == PoolSt::Up).map(|s| s.totals().height).max().unwrap_or(0);
+            let stalled = hw.tick(now, height, live);
+            let mut to: Option<(usize, String)> = None;
+            let mut is_failback = false;
+            if states.iter().any(|s| s.0 == PoolSt::Up) {
+                fo_mult = 1; // an engine has its pool: the next failover waits the base time again
+            }
+            if let Some((t, why)) = req {
+                // a failback (the primary is back), or the watchdog: the next entry / the same entry again (the engines restart)
+                is_failback = t == 0 && cur_pool != 0 && why.starts_with("the primary");
+                to = Some((t, why));
+            } else if (pools.len() > 1 && (pool_refused || failover_due(&states, now, failover_after() * fo_mult))) || stalled.is_some() {
+                let next = (cur_pool + 1) % pools.len();
+                let why = if let Some(d) = stalled {
+                    hw.restarted(now);
+                    format!("the engines report the same block height for {:.1} min: the pool connection is silent", d.as_secs_f64() / 60.0)
+                } else if pool_refused {
+                    "the pool refused the login".to_string()
+                } else {
+                    format!("no engine has the pool for {} s", failover_after().as_secs())
+                };
+                if cur_pool == 0 && failback_at.is_some_and(|t| t.elapsed().as_secs_f64() < crate::failover::opts().bad_within_s) {
+                    let mut fb = link.fb.lock().unwrap();
+                    fb.left_bad(&crate::failover::opts());
+                    println!("pool: the primary dropped again soon after the failback: the next checks come less often (x{})", fb.hold);
+                }
+                link.failovers.fetch_add(1, Ordering::Relaxed);
+                failback_at = None;
+                // no pool worked for the whole round: the engines restart less often (x2, up to x8 of the base time)
+                if stalled.is_none() {
+                    fo_mult = (fo_mult * 2).min(8);
+                }
+                to = Some((next, format!("pool {} of {} ({}) is not usable ({why}): failing over", cur_pool + 1, pools.len(), crate::failover::label(&pools[cur_pool]))));
+            }
+            pool_refused = false;
+            if let Some((t, why)) = to {
+                if t == 0 && is_failback {
+                    failback_at = Some(now);
+                    link.failbacks.fetch_add(1, Ordering::Relaxed);
+                }
+                println!("pool: {why}: the engines restart on pool {} of {} ({}); work in flight is dropped, the engines reload the model (about a minute)", t + 1, pools.len(), crate::failover::label(&pools[t]));
+                cur_pool = t;
+                link.begin(t);
+                switch_pool(&mut slots, stagger);
+            }
+        } else {
+            let _ = link.take();
+            pool_refused = false;
+            hw.reset(Instant::now());
         }
         if let Some(w) = &fwatch {
             for (k, xids) in w.take() {
@@ -1087,6 +1427,19 @@ pub fn mine(o: Opts, stop: Arc<AtomicBool>) -> Result<()> {
             println!("{l}");
         }
         if last_report.elapsed() >= Duration::from_secs(10) {
+            // accepted-shares watchdog (the engine does not tell the share difficulty: shares are expected at the rate seen so far, one per
+            // 6 minutes until there are 3 of them, so a pool is not left before ~60 minutes without a share at the start)
+            if pools.len() > 0 && !paused && !in_use {
+                let dt = last_report.elapsed().as_secs_f64();
+                let (mut acc, mut rej, mut stale) = (0u64, 0u64, 0u64);
+                for s in &slots {
+                    let t = s.totals();
+                    (acc, rej, stale) = (acc + t.accepted, rej + t.rejected, stale + t.stale);
+                }
+                let allowed = slots.iter().any(|s| s.pool.0 == PoolSt::Up) && !slots.iter().any(|s| s.fee);
+                let est = share_rate.tick(link.entry().unwrap_or(cur_pool), dt, allowed, acc);
+                crate::failover::watch_tick(&mut watchdog, &link, "user", dt, allowed, 1.0, Some(est), acc, rej + stale, acc + rej + stale);
+            }
             last_report = Instant::now();
             println!("{}", report_line(&slots, nv.as_ref(), start.elapsed()));
         }
@@ -1244,5 +1597,97 @@ mod tests {
         assert!(validate_worker("rig-1.a_b", false).is_ok());
         assert!(validate_worker("bad name", false).is_err());
         assert!(validate_worker(&"x".repeat(30), true).is_err());
+    }
+    #[test]
+    fn pool_lines_and_failover_decision() {
+        assert_eq!(pool_line("Connected to pool at height 123."), Some(PoolSt::Up));
+        assert_eq!(pool_line("Pool unavailable (connection refused); retrying..."), Some(PoolSt::Down));
+        assert_eq!(pool_line("Pool connection lost (broken pipe); reconnecting..."), Some(PoolSt::Down));
+        assert_eq!(pool_line("DEV FEE | pool refused the fee session (x); skipped"), None);
+        assert_eq!(pool_line("MINER STATS | GPU 0 | hashrate 1.0 FW/s"), None);
+        assert!(pool_refused_line("Error: this pool does not allow address-only mining; the pool operator must enable address-only payouts"));
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_secs(70);
+        let a = Duration::from_secs(60);
+        // nobody reported yet (model loading): no failover
+        assert!(!failover_due(&[(PoolSt::Unknown, t0), (PoolSt::Unknown, t0)], later, a));
+        // down for 70 s on every engine: fail over
+        assert!(failover_due(&[(PoolSt::Down, t0), (PoolSt::Down, t0)], later, a));
+        // down for 30 s only
+        assert!(!failover_due(&[(PoolSt::Down, t0)], t0 + Duration::from_secs(30), a));
+        // one engine still has its pool: stay (the others reconnect by themselves)
+        assert!(!failover_due(&[(PoolSt::Down, t0), (PoolSt::Up, t0)], later, a));
+        // an engine that has not reported yet does not prevent it
+        assert!(failover_due(&[(PoolSt::Down, t0), (PoolSt::Unknown, t0)], later, a));
+        assert!(!failover_due(&[], later, a));
+    }
+
+    #[test]
+    fn height_watch_fires_only_after_a_long_silence() {
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        let mut w = HeightWatch::new(t0);
+        // a block about every 60 s with random gaps up to 300 s: never fires
+        let mut t = 0;
+        let mut h = 63157;
+        for gap in [20u64, 30, 60, 190, 71, 140, 70, 181, 20, 40, 100, 300, 60] {
+            for _ in 0..gap / 10 {
+                t += 10;
+                assert!(w.tick(at(t), h, true).is_none(), "t {t}");
+            }
+            h += 1;
+            t += 10;
+            assert!(w.tick(at(t), h, true).is_none());
+        }
+        // the height stands: not at 6 min 41 s (the Rig05 DROP case), but at the threshold (12 x the measured mean, 8 min floor)
+        let thr = w.threshold().as_secs();
+        assert!((480..=1800).contains(&thr), "{thr}");
+        let t1 = t;
+        let mut fired = None;
+        for k in 1..400 {
+            if w.tick(at(t1 + k * 10), h, true).is_some() {
+                fired = Some(k * 10);
+                break;
+            }
+        }
+        let f = fired.expect("must fire");
+        assert!(f >= 480 && f <= thr + 10, "{f} vs {thr}");
+        // not live (paused, fee slot, engines loading, no pool): the clock does not run
+        let mut w = HeightWatch::new(t0);
+        w.tick(at(1), 100, true);
+        assert!(w.tick(at(5000), 100, false).is_none());
+        assert!(w.tick(at(5010), 100, true).is_none());
+        assert!(w.tick(at(5100), 100, true).is_none());
+        // a height of 0 (engine still loading) never counts
+        assert!(w.tick(at(9000), 0, true).is_none());
+        // after a restart because of a silence the next threshold is longer
+        let mut w = HeightWatch::new(t0);
+        w.tick(at(0), 5, true);
+        let base = w.threshold();
+        w.restarted(at(1));
+        assert_eq!(w.threshold(), base * 2);
+        // a new height brings the base threshold back
+        w.tick(at(2), 5, true);
+        w.tick(at(3), 6, true);
+        assert_eq!(w.threshold(), base);
+    }
+
+    #[test]
+    fn height_watch_threshold_follows_a_slow_chain() {
+        let t0 = Instant::now();
+        let mut w = HeightWatch::new(t0);
+        w.tick(t0, 10, true);
+        // blocks every 200 s: 12 x 200 s = 40 min, capped at 30
+        for i in 1..=6u64 {
+            w.tick(t0 + Duration::from_secs(i * 200), 10 + i, true);
+        }
+        assert_eq!(w.threshold(), STALL_MAX);
+        // fast blocks (10 s): the floor, 8 min
+        let mut w = HeightWatch::new(t0);
+        w.tick(t0, 10, true);
+        for i in 1..=6u64 {
+            w.tick(t0 + Duration::from_secs(i * 10), 10 + i, true);
+        }
+        assert_eq!(w.threshold(), STALL_MIN);
     }
 }

@@ -98,6 +98,7 @@ pub struct Nvml {
     get_pci: unsafe extern "C" fn(*mut c_void, *mut PciInfo) -> c_int,
     get_power: FnDevU,
     get_pl: Option<FnDevU>,
+    get_reasons: Option<unsafe extern "C" fn(*mut c_void, *mut u64) -> c_int>, // current clocks event (throttle) reasons bitmask
     get_clock: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
     get_max_clock: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int>,
     get_temp: unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int,
@@ -111,6 +112,8 @@ pub struct Nvml {
     lgc_reset: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
     lmc_set: Option<unsafe extern "C" fn(*mut c_void, c_uint, c_uint) -> c_int>,
     lmc_reset: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+    sup_mem: Option<unsafe extern "C" fn(*mut c_void, *mut c_uint, *mut c_uint) -> c_int>,
+    sup_gr: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint, *mut c_uint) -> c_int>,
     ev_create: Option<unsafe extern "C" fn(*mut *mut c_void) -> c_int>,
     ev_register: Option<unsafe extern "C" fn(*mut c_void, u64, *mut c_void) -> c_int>,
     ev_wait: Option<unsafe extern "C" fn(*mut c_void, *mut EventData, c_uint) -> c_int>,
@@ -171,6 +174,7 @@ impl Nvml {
             get_pci: req!("nvmlDeviceGetPciInfo_v3"),
             get_power: req!("nvmlDeviceGetPowerUsage"),
             get_pl: opt!("nvmlDeviceGetEnforcedPowerLimit"),
+            get_reasons: opt!("nvmlDeviceGetCurrentClocksEventReasons").or_else(|| opt!("nvmlDeviceGetCurrentClocksThrottleReasons")),
             get_clock: req!("nvmlDeviceGetClockInfo"),
             get_max_clock: opt!("nvmlDeviceGetMaxClockInfo"),
             get_temp: req!("nvmlDeviceGetTemperature"),
@@ -184,6 +188,8 @@ impl Nvml {
             lgc_reset: opt!("nvmlDeviceResetGpuLockedClocks"),
             lmc_set: opt!("nvmlDeviceSetMemoryLockedClocks"),
             lmc_reset: opt!("nvmlDeviceResetMemoryLockedClocks"),
+            sup_mem: opt!("nvmlDeviceGetSupportedMemoryClocks"),
+            sup_gr: opt!("nvmlDeviceGetSupportedGraphicsClocks"),
             ev_create: opt!("nvmlEventSetCreate"),
             ev_register: opt!("nvmlDeviceRegisterEvents"),
             ev_wait: opt!("nvmlEventSetWait_v2"),
@@ -282,6 +288,13 @@ impl Nvml {
         (unsafe { f(d.0, &mut mw) } == 0).then(|| mw as f64 / 1000.0)
     }
 
+    /// Why the clocks are held down right now (NVML clocks event reasons bitmask): bit 0x4 = software power cap, 0x1 = idle.
+    pub fn clock_reasons(&self, d: Dev) -> Option<u64> {
+        let f = self.get_reasons?;
+        let mut r = 0u64;
+        (unsafe { f(d.0, &mut r) } == 0).then_some(r)
+    }
+
     pub fn clock_mhz(&self, d: Dev) -> Option<u32> {
         let mut c = 0;
         (unsafe { (self.get_clock)(d.0, 0, &mut c) } == 0).then_some(c) // NVML_CLOCK_GRAPHICS
@@ -301,10 +314,40 @@ impl Nvml {
     }
 
     /// Highest memory clock of the board (nvmlDeviceGetMaxClockInfo, NVML_CLOCK_MEM).
+    /// Maximum graphics clock (nvmlDeviceGetMaxClockInfo, NVML_CLOCK_GRAPHICS): the top of --auto-lock's default range.
+    pub fn max_core_clock_mhz(&self, d: Dev) -> Option<u32> {
+        let f = self.get_max_clock?;
+        let mut c = 0;
+        (unsafe { f(d.0, 0, &mut c) } == 0 && c > 0).then_some(c)
+    }
+
     pub fn max_mem_clock_mhz(&self, d: Dev) -> Option<u32> {
         let f = self.get_max_clock?;
         let mut c = 0;
         (unsafe { f(d.0, 2, &mut c) } == 0).then_some(c)
+    }
+
+    /// PROX (1.7.8): the lowest memory clock at which the card still offers its full graphics clock range (BLAKE2b does not touch
+    /// the video memory; memory clocks that cap the core, e.g. 405 MHz = P8 on GeForce, are skipped).  Err: why it cannot tell.
+    pub fn low_mem_clock(&self, d: Dev) -> Result<u32> {
+        let (Some(sm), Some(sg)) = (self.sup_mem, self.sup_gr) else { bail!("NVML has no supported-clocks query") };
+        let mut n: c_uint = 64;
+        let mut mc = [0 as c_uint; 64];
+        let r = unsafe { sm(d.0, &mut n, mc.as_mut_ptr()) };
+        if r != 0 || n == 0 {
+            bail!("supported memory clocks: {}", self.err(if r != 0 { r } else { 1 }));
+        }
+        let mut v = Vec::new();
+        for &m in &mc[..(n as usize).min(64)] {
+            let mut k: c_uint = 128;
+            let mut g = [0 as c_uint; 128];
+            if unsafe { sg(d.0, m, &mut k, g.as_mut_ptr()) } != 0 || k == 0 {
+                continue;
+            }
+            v.push((m, *g[..(k as usize).min(128)].iter().max().unwrap()));
+        }
+        let best = v.iter().map(|x| x.1).max().unwrap_or(0);
+        v.iter().filter(|x| x.1 >= best && best > 0).map(|x| x.0).min().ok_or_else(|| anyhow::anyhow!("no usable memory clock found"))
     }
 
     pub fn temp_c(&self, d: Dev) -> Option<u32> {

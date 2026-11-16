@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.7):**
+**Installation URL (1.7.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -45,7 +45,7 @@ HiveOS caches the downloaded archive by its file name: every version has a new f
 
 The miner log is at `/var/log/miner/freeforgem/freeforgem.log` and in the HiveOS miner console.
 The dashboard shows the hashrate per GPU and in total, temperatures, fans, and accepted and rejected shares; since 1.7.2 the rig
-efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.7 0.652 TH/W,
+efficiency (TH/W for Pearl, MH/W for NOID) next to the miner version; since 1.7.5 a newer release too (`1.7.8 0.652 TH/W,
 need update!!`; `--no-update-check` turns the check off).
 
 ### Overclocking (RTX 3070)
@@ -95,14 +95,29 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
   control give one value per GPU in nvidia-smi order (GPU0, GPU1, ... as in the miner log; or in `--devices` order), no spaces:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = that GPU's default).
 
+### Automatic core lock (optional, `--auto-lock`, new in 1.7.8)
+
+Add `--auto-lock` to *Extra config arguments* (Pearl, NOID, PROX; not CMFD). The miner then sweeps the core clock locks of every GPU
+(default 1800 ... 1200 MHz, highest first, each at its own `--auto-uv` profile, 45 s + 120 s of real mining per lock, shares go to the pool),
+keeps the best TH/W within 10 % of the top hash rate and saves it in `/hive-config/freeforgem/autolock.json`: later starts apply it at once.
+The first sweep takes 30-90 min (all GPUs at once); the hash rate shows on the dashboard all the time, with short gaps between rounds.
+Options: `--auto-lock-range 1300-1600:100`, `--auto-lock-max-loss 10`, `--auto-lock-goal eff|speed`, `--auto-lock-reset` (sweep again).
+A GPU with its own `--lock-cclock` value is not swept. Details: MANUAL.md, section 23.
+
+**By money:** `--auto-lock --auto-lock-goal profit --power-price 0.12,0.053@23-07` (electricity $/kWh, day and night 23-07 h) keeps the
+lock with the most US$ per day (income from the network data and the coin price minus electricity at the measured watts); every lock
+2000 ... 1200 is measured once. The price comes from public tickers (GET only, nothing of yours is sent) or `--coin-price X` (no exchange
+is asked); every `--auto-lock-reprice-hours` (6) the choice is made again from the measured points (switch only for > 3 % more,
+`--auto-lock-hysteresis`). `--pool-fee PCT` for a pool the miner does not know. MANUAL.md, section 23.1.
+
 ### Requirements
 
 - HiveOS with NVIDIA driver 525 or newer.
-- Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too (CMP 50HX: only ~2.6 TH/s, not recommended for Pearl).
+- Tuned for RTX 30xx and RTX 40xx (own Ada kernel since 1.5.4); RTX 20xx/GTX 16xx/CMP and RTX 50xx are supported too (CMP 50HX: ~67 TH/s per card at lock 1300 and ~77 TH/s at 1500 on driver 610.43.03, 166-176 W; only ~2.6 TH/s on the older drivers 550.78 / 595.91.07).
 - Older GPUs are not supported. AMD Radeon cards are supported on Windows only (since 1.6.0); the HiveOS package is NVIDIA-only.
 - **RAM:** mining needs about 0.2 GB plus 0.1-0.2 GB per GPU, and up to ~1.5 GB more for a moment while it proves a Pearl share
   (the 0.7-0.8 GB job matrix is built only then; until 1.7.3 every job kept it and every proof copied it). A `--auto-uv` check
-  process needs ~1.6 GB more (RTX 3070 / CMP 50HX). The miner plans its checks with 70 % of the free RAM: it logs "checking N of M
+  process needs ~0.25 GB, and the checks share one ~1.6 GB proof buffer (RTX 3070 / CMP 50HX; they prove one at a time). The miner plans its checks with all of the free RAM but 0.5 GB (70 % of it on a low-RAM rig): it logs "checking N of M
   GPU(s) at a time", and when even one does not fit (a 4 GB rig) it runs no checks or tunings: a GPU with a verified profile of
   its clocks uses it, the others mine at your offset. A check process is the first one the Linux OOM killer takes; a check killed
   for lack of RAM is not counted as a failed offset. Without `--lock-cclock` / `--lock-mclock` the miner sets the OC profile's
@@ -119,6 +134,20 @@ unlocked driver, add the word `cmp-unlock-driver` to *Extra config arguments* (t
 only if the unlocked build is not in place yet, and **reboots the rig**; a rig that already has it, has no CMP card or runs without root is left
 alone. **This replaces the NVIDIA kernel driver of the whole rig:** read MANUAL.md section 20 first. By hand: `sudo ./freeforgem --cmp-driver`
 (`FFG_CMP_DRIVER_DRY_RUN=1` only reports what it would do).
+
+### Backup pools (failover and failback), since 1.7.8
+
+The flight sheet's **Pool URL** field takes several URLs of one coin, separated by a space or a comma; the first one is the primary:
+
+    pearl-eu2.luckypool.io:3360 prl-eu.kryptex.network:7048
+
+If a pool cannot be reached, refuses the login or sends no job, the miner moves to the next URL; while it is on a backup it checks the
+primary every 10 minutes on a separate connection (login + a job; `--failback-minutes N` in *Extra config arguments*, `0` = off) and
+goes back after 2 good checks in a row, without losing the shares in flight. The dev fee follows you to the pool you are on. CMFD: the
+engines are restarted on the next pool (about a minute without mining per switch). `--pool-check` in a shell (`./freeforgem --pool "A,B"
+--wallet W --pool-check`) tests every entry without a GPU. Details: MANUAL.md, section 22. A `http://` solo URL is one node: no list.
+`--noshare-minutes M` (15) and `--reject-minutes K` (5) in *Extra config arguments* (0 = off): a pool that takes the connection but credits no
+share of yours (while the GPUs hash and shares were expected) is reconnected, then the next pool of the list is used.
 
 ### Developer fee
 
@@ -153,6 +182,26 @@ CMFD runs on HiveOS images based on Ubuntu 20.04 and 22.04 alike (the engine in 
 bit-for-bit on the real model; first start ~15–20 min, then applied at once; owner's offset back on `miner stop`). Tune with the
 OC profile you mine with: a changed power limit re-tunes; a changed core clock lock picks (or tunes once) its own CMFD profile (since 1.7.2). MANUAL.md, section 13.
 
+### Proxima (PROX), since 1.7.8
+
+Needs an NVIDIA card (GTX 10 / RTX 20/30/40/50). Flight sheet: coin `PROX` (add it as a custom coin if it is not in the list), wallet =
+your PROX address (InnovLab: your holder id, 64 hex), Pool *Configure in miner*, Miner *Custom* `freeforgem` (same Installation URL).
+**Hash algorithm: leave `----`**: HiveOS has no `proxima` in its list. Template `%WAL%.%WORKER_NAME%` (solo: `%WORKER_NAME%`).
+
+| | proximamine | InnovLab | solo |
+|---|---|---|---|
+| Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` | `http://NODE_IP:PORT` |
+| Pass | your proximamine secret | `x` | the node's `mine.seeker.token` |
+
+Screenshots of every field: `docs/img/hiveos-prox-*.png` (also in MANUAL.md, section 21).
+Extra config: `--auto-uv --lock-cclock 1500` (RTX 3070, RTX 3070 Laptop, RTX 3080 Ti; one value for every card or a comma list per GPU).
+The core lock sets the speed and the auto-uv offset the watts; recommended locks (offset found or fixed): RTX 3070 1500 (+120,
+2.66 GH/s, 87 W), RTX 3070 Laptop 1500 (+270, 2.23 GH/s, 53 W), RTX 3080 Ti 1500 (+210, 4.40 GH/s, 147 W; for speed 1800 +270, 5.28 GH/s,
+201 W), RTX 4070 Ti **2450** (+270, 5.47 GH/s, 142 W). CMP 50HX is not measured (no memory lock on CMP). The memory is locked at its lowest
+clock by default (`--no-mem-lock` leaves it). The HiveOS OC of the web UI is applied by `nvidia-oc` at every miner start and OC change and
+resets the lock and the offset: since 1.7.8 the miner sets them again (log: `... was reset by an OC apply ... set again`, at most 4 times per
+GPU per hour). The dashboard shows GH/s and GH/W. Pools, options and the dev fee (1%): MANUAL.md, section 21.
+
 ## Русский
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.
@@ -162,10 +211,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.7):**
+**Ссылка для установки (1.7.8):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
@@ -245,14 +294,29 @@ HiveOS кэширует скачанный архив по имени файла
   управления — по значению на карту в порядке nvidia-smi (GPU0, GPU1, ... как в логе майнера; или в порядке `--devices`), без пробелов:
   `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = значение по умолчанию для карты).
 
+### Автовыбор лока ядра (по желанию, `--auto-lock`, новое в 1.7.8)
+
+Добавьте `--auto-lock` в *Extra config arguments* (Pearl, NOID, PROX; не CMFD). Майнер переберёт локи ядра каждой карты (по умолчанию
+1800 ... 1200 МГц сверху вниз, каждый со своим профилем `--auto-uv`, 45 с + 120 с настоящего майнинга на лок, шары уходят в пул), оставит
+лучший TH/W в пределах 10 % от максимального хешрейта и сохранит его в `/hive-config/freeforgem/autolock.json`: следующие старты сразу
+ставят его. Первый перебор — 30-90 мин (все карты сразу); хешрейт виден в панели всё время, с короткими паузами между раундами.
+Опции: `--auto-lock-range 1300-1600:100`, `--auto-lock-max-loss 10`, `--auto-lock-goal eff|speed`, `--auto-lock-reset` (перебрать заново).
+Карта со своим значением `--lock-cclock` не перебирается. Подробно: MANUAL.md, раздел 23.
+
+**По деньгам:** `--auto-lock --auto-lock-goal profit --power-price 0.12,0.053@23-07` (электричество $/кВт·ч, день и ночь 23-07 ч) оставит
+лок с наибольшей прибылью в $ в сутки (доход по данным сети и цене монеты минус электричество по замеренным ваттам); каждый лок
+2000 ... 1200 меряется один раз. Цена — из публичных тикеров (только GET, ничего вашего не отправляется) или `--coin-price X` (к биржам не
+обращается); раз в `--auto-lock-reprice-hours` (6) выбор повторяется по замеренным точкам (переключение только при выигрыше > 3 %,
+`--auto-lock-hysteresis`). `--pool-fee PCT` — для пула, которого майнер не знает. MANUAL.md, раздел 23.1.
+
 ### Требования
 
 - HiveOS с драйвером NVIDIA 525 или новее.
-- Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: всего ~2,6 TH/s, для Pearl не рекомендуется).
+- Оптимизирован под RTX 30xx и RTX 40xx (своё ядро для Ada с 1.5.4); RTX 20xx/GTX 16xx/CMP и RTX 50xx тоже поддерживаются (CMP 50HX: на драйвере 610.43.03 ~67 TH/s на карту при локе 1300 и ~77 TH/s при 1500, 166-176 Вт; на старых драйверах 550.78 / 595.91.07 только ~2,6 TH/s).
 - Старые карты не поддерживаются. Карты AMD Radeon поддерживаются только в Windows (с 1.6.0); пакет для HiveOS — только NVIDIA.
 - **ОЗУ:** майнингу нужно около 0,2 ГБ плюс 0,1-0,2 ГБ на карту и до ~1,5 ГБ сверх того на миг, пока он доказывает шару Pearl
   (матрица задания 0,7-0,8 ГБ строится только тогда; до 1.7.3 каждое задание её хранило, а каждое доказательство копировало).
-  Процессу проверки `--auto-uv` нужно ещё ~1,6 ГБ (RTX 3070 / CMP 50HX). Майнер планирует проверки по 70 % свободной памяти: в
+  Процессу проверки `--auto-uv` нужно ~0,25 ГБ, а буфер доказательства ~1,6 ГБ у всех проверок один (RTX 3070 / CMP 50HX; доказывают по очереди). Майнер планирует проверки по всей свободной памяти, кроме 0,5 ГБ (на риге с малой памятью по 70 %): в
   логе "checking N of M GPU(s) at a time", а если не помещается даже одна (риг с 4 ГБ) — проверок и тюнинга нет: карта с
   проверенным профилем своих частот использует его, остальные майнят на вашем offset. Процесс проверки OOM killer Linux убивает
   первым; проверка, убитая из-за нехватки памяти, не считается провалом offset. Без `--lock-cclock` / `--lock-mclock` майнер
@@ -294,6 +358,26 @@ CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04
 `miner stop`). Подбирайте с тем профилем разгона, с которым майните: смена лимита мощности — подбор заново, смена лока частоты
 ядра — свой профиль CMFD для этого лока (подбирается один раз, с 1.7.2). MANUAL.md, раздел 13.
 
+### Proxima (PROX), с 1.7.8
+
+Нужна карта NVIDIA (GTX 10 / RTX 20/30/40/50). Полётный лист: монета `PROX` (если её нет в списке — добавьте как свою), кошелёк — ваш адрес
+PROX (InnovLab: holder id, 64 hex), Pool *Configure in miner*, Miner *Custom* `freeforgem` (та же ссылка Installation URL).
+**Hash algorithm: оставьте `----`**: в списке HiveOS нет `proxima`. Шаблон `%WAL%.%WORKER_NAME%` (соло: `%WORKER_NAME%`).
+
+| | proximamine | InnovLab | соло |
+|---|---|---|---|
+| Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` | `http://IP_НОДЫ:ПОРТ` |
+| Pass | secret вашего аккаунта proximamine | `x` | `mine.seeker.token` ноды |
+
+Скриншоты всех полей: `docs/img/hiveos-prox-*.png` (также в MANUAL.md, раздел 21).
+Extra config: `--auto-uv --lock-cclock 1500` (RTX 3070, RTX 3070 Laptop, RTX 3080 Ti; одно значение для всех карт или список через запятую по GPU).
+Лок ядра задаёт скорость, оффсет auto-uv — ватты; рекомендуемые локи (оффсет найденный или фиксированный): RTX 3070 1500 (+120,
+2,66 GH/s, 87 Вт), RTX 3070 Laptop 1500 (+270, 2,23 GH/s, 53 Вт), RTX 3080 Ti 1500 (+210, 4,40 GH/s, 147 Вт; для скорости 1800 +270, 5,28 GH/s,
+201 Вт), RTX 4070 Ti **2450** (+270, 5,47 GH/s, 142 Вт). CMP 50HX не замерена (на CMP нет лока памяти). Память по умолчанию лочится на самой
+низкой частоте (`--no-mem-lock` оставляет её). Разгон HiveOS из веб-интерфейса `nvidia-oc` применяет при каждом старте майнера и смене разгона, и он
+сбрасывает лок и оффсет: с 1.7.8 майнер ставит их заново (в логе `... was reset by an OC apply ... set again`, не больше 4 раз на GPU в час).
+На панели видны GH/s и GH/W. Пулы, опции и комиссия (1%): MANUAL.md, раздел 21.
+
 ### Карты CMP: разблокированный драйвер (по желанию, по умолчанию выключено, 1.7.7)
 
 Под штатным драйвером NVIDIA карта CMP (CMP 50HX и семейство) выдаёт около десятой части скорости. Чтобы майнер поставил разблокированный драйвер,
@@ -301,6 +385,21 @@ CMFD работает на образах HiveOS и с Ubuntu 20.04, и с 22.04
 разблокированной сборки ещё нет, и **перезагружает риг**; риг, у которого она уже стоит, без карты CMP или без root, не трогается.
 **Это заменяет драйвер ядра NVIDIA на всём риге:** сначала прочитайте MANUAL.md, раздел 20. Вручную: `sudo ./freeforgem --cmp-driver`
 (`FFG_CMP_DRIVER_DRY_RUN=1` только сообщает, что было бы сделано).
+
+### Резервные пулы (failover и failback), с 1.7.8
+
+В поле **Pool URL** полётного листа можно указать несколько URL одной монеты через пробел или запятую; первый — основной:
+
+    pearl-eu2.luckypool.io:3360 prl-eu.kryptex.network:7048
+
+Если пул недоступен, отказал в логине или не прислал задание, майнер переходит к следующему URL; пока он на резервном, основной
+проверяется раз в 10 минут отдельным соединением (login + задание; `--failback-minutes N` в *Extra config arguments*, `0` — выкл.), и после
+2 удачных проверок подряд майнер возвращается на основной, не теряя шары «в полёте». Комиссия следует за вами на тот пул, где вы сейчас.
+CMFD: движки перезапускаются на следующем пуле (около минуты без майнинга на каждое переключение). `--pool-check` в консоли
+(`./freeforgem --pool "A,B" --wallet W --pool-check`) проверяет каждую запись без GPU. Подробнее: MANUAL.md, раздел 22. Соло-URL
+`http://` — одна нода, списка нет.
+`--noshare-minutes M` (15) и `--reject-minutes K` (5) в *Extra config arguments* (0 — выкл.): пул, который принимает соединение, но не
+засчитывает ваши шары (при работающих GPU и ожидаемых шарах), переподключается, затем берётся следующий пул списка.
 
 ### Комиссия разработчика
 

@@ -20,9 +20,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const PROTOCOL: &str = "parano1d-stratum-v1";
+/// the limit until the pool answered a hashrate report on this connection; after that a silence of crate::silence::FAST (60 s) ends it
 const SILENCE_LIMIT: Duration = Duration::from_secs(300);
-const BACKOFF_MIN: Duration = Duration::from_secs(2);
-const BACKOFF_MAX: Duration = Duration::from_secs(60);
 // the session loop sends the queued shares once per read timeout: short, so a share waits at most this long (stale risk)
 const READ_TICK_MS: u64 = 20;
 
@@ -115,7 +114,12 @@ fn better(a: &[u8; 32], b: &[u8; 32]) -> bool {
 
 pub struct Login {
     pub name: &'static str,
+    /// the entry in use (`urls[entry]`, set by the connection loop; the first one is the primary)
     pub url: PoolUrl,
+    pub urls: Vec<PoolUrl>,
+    pub link: Arc<crate::failover::Link>,
+    /// the fee login: follows the user's entry
+    pub follow: Option<Arc<crate::failover::Link>>,
     pub login: String,
     pub password: String,
     pub enabled: Arc<AtomicBool>,
@@ -128,41 +132,79 @@ fn log(l: &Login, s: &str) {
     eprintln!("[noid-pool:{}] {s}", l.name);
 }
 
+/// The connection loop of one login (failover.rs): the entries of the `--pool` list in turn, back to the primary on request.
 pub fn spawn(l: Login, src: Src, tx: Sender<(Src, Event)>, rx: Receiver<Submit>, stats: Arc<Stats>) {
     std::thread::Builder::new()
         .name(format!("noid-pool-{}", l.name))
         .spawn(move || {
-            let mut backoff = BACKOFF_MIN;
-            while !l.stop.load(Ordering::Relaxed) {
-                if !l.enabled.load(Ordering::Relaxed) {
+            let mut l = l;
+            let lp = crate::failover::Loop {
+                name: l.name,
+                link: l.link.clone(),
+                follow: l.follow.clone(),
+                stop: l.stop.clone(),
+                enabled: l.enabled.clone(),
+                fee: src == Src::Fee,
+                label: Box::new({
+                    let urls = l.urls.clone();
+                    move |e| format!("{}:{}", urls[e.min(urls.len() - 1)].host, urls[e.min(urls.len() - 1)].port)
+                }),
+            };
+            crate::failover::run(
+                lp,
+                &mut l,
+                |l, e| l.url = l.urls[e].clone(),
+                |l| session(l, src, &tx, &rx, &stats),
+                |_| {
+                    stats.connected.store(0, Ordering::Relaxed);
+                    let _ = tx.send((src, Event::Disconnected));
                     while rx.try_recv().is_ok() {}
-                    std::thread::sleep(Duration::from_millis(200));
-                    continue;
-                }
-                let t = Instant::now();
-                match session(&l, src, &tx, &rx, &stats) {
-                    Ok(()) => log(&l, "connection closed"),
-                    Err(e) => log(&l, &format!("{e}")),
-                }
-                stats.connected.store(0, Ordering::Relaxed);
-                let _ = tx.send((src, Event::Disconnected));
-                while rx.try_recv().is_ok() {}
-                if !l.enabled.load(Ordering::Relaxed) || l.stop.load(Ordering::Relaxed) {
-                    continue;
-                }
-                if t.elapsed() > Duration::from_secs(60) {
-                    backoff = BACKOFF_MIN;
-                }
-                let wait = if src == Src::Fee { BACKOFF_MIN } else { backoff };
-                log(&l, &format!("reconnecting in {}s", wait.as_secs()));
-                let until = Instant::now() + wait;
-                while Instant::now() < until && l.enabled.load(Ordering::Relaxed) && !l.stop.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                backoff = (backoff * 2).min(BACKOFF_MAX);
-            }
+                },
+                |_| while rx.try_recv().is_ok() {},
+            );
         })
         .expect("spawn NOID pool thread");
+}
+
+/// `--pool-check`: the failback check (connect + login + a job) of every entry of the list.
+pub fn check(urls: &[PoolUrl], login: &str, password: &str, timeout: Duration) -> Vec<Result<(), String>> {
+    let l = Login {
+        name: "check",
+        url: urls[0].clone(),
+        urls: urls.to_vec(),
+        link: crate::failover::Link::new(1),
+        follow: None,
+        login: login.to_string(),
+        password: password.to_string(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop: Arc::new(AtomicBool::new(false)),
+        hashrate: Arc::new(AtomicU64::new(0)),
+    };
+    (0..urls.len()).map(|e| probe(&l, e, timeout)).collect()
+}
+
+/// One check of entry `entry` (failback): connect + login + a usable job, nothing is submitted (the mining session on a scratch channel).
+pub fn probe(l: &Login, entry: usize, timeout: Duration) -> Result<(), String> {
+    let p = Login {
+        name: "probe",
+        url: l.urls[entry].clone(),
+        urls: l.urls.clone(),
+        link: crate::failover::Link::new(1),
+        follow: None,
+        login: l.login.clone(),
+        password: l.password.clone(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop: Arc::new(AtomicBool::new(false)),
+        hashrate: Arc::new(AtomicU64::new(0)),
+    };
+    crate::failover::probe_session::<Event, Submit>(
+        timeout,
+        move |en, tx, rx| {
+            let p = Login { enabled: en, ..p };
+            session(&p, Src::User, &tx, &rx, &Stats::default())
+        },
+        |e| matches!(e, Event::Job(_)),
+    )
 }
 
 // ---------------- transport ----------------
@@ -214,14 +256,14 @@ fn tls_config(insecure: bool) -> Arc<rustls::ClientConfig> {
     Arc::new(cfg)
 }
 
-enum Conn {
+pub(crate) enum Conn {
     Plain(TcpStream),
     Tls(Box<rustls::ClientConnection>, TcpStream),
 }
 
 impl Conn {
     /// Plain bytes from the pool; Ok(None) = nothing within the socket's read timeout, Ok(Some(0)) = closed.
-    fn recv(&mut self, b: &mut [u8]) -> std::io::Result<Option<usize>> {
+    pub(crate) fn recv(&mut self, b: &mut [u8]) -> std::io::Result<Option<usize>> {
         let quiet = |e: &std::io::Error| matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted);
         match self {
             Conn::Plain(s) => match s.read(b) {
@@ -255,7 +297,7 @@ impl Conn {
         }
     }
 
-    fn send(&mut self, b: &[u8]) -> std::io::Result<()> {
+    pub(crate) fn send(&mut self, b: &[u8]) -> std::io::Result<()> {
         match self {
             Conn::Plain(s) => s.write_all(b),
             Conn::Tls(c, s) => {
@@ -269,7 +311,7 @@ impl Conn {
     }
 }
 
-fn connect(u: &PoolUrl) -> std::io::Result<Conn> {
+pub(crate) fn connect(u: &PoolUrl) -> std::io::Result<Conn> {
     let mut last = None;
     let mut sock = None;
     for a in (u.host.as_str(), u.port).to_socket_addrs()? {
@@ -342,15 +384,16 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut next_id = 100u64;
     let mut namespace: Option<Vec<u8>> = None;
     let mut nonce_bits = 64u32;
-    let mut last_rx = Instant::now();
+    let mut sil = crate::silence::Silence::new(SILENCE_LIMIT);
     let mut last_hr = Instant::now();
     let mut seen = 0;
+    let mut drain = crate::failover::Drain::new();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
-        if last_rx.elapsed() > SILENCE_LIMIT {
-            return Err(std::io::Error::new(ErrorKind::TimedOut, format!("no data from the pool for {}s", SILENCE_LIMIT.as_secs())));
+        if let Some(idle) = sil.expired() {
+            return Err(crate::silence::Silence::error(idle));
         }
         // replies the pool never sent: they stop counting as unanswered after REPLY_GIVEUP (kept for the log of a late reply)
         if pending.len() > 64 {
@@ -365,6 +408,10 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
         // the best first: when only some can go, the easier ones wait or are skipped
         incoming.sort_by(|a, b| if better(&a.digest, &b.digest) { std::cmp::Ordering::Less } else if better(&b.digest, &a.digest) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal });
         for s in incoming {
+            if drain.frozen() {
+                stats.submitted.fetch_sub(1, Ordering::Relaxed);
+                continue; // a switch to another pool is under way: this share belongs to a job of the old pool
+            }
             if !valid.contains(&s.job_id) {
                 stats.submitted.fetch_sub(1, Ordering::Relaxed);
                 stats.stale_drop.fetch_add(1, Ordering::Relaxed);
@@ -388,11 +435,16 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
             pending.insert(s.id, (s.job_id, Instant::now()));
             c.send(format!("{}\n", s.line).as_bytes())?;
         }
+        // a switch to another pool (failback): the shares found meanwhile went out above, wait for the pool's answers, then end
+        if drain.check(&l.link, pending.is_empty() && held.is_empty()) {
+            return Ok(());
+        }
         if last_hr.elapsed() >= Duration::from_secs(30) {
             last_hr = Instant::now();
             let hr = l.hashrate.load(Ordering::Relaxed);
             if hr > 0 {
                 next_id += 1;
+                sil.probe_sent();
                 c.send(format!("{}\n", json!({"id": next_id, "method": "mining.hashrate", "params": [hr]})).as_bytes())?;
             }
         }
@@ -400,7 +452,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
             Some(0) => return Ok(()),
             Some(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                last_rx = Instant::now();
+                sil.rx();
             }
             None => {}
         }
@@ -494,7 +546,8 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                         }
                         log(l, "authorized");
                     } else if id > 100 {
-                        // hashrate report reply
+                        // hashrate report reply: from now on this pool is judged by the 60 s limit
+                        sil.answered();
                     } else {
                         log(l, &format!("reply: {line}"));
                     }
@@ -544,6 +597,10 @@ fn parse_job(v: &Value, namespace: Option<&[u8]>, sub_bits: u32) -> Result<NJob,
         Value::Null => return Err("no work_domain_id".into()),
         x => x.to_string(),
     };
+    // goal profit (auto-lock): the block target and the height of the job
+    if let Some(bt) = block_target.as_ref() {
+        crate::autolock::note_net("noid", p["height"].as_u64().unwrap_or(0), crate::profit::work_le(bt));
+    }
     let mut fields = [0u8; 256];
     fields.copy_from_slice(&f);
     Ok(NJob {

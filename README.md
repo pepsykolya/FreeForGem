@@ -1,6 +1,6 @@
 # FreeForGem
 
-**FreeForGem** is a multi-coin GPU miner for **Pearl (PRL)**, **Common Foundry (CMFD)** and **NOID (Parano1d)** with its own
+**FreeForGem** is a multi-coin GPU miner for **Pearl (PRL)**, **Common Foundry (CMFD)**, **NOID (Parano1d)** and, since 1.7.8, **Proxima (PROX)** with its own
 GPU kernels, a CPU check of every share before it is submitted, a **1% developer fee**, and an optional **per-card automatic
 undervolt** (`--auto-uv`) that finds the lowest safe core voltage of each GPU with bit-exact checks.
 
@@ -8,7 +8,7 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.7**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.8**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
@@ -21,6 +21,7 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 | **Pearl (PRL)** | pearlhash (`pearlhash`), proof of useful work, int8 tensor-core GEMM | NVIDIA RTX 20/30/40/50, GTX 16, CMP; AMD Radeon RX 6000+ (Windows) | default |
 | **Common Foundry (CMFD)** | ForgeMatrix V4 (`forgematrix_v4`) | NVIDIA RTX 20xx or newer, AMD Radeon (Windows); ~7 GB free GPU memory | a `cmfd+tls://` pool URL or `--algo cmfd` |
 | **NOID (Parano1d)** | Poseidon2b over GF(2^128) (`parano1d`), pool protocol `parano1d-stratum-v1` over TLS | NVIDIA sm_80+ (RTX 30/40/50, A100/H100), driver **580+** | `--algo noid` (or a NOID pool URL) |
+| **Proxima (PROX)** | BLAKE2b-256 over the transaction hash (HiveOS: leave `----`, there is no `proxima` in the list) | NVIDIA GTX 10 / RTX 20/30/40/50 (sm_61+) | `--algo prox` (or a pool host with `prox`, an `innov+tls://` URL, `--solo`) |
 
 ## Quick start
 
@@ -31,20 +32,20 @@ Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 | Field | Pearl | NOID |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.7/freeforgem-1.7.7_hiveos.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz` | same |
 | Hash algorithm | `pearlhash` | `parano1d` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
 | Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1300 --auto-uv` |
 
-Use the **HiveOS** file of the release (`freeforgem-1.7.7_hiveos.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Use the **HiveOS** file of the release (`freeforgem-1.7.8_hiveos.tar.gz`) as the Installation URL — not the Linux or Windows archive.
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
 
 **CMP cards (optional, off by default):** under the stock NVIDIA driver they compute about 10 times slower. Adding `cmp-unlock-driver` to *Extra config arguments* (or `sudo ./freeforgem --cmp-driver`) makes the miner install an unlocked driver and **reboot the rig**; it replaces the kernel driver of the whole rig, read MANUAL.md section 20 first.
 
 ### Windows 10/11 x64
 
-Download `freeforgem-1.7.7-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+Download `freeforgem-1.7.8-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
 pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
 replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
 Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
@@ -53,8 +54,8 @@ Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details
 ### Linux x86_64
 
 ```
-tar xzf freeforgem-1.7.7-linux-x86_64.tar.gz
-cd freeforgem-1.7.7
+tar xzf freeforgem-1.7.8-linux-x86_64.tar.gz
+cd freeforgem-1.7.8
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv                                # NOID
@@ -97,7 +98,7 @@ int8 tensor peak at 1560 MHz).
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
 * **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
 * **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives only ~2.6 TH/s (cut int8 tensor cores): not recommended for Pearl, but it mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGem (MANUAL.md section 7, *CMP cards*).
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives ~67 TH/s per card at lock 1300 and ~77 TH/s at 1500 on driver 610.43.03 (166-176 W; 4x CMP 50HX rig; only ~2.6 TH/s on the older drivers 550.78 / 595.91.07) and mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGem (MANUAL.md section 7, *CMP cards*).
 * **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
@@ -193,7 +194,7 @@ give it a CMFD pool URL and your CMFD address (`cmfd1...` as the wallet 1.0.16+ 
 ```
 
 The CMFD work is done by the **FreeForgeMiner** engine (MIT, <https://github.com/pepsykolya/freeforgeminer>), shipped
-in the `cmfd/` folder (release 1.2.4; the Linux binaries are built from the same source on Ubuntu 20.04, so CMFD runs on every
+in the `cmfd/` folder (release 1.2.5; the Linux binaries are built from the same source on Ubuntu 20.04, so CMFD runs on every
 HiveOS): same consensus code, same speed (RTX 3070 ~20 FW/s, RTX 4070 Ti ~35 FW/s;
 AMD RX 6800 XT ~10 FW/s on Windows). The 6.4 GB
 model is downloaded once from the official Common Foundry servers and then only verified (`--cmfd-model DIR`; on HiveOS it is
@@ -213,6 +214,33 @@ HiveOS: the same flight sheet with *Hash algorithm* `forgematrix_v4`, wallet tem
 
 **CMFD dev fee: 1%**, inside the engine: 36 s per hour per GPU (random slot) on your pool, worker `ffm-fee`,
 log lines `DEV FEE | ...`. The Pearl fee below is not run in CMFD mode.
+
+## Proxima (PROX)
+
+Since 1.7.8 the same binary mines **Proxima (PROX)**: `h = BLAKE2b-256(message || nonce)`, a share needs `k` zero low bits in the last
+8 bytes. Own CUDA kernel (closed source, `libproxgpu.so` / `proxgpu.dll`; NVIDIA sm_61+), every candidate hashed again on the CPU,
+1% dev fee. Pools: proximamine (`stratum+ssl://pool.proximamine.com:3334`, password = your account secret), InnovLab
+(`innov+tls://eu3.innovlab.cc:19701`, own protocol, password `x`), or solo against your own node (`--solo`, `--token`).
+
+```
+./freeforgem --algo prox --pool stratum+ssl://pool.proximamine.com:3334 --wallet ADDRESS --worker rig1 --password SECRET --auto-uv --lock-cclock 1500
+```
+
+The kernel is pure integer ALU work: the hashrate follows the core clock, the video memory is not used (the miner locks it at the lowest
+clock that still allows the full core range by default). So the **core lock sets the speed and the offset (undervolt) sets the watts**;
+`--auto-uv` finds the offset of every card with bit-exact checks (a PROX-specific tuner, opt-in as for Pearl). Measured with a fixed
+lock and offset, 0 wrong hashes at every point:
+
+| GPU | `--lock-cclock` | offset | GH/s | W | GH/W |
+|---|---|---|---|---|---|
+| RTX 3070 | 1500 | +120 | 2.66 | 87 | 0.031 |
+| RTX 3070 Laptop | 1500 | +270 | 2.23 | 53 | 0.042 |
+| RTX 3080 Ti | 1500 | +210 | 4.40 | 147 | 0.030 |
+| RTX 4070 Ti | 2450 | +270 | 5.47 | 142 | 0.0385 |
+
+HiveOS: flight sheet with coin `PROX`, Hash algorithm left at `----`, Extra config `--auto-uv --lock-cclock 1500` (HIVEOS.md; screenshots
+in MANUAL.md section 21). If the HiveOS OC (`nvidia-oc`) resets the core / memory lock or the offset, the miner sets them again (1.7.8).
+Windows: `start-prox.bat`. Details: [MANUAL.md](MANUAL.md), section 21.
 
 ## Developer fee
 

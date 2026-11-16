@@ -67,7 +67,14 @@ impl Src {
 /// Connection parameters of one stratum login.
 pub struct Login {
     pub name: &'static str, // "user" / "fee": log prefix
+    /// the entry in use (`pools[entry]`, set by the connection loop; `--pool` list, the first one is the primary)
     pub addr: String,
+    pub pools: Vec<String>,
+    /// wallet text of the login for a pool address (login_wallet(pool, wallet, worker) of the user / of the fee)
+    pub wallet_fn: Arc<dyn Fn(&str) -> String + Send + Sync>,
+    pub link: Arc<crate::failover::Link>,
+    /// the fee login: follows the user's entry
+    pub follow: Option<Arc<crate::failover::Link>>,
     pub wallet: String,
     /// Used instead of `wallet` once the pool has refused it (fee login: plain PRL when the PRL+NOCK login is refused).
     pub fallback_wallet: Option<String>,
@@ -90,47 +97,96 @@ pub struct Login {
 /// A job that lists `proof_encodings` with "gzip" also enables it. FFGP_PROOF_GZIP=on/off forces the choice.
 static GZIP_REFUSED: AtomicBool = AtomicBool::new(false);
 
-const SILENCE_LIMIT: Duration = Duration::from_secs(240);
-const BACKOFF_MIN: Duration = Duration::from_secs(2);
-const BACKOFF_MAX: Duration = Duration::from_secs(60);
+const SILENCE_LIMIT: Duration = Duration::from_secs(240); // until the pool answered a probe on this connection (silence.rs); then 60 s
 
+/// The connection loop of one login (failover.rs): the entries of the `--pool` list in turn, back to the primary on request.
+/// A single pool reconnects with exponential backoff as before; the fee login always retries quickly (its slot is short).
 pub fn spawn(l: Login, src: Src, tx: Sender<(Src, Event)>, rx: Receiver<Submit>, stats: Arc<Stats>) {
     std::thread::Builder::new()
         .name(format!("stratum-{}", l.name))
         .spawn(move || {
-            let mut backoff = BACKOFF_MIN;
-            while !l.stop.load(Ordering::Relaxed) {
-                if !l.enabled.load(Ordering::Relaxed) {
-                    while rx.try_recv().is_ok() {}
-                    std::thread::sleep(Duration::from_millis(200));
-                    continue;
-                }
-                let t = Instant::now();
-                match session(&l, src, &tx, &rx, &stats) {
-                    Ok(()) => log(&l, "connection closed"),
-                    Err(e) => log(&l, &format!("{e}")),
-                }
-                stats.connected.store(0, Ordering::Relaxed);
-                let _ = tx.send((src, Event::Disconnected));
-                while rx.try_recv().is_ok() {} // drop submits that belong to the dead connection
-                if !l.enabled.load(Ordering::Relaxed) || l.stop.load(Ordering::Relaxed) {
-                    continue;
-                }
-                // exponential backoff; a session that lived a while starts over from the minimum (the fee
-                // login always retries quickly: its slot is short)
-                if t.elapsed() > Duration::from_secs(60) {
-                    backoff = BACKOFF_MIN;
-                }
-                let wait = if src == Src::Fee { BACKOFF_MIN } else { backoff };
-                log(&l, &format!("reconnecting in {}s", wait.as_secs()));
-                let until = Instant::now() + wait;
-                while Instant::now() < until && l.enabled.load(Ordering::Relaxed) && !l.stop.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                backoff = (backoff * 2).min(BACKOFF_MAX);
-            }
+            let mut l = l;
+            let lp = crate::failover::Loop {
+                name: l.name,
+                link: l.link.clone(),
+                follow: l.follow.clone(),
+                stop: l.stop.clone(),
+                enabled: l.enabled.clone(),
+                fee: src == Src::Fee,
+                label: Box::new({
+                    let pools = l.pools.clone();
+                    move |e| crate::failover::label(&pools[e.min(pools.len() - 1)])
+                }),
+            };
+            crate::failover::run(
+                lp,
+                &mut l,
+                |l, e| {
+                    l.addr = l.pools[e].clone();
+                    l.wallet = (l.wallet_fn)(&l.addr);
+                    l.fallback.store(false, Ordering::Relaxed);
+                },
+                |l| session(l, src, &tx, &rx, &stats),
+                |_| {
+                    stats.connected.store(0, Ordering::Relaxed);
+                    let _ = tx.send((src, Event::Disconnected));
+                    while rx.try_recv().is_ok() {} // drop submits that belong to the dead connection
+                },
+                |_| while rx.try_recv().is_ok() {},
+            );
         })
         .expect("spawn stratum thread");
+}
+
+/// `--pool-check`: the failback check (connect + login + a job) of every entry of the list.
+pub fn check(pools: &[String], wallet: &str, worker: &str, password: &str, timeout: Duration) -> Vec<Result<(), String>> {
+    let (w, wk) = (wallet.to_string(), worker.to_string());
+    let wallet_fn: Arc<dyn Fn(&str) -> String + Send + Sync> = Arc::new(move |p: &str| login_wallet(p, &w, &wk).0);
+    let l = Login {
+        name: "check",
+        addr: pools[0].clone(),
+        pools: pools.to_vec(),
+        wallet: wallet_fn(&pools[0]),
+        wallet_fn,
+        link: crate::failover::Link::new(1),
+        follow: None,
+        fallback_wallet: None,
+        fallback: AtomicBool::new(false),
+        worker: worker.to_string(),
+        password: password.to_string(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop: Arc::new(AtomicBool::new(false)),
+    };
+    (0..pools.len()).map(|e| probe(&l, e, timeout)).collect()
+}
+
+/// One check of entry `entry` of the list (failback): connect + login + a usable job, nothing is submitted. The session code is
+/// the mining one, on a scratch channel.
+pub fn probe(l: &Login, entry: usize, timeout: Duration) -> Result<(), String> {
+    let addr = l.pools[entry].clone();
+    let p = Login {
+        name: "probe",
+        wallet: (l.wallet_fn)(&addr),
+        addr,
+        pools: l.pools.clone(),
+        wallet_fn: l.wallet_fn.clone(),
+        link: crate::failover::Link::new(1),
+        follow: None,
+        fallback_wallet: l.fallback_wallet.clone(),
+        fallback: AtomicBool::new(false),
+        worker: l.worker.clone(),
+        password: l.password.clone(),
+        enabled: Arc::new(AtomicBool::new(true)),
+        stop: Arc::new(AtomicBool::new(false)),
+    };
+    crate::failover::probe_session::<Event, Submit>(
+        timeout,
+        move |en, tx, rx| {
+            let p = Login { enabled: en, ..p };
+            session(&p, Src::User, &tx, &rx, &Stats::default())
+        },
+        |e| matches!(e, Event::Job(_)),
+    )
 }
 
 /// LuckyPool (`*.luckypool.io`): takes the worker in its own authorize field and understands PRL+NOCK merge-mining wallets.
@@ -263,13 +319,14 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut authorized = false;
     let mut early: Vec<Value> = Vec::new();
     let started = Instant::now();
-    let mut last_rx = Instant::now();
+    let mut sil = crate::silence::Silence::new(SILENCE_LIMIT);
+    let mut drain = crate::failover::Drain::new();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
-        if last_rx.elapsed() > SILENCE_LIMIT {
-            return Err(std::io::Error::new(ErrorKind::TimedOut, format!("no data from the pool for {}s", SILENCE_LIMIT.as_secs())));
+        if let Some(idle) = sil.expired() {
+            return Err(crate::silence::Silence::error(idle));
         }
         // a pool that never answers authorize: go on after 5 s, uncompressed
         if !authorized && started.elapsed() > Duration::from_secs(5) {
@@ -283,13 +340,25 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
         }
         // outgoing submits
         while let Ok(s) = rx.try_recv() {
+            if drain.frozen() {
+                continue; // a switch to another pool is under way: this share belongs to a job of the old pool
+            }
             pending.insert(s.id, s.job_id);
             sock.write_all(s.line.as_bytes())?;
             sock.write_all(b"\n")?;
         }
+        // a switch to another pool (failback): the shares found meanwhile went out above, wait for the pool's answers, then end
+        if drain.check(&l.link, pending.is_empty()) {
+            return Ok(());
+        }
+        if sil.probe_due() {
+            // no keepalive in this protocol: after 20 s of silence ask something the pool answers ("method not supported" is an answer)
+            sil.synthetic_sent();
+            sock.write_all(crate::silence::Silence::probe_line().as_bytes())?;
+        }
         match reader.read_line(&mut buf) {
             Ok(0) => return Ok(()),
-            Ok(_) => last_rx = Instant::now(),
+            Ok(_) => sil.rx(),
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                 if !buf.ends_with('\n') {
                     continue; // partial line stays in buf
@@ -339,7 +408,9 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
             "" => {
                 let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
                 let ok = v.get("result").map(|r| r.as_bool().unwrap_or(!r.is_null())).unwrap_or(false) && v.get("error").map_or(true, Value::is_null);
-                if let Some(job_id) = pending.remove(&id) {
+                if id == crate::silence::PROBE_ID {
+                    sil.answered(); // any answer, an error too
+                } else if let Some(job_id) = pending.remove(&id) {
                     if ok {
                         stats.accepted.fetch_add(1, Ordering::Relaxed);
                         log(l, &format!("share ACCEPTED (id {id}, job {job_id}): {line}"));
@@ -406,6 +477,10 @@ fn parse_job(v: &Value, v2: bool) -> Option<PoolJob> {
         let (_, suf) = job_id.rsplit_once('_')?;
         suf.parse::<f64>().ok()
     });
+    // goal profit (auto-lock): the network target (nbits, header bytes 72..76) and the height of the job
+    if let Some(h) = p.get("height").and_then(Value::as_u64) {
+        crate::autolock::note_net("pearl", h, crate::profit::work_nbits(u32::from_le_bytes([header[72], header[73], header[74], header[75]])));
+    }
     let encodings = p["proof_encodings"].as_array();
     let gzip = match std::env::var("FFGP_PROOF_GZIP").as_deref() {
         Ok("on") => true,
@@ -488,5 +563,289 @@ mod login_tests {
         assert!(pool_addr("stratum+ssl://prl-eu.kryptex.network:8048").unwrap_err().contains("not supported"));
         assert!(pool_addr("ssl://prl-eu.kryptex.network:8048").is_err());
         assert!(pool_addr("http://prl-eu.kryptex.network:7048").unwrap_err().contains("unknown scheme"));
+    }
+}
+
+/// Failover / failback against local mock pools (the real connection loop, session code, prober and drain; no GPU).
+#[cfg(test)]
+mod failover_tests {
+    use super::*;
+    use crate::failover::{self, Link};
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Mutex;
+    use std::sync::mpsc;
+
+    /// A Pearl stratum mock: login, one job per login, every submit accepted. `stop()` = the pool goes down (open connections are cut).
+    struct Mock {
+        port: u16,
+        alive: Arc<AtomicBool>,
+        conns: Arc<Mutex<Vec<TcpStream>>>,
+        logins: Arc<Mutex<Vec<String>>>,
+        submits: Arc<AtomicU64>,
+        /// what a submit gets: 0 accepted, 1 rejected, 2 no answer at all
+        mode: Arc<std::sync::atomic::AtomicU8>,
+    }
+
+    fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    impl Mock {
+        fn new(port: u16) -> Mock {
+            Mock { port, alive: Arc::new(AtomicBool::new(false)), conns: Arc::new(Mutex::new(vec![])), logins: Arc::new(Mutex::new(vec![])), submits: Arc::new(AtomicU64::new(0)), mode: Arc::new(std::sync::atomic::AtomicU8::new(0)) }
+        }
+        fn start(&self) {
+            let l = TcpListener::bind(("127.0.0.1", self.port)).expect("bind mock port");
+            l.set_nonblocking(true).unwrap();
+            self.alive.store(true, Ordering::SeqCst);
+            let (alive, conns, logins, submits, mode) = (self.alive.clone(), self.conns.clone(), self.logins.clone(), self.submits.clone(), self.mode.clone());
+            std::thread::spawn(move || {
+                while alive.load(Ordering::SeqCst) {
+                    match l.accept() {
+                        Ok((s, _)) => {
+                            s.set_nonblocking(false).unwrap();
+                            conns.lock().unwrap().push(s.try_clone().unwrap());
+                            let (logins, submits, mode) = (logins.clone(), submits.clone(), mode.clone());
+                            std::thread::spawn(move || {
+                                let w = Arc::new(Mutex::new(s.try_clone().unwrap()));
+                                let send = |w: &Mutex<TcpStream>, v: Value| {
+                                    let _ = w.lock().unwrap().write_all(format!("{v}
+").as_bytes());
+                                };
+                                for line in BufReader::new(s).lines().map_while(Result::ok) {
+                                    let v: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+                                    match v["method"].as_str() {
+                                        Some("mining.subscribe") => {
+                                            send(&w, json!({"jsonrpc":"2.0","id":1,"result":[]}));
+                                        }
+                                        Some("mining.authorize") => {
+                                            logins.lock().unwrap().push(format!("{}", v["params"]["wallet"].as_str().unwrap_or("")));
+                                            send(&w, json!({"jsonrpc":"2.0","id":2,"result":true}));
+                                            let job = json!({"jsonrpc":"2.0","method":"mining.notify","params":{"job_id":"j1","header":"00".repeat(76),"target":"ff".repeat(32),"difficulty":1.0}});
+                                            send(&w, job);
+                                        }
+                                        Some("mining.submit") => {
+                                            submits.fetch_add(1, Ordering::SeqCst);
+                                            // a pool needs a moment to answer: the switch must wait for it
+                                            let m = mode.load(Ordering::SeqCst);
+                                            if m == 2 {
+                                                continue; // silent: no answer
+                                            }
+                                            let (w2, id) = (w.clone(), v["id"].clone());
+                                            std::thread::spawn(move || {
+                                                std::thread::sleep(Duration::from_millis(150));
+                                                let r = if m == 1 { json!({"jsonrpc":"2.0","id":id,"result":null,"error":{"code":20,"message":"rejected"}}) } else { json!({"jsonrpc":"2.0","id":id,"result":true}) };
+                                                let _ = w2.lock().unwrap().write_all(format!("{r}
+").as_bytes());
+                                            });
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            });
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            });
+        }
+        fn stop(&self) {
+            self.alive.store(false, Ordering::SeqCst);
+            for c in self.conns.lock().unwrap().drain(..) {
+                let _ = c.shutdown(std::net::Shutdown::Both);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        fn logins(&self) -> Vec<String> {
+            self.logins.lock().unwrap().clone()
+        }
+    }
+
+    fn login(name: &'static str, pools: &[String], wallet: &str, link: Arc<Link>, follow: Option<Arc<Link>>, enabled: Arc<AtomicBool>, stop: Arc<AtomicBool>) -> Login {
+        let w = wallet.to_string();
+        let wallet_fn: Arc<dyn Fn(&str) -> String + Send + Sync> = Arc::new(move |_p: &str| format!("{w}.rig"));
+        Login {
+            name,
+            addr: pools[0].clone(),
+            pools: pools.to_vec(),
+            wallet: wallet_fn(&pools[0]),
+            wallet_fn,
+            link,
+            follow,
+            fallback_wallet: None,
+            fallback: AtomicBool::new(false),
+            worker: "rig".into(),
+            password: "x".into(),
+            enabled,
+            stop,
+        }
+    }
+
+    fn wait_for(what: &str, secs: u64, mut f: impl FnMut() -> bool) {
+        let t = Instant::now();
+        while !f() {
+            assert!(t.elapsed() < Duration::from_secs(secs), "timeout waiting for: {what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    static GLOBAL: Mutex<()> = Mutex::new(());
+
+    /// the user's session against pool A (mode `mode`) and a good pool B, with the accepted-shares watchdog ticking like the status loop
+    /// does; `expect` = shares expected per second at the measured hash rate
+    fn watchdog_run(mode: u8, expect: f64, secs: u64) -> (Option<usize>, u64, u64) {
+        failover::set_test_timing(0.0, 0.4, 100); // no failback
+        failover::set_watchdog_secs(3.0, 2.0, 1.0);
+        let (pa, pb) = (free_port(), free_port());
+        let (a, b) = (Mock::new(pa), Mock::new(pb));
+        a.mode.store(mode, Ordering::SeqCst);
+        a.start();
+        b.start();
+        let pools = vec![format!("127.0.0.1:{pa}"), format!("127.0.0.1:{pb}")];
+        let stop = Arc::new(AtomicBool::new(false));
+        let (ev_tx, _ev_rx) = mpsc::channel::<(Src, Event)>();
+        let (sub_tx, sub_rx) = mpsc::channel::<Submit>();
+        let stats = Arc::new(Stats::default());
+        let link = Link::new(2);
+        spawn(login("user", &pools, "UW", link.clone(), None, Arc::new(AtomicBool::new(true)), stop.clone()), Src::User, ev_tx, sub_rx, stats.clone());
+        {
+            let (stop, stats, link) = (stop.clone(), stats.clone(), link.clone());
+            std::thread::spawn(move || {
+                let mut w = failover::Watch::default();
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(100));
+                    let allowed = stats.connected.load(Ordering::SeqCst) != 0;
+                    failover::watch_tick(&mut w, &link, "user", 0.1, allowed, 1e9, Some(1e9 / expect), stats.accepted.load(Ordering::SeqCst), stats.rejected.load(Ordering::SeqCst), stats.submitted.load(Ordering::SeqCst));
+                }
+            });
+        }
+        {
+            let (stop, stats) = (stop.clone(), stats.clone());
+            std::thread::spawn(move || {
+                let mut id = 100u64;
+                while !stop.load(Ordering::SeqCst) {
+                    id += 1;
+                    let line = json!({"jsonrpc":"2.0","id":id,"method":"mining.submit","params":["j1","00"]}).to_string();
+                    stats.submitted.fetch_add(1, Ordering::SeqCst);
+                    let _ = sub_tx.send(Submit { id, job_id: "j1".into(), line });
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            });
+        }
+        std::thread::sleep(Duration::from_secs(secs));
+        let r = (link.entry(), stats.accepted.load(Ordering::SeqCst), b.submits.load(Ordering::SeqCst));
+        stop.store(true, Ordering::SeqCst);
+        a.stop();
+        b.stop();
+        r
+    }
+
+    #[test]
+    fn watchdog_leaves_a_pool_that_rejects_or_ignores_shares() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        for mode in [1u8, 2u8] {
+            // 10 shares expected per second: the 3 s window is plenty
+            let (entry, acc, on_b) = watchdog_run(mode, 10.0, 25);
+            assert_eq!(entry, Some(1), "mode {mode}: the miner left the pool that credits nothing");
+            assert!(acc >= 3 && on_b >= 3, "mode {mode}: shares are accepted on the backup (acc {acc}, on B {on_b})");
+        }
+    }
+
+    #[test]
+    fn watchdog_no_false_alarm_on_rare_shares_or_a_normal_pool() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        // a silent pool, but only ~0.001 shares expected per second (big difficulty): the window must not fire
+        let (entry, _, _) = watchdog_run(2, 0.001, 12);
+        assert_eq!(entry, Some(0), "rare shares: no switch");
+        // a normal pool: never leaves
+        let (entry, acc, _) = watchdog_run(0, 10.0, 10);
+        assert_eq!(entry, Some(0));
+        assert!(acc >= 20);
+    }
+
+    #[test]
+    fn failover_then_failback_keeps_shares_and_fee_follows() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        failover::set_test_timing(0.02, 0.4, 100);
+        let (pa, pb) = (free_port(), free_port());
+        let (a, b) = (Mock::new(pa), Mock::new(pb));
+        b.start(); // the primary (a) is down
+        let pools = vec![format!("127.0.0.1:{pa}"), format!("127.0.0.1:{pb}")];
+        let stop = Arc::new(AtomicBool::new(false));
+        let (ev_tx, ev_rx) = mpsc::channel::<(Src, Event)>();
+        let (user_sub_tx, user_sub_rx) = mpsc::channel::<Submit>();
+        let (_fee_sub_tx, fee_sub_rx) = mpsc::channel::<Submit>();
+        let stats = [Arc::new(Stats::default()), Arc::new(Stats::default())];
+        let user_link = Link::new(2);
+        let fee_enabled = Arc::new(AtomicBool::new(false));
+        spawn(login("user", &pools, "UW", user_link.clone(), None, Arc::new(AtomicBool::new(true)), stop.clone()), Src::User, ev_tx.clone(), user_sub_rx, stats[0].clone());
+        spawn(login("fee", &pools, "FW", Link::new(2), Some(user_link.clone()), fee_enabled.clone(), stop.clone()), Src::Fee, ev_tx, fee_sub_rx, stats[1].clone());
+        {
+            let probe_login = login("probe", &pools, "UW", Link::new(1), None, Arc::new(AtomicBool::new(true)), stop.clone());
+            let p2 = pools.clone();
+            failover::spawn_prober("user", user_link.clone(), stop.clone(), move |e| p2[e].clone(), move |e| probe(&probe_login, e, Duration::from_secs(5)));
+        }
+        let jobs = Arc::new(AtomicU64::new(0));
+        {
+            let jobs = jobs.clone();
+            std::thread::spawn(move || {
+                while let Ok((src, ev)) = ev_rx.recv() {
+                    if src == Src::User && matches!(ev, Event::Job(_)) {
+                        jobs.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
+        // 1. failover: the primary is down, the backup takes the user
+        wait_for("a job from the backup", 20, || jobs.load(Ordering::SeqCst) >= 1);
+        assert_eq!(user_link.entry(), Some(1));
+        assert_eq!(b.logins(), vec!["UW.rig"]);
+        assert!(a.logins().is_empty());
+        // shares go on: one per 40 ms from a background thread for the whole test
+        let sent = Arc::new(AtomicU64::new(0));
+        let run = Arc::new(AtomicBool::new(true));
+        {
+            let (sent, run) = (sent.clone(), run.clone());
+            std::thread::spawn(move || {
+                let mut id = 100u64;
+                while run.load(Ordering::SeqCst) {
+                    id += 1;
+                    let line = json!({"jsonrpc":"2.0","id":id,"method":"mining.submit","params":["j1","00"]}).to_string();
+                    let _ = user_sub_tx.send(Submit { id, job_id: "j1".into(), line });
+                    sent.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(40));
+                }
+            });
+        }
+        wait_for("shares accepted on the backup", 10, || stats[0].accepted.load(Ordering::SeqCst) >= 3);
+        // the fee slot on the backup: the fee login goes to the pool the user is on
+        fee_enabled.store(true, Ordering::SeqCst);
+        wait_for("the fee login on the backup", 10, || b.logins().iter().any(|l| l == "FW.rig"));
+        assert!(a.logins().is_empty());
+        fee_enabled.store(false, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300));
+        // 2. the primary comes back: two good checks, the user goes back to it (the drain waits for the answers of the shares in flight)
+        a.start();
+        wait_for("failback to the primary", 30, || user_link.entry() == Some(0) && a.logins().iter().any(|l| l == "UW.rig"));
+        wait_for("shares accepted on the primary", 10, || a.submits.load(Ordering::SeqCst) >= 3);
+        assert_eq!(user_link.failbacks.load(Ordering::Relaxed), 1);
+        // the fee follows the user back
+        let before = b.logins().iter().filter(|l| *l == "FW.rig").count();
+        fee_enabled.store(true, Ordering::SeqCst);
+        wait_for("the fee login on the primary", 10, || a.logins().iter().any(|l| l == "FW.rig"));
+        assert_eq!(b.logins().iter().filter(|l| *l == "FW.rig").count(), before, "the fee must not reconnect to the backup");
+        fee_enabled.store(false, Ordering::SeqCst);
+        // every share a pool received was answered and counted (the switch did not cut shares in flight)
+        run.store(false, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(800));
+        let got = a.submits.load(Ordering::SeqCst) + b.submits.load(Ordering::SeqCst);
+        let counted = stats[0].accepted.load(Ordering::SeqCst) + stats[0].rejected.load(Ordering::SeqCst);
+        assert!(got >= 6 && sent.load(Ordering::SeqCst) >= got);
+        assert_eq!(counted, got, "shares received by the pools = shares answered ({got} received: a {} b {}; accepted {} rejected {})", a.submits.load(Ordering::SeqCst), b.submits.load(Ordering::SeqCst), stats[0].accepted.load(Ordering::SeqCst), stats[0].rejected.load(Ordering::SeqCst));
+        assert_eq!(stats[0].rejected.load(Ordering::SeqCst), 0);
+        stop.store(true, Ordering::SeqCst);
+        a.stop();
+        b.stop();
     }
 }

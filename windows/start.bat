@@ -12,6 +12,9 @@ set "WALLET=prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hwqzt03ssfw8fyr"
 rem LuckyPool also pays Nockchain (NOCK) for the same work (merge mining, no hashrate loss): add "+" and your
 rem NOCK address after the PRL address, e.g.  set "WALLET=prl1...+YOUR_NOCK_ADDRESS"
 rem Stratum pool HOST:PORT (see MANUAL.md, section "Pools")
+rem Backup pools (1.7.8): a comma separated list, the first one is the primary, e.g.
+rem   set "POOL=pearl-eu2.luckypool.io:3360,prl-eu.kryptex.network:7048"
+rem The miner moves to the next entry when a pool is unusable and comes back to the primary when it works again (MANUAL.md, "Pool lists").
 set "POOL=pearl-eu2.luckypool.io:3360"
 rem Worker (rig) name: letters, numbers, dots, underscores, hyphens
 set "WORKER=%COMPUTERNAME%"

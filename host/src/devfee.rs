@@ -17,6 +17,15 @@ pub const FEE_WALLET: &str = "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hw
 pub const FEE_WORKER: &str = "ffgp-devfee";
 /// NOID (Parano1d) fee address: the same 1% schedule, a second login on the user's NOID pool (noid/mod.rs).
 pub const FEE_WALLET_NOID: &str = "o1qxh67m5rugg8t43gcn47lp775thsq4padlacn2jv9l3d7lmv7cmq4gmhdc";
+/// Proxima (PROX) fee login (prox/mod.rs): the same 1% schedule, ALWAYS on the proximamine pool (also when the user mines on
+/// another pool or solo through a node), login FEE_WALLET_PROX.FEE_WORKER_PROX with the dev account's pool secret.
+pub const FEE_POOL_PROX: &str = "stratum+ssl://pool.proximamine.com:3334";
+pub const FEE_WALLET_PROX: &str = "fb8f33895d20ed0d244d1476272b0ccddd244f84acd2e423e55c7a95f6a6f6a6";
+pub const FEE_WORKER_PROX: &str = "ffg";
+/// The dev account's pool secret is NOT in the source: it is injected at build time from the environment variable
+/// FFG_FEE_PASS_PROX (build.sh / build-windows.ps1 read it from ~/.secrets/prox-devfee/pool-secret); build.rs refuses a release
+/// build without it unless FFG_ALLOW_NO_PROX_FEE=1 (dev build: empty, the PROX fee login then fails and prox/mod.rs warns).
+pub const FEE_PASS_PROX: &str = match option_env!("FFG_FEE_PASS_PROX") { Some(s) => s, None => "" };
 /// Nockchain address merge-mined with the fee slot on LuckyPool (`PRL+NOCK` wallet syntax); other pools get FEE_WALLET only.
 pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat4ih";
 
@@ -50,7 +59,11 @@ pub struct Params {
 impl Params {
     /// FFGP_DEVFEE_TEST=1 (testing only): 4 minute cycle, 20 s slot.
     pub fn from_env() -> Params {
-        if std::env::var("FFGP_DEVFEE_TEST").map_or(false, |v| v == "1") {
+        let t = std::env::var("FFGP_DEVFEE_TEST").unwrap_or_default();
+        if t == "2" {
+            // testing only (1.7.8, PROX fee routing tests): 70 s cycle, 15 s slot - one slot within the first minute
+            Params { cycle: Duration::from_secs(70), slot: Duration::from_secs(15) }
+        } else if t == "1" {
             Params { cycle: Duration::from_secs(240), slot: Duration::from_secs(20) }
         } else {
             Params { cycle: Duration::from_secs(CYCLE_SECS), slot: Duration::from_secs(SLOT_SECS) }

@@ -7,9 +7,30 @@ set -euo pipefail
 cd "$(dirname "$0")"
 LIB=prebuilt/linux-x86_64/libpearlgpu.so
 NLIB=prebuilt/linux-x86_64/libnoidgpu.so
+PLIB=prebuilt/linux-x86_64/libproxgpu.so   # PROX (Proxima): ffgprox kernel A, cudart static
 [ -f "$LIB" ] || { echo "missing $LIB (prebuilt GPU library)"; exit 1; }
 [ -f "$NLIB" ] || { echo "missing $NLIB (prebuilt NOID GPU library)"; exit 1; }
+[ -f "$PLIB" ] || { echo "missing $PLIB (prebuilt PROX GPU library)"; exit 1; }
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' host/Cargo.toml)
+
+# PROX dev fee: the dev account's pool secret is NOT in the source, it is compiled in from FFG_FEE_PASS_PROX (devfee.rs, option_env!).
+# Sources, in order: the environment, $FFG_PROX_SECRET_FILE, /run/secrets/prox-pool-secret (docker, see build-docker.sh),
+# ~/.secrets/prox-devfee/pool-secret.  FFG_ALLOW_NO_PROX_FEE=1 = dev build WITHOUT the PROX fee (never release it).  Never printed.
+if [ -z "${FFG_FEE_PASS_PROX:-}" ]; then
+  for f in "${FFG_PROX_SECRET_FILE:-}" /run/secrets/prox-pool-secret "$HOME/.secrets/prox-devfee/pool-secret"; do
+    if [ -n "$f" ] && [ -r "$f" ]; then FFG_FEE_PASS_PROX=$(tr -d '[:space:]' < "$f"); break; fi
+  done
+fi
+if [ -n "${FFG_FEE_PASS_PROX:-}" ]; then
+  export FFG_FEE_PASS_PROX
+elif [ "${FFG_ALLOW_NO_PROX_FEE:-0}" = 1 ]; then
+  export FFG_ALLOW_NO_PROX_FEE
+  echo "WARNING: dev build WITHOUT the PROX dev-fee secret (FFG_ALLOW_NO_PROX_FEE=1) - do not release this package"
+else
+  echo "ERROR: PROX dev-fee secret not found (FFG_FEE_PASS_PROX, \$FFG_PROX_SECRET_FILE, ~/.secrets/prox-devfee/pool-secret)." >&2
+  echo "A release without it would ship a miner without the PROX fee. For a dev build set FFG_ALLOW_NO_PROX_FEE=1." >&2
+  exit 1
+fi
 
 echo "== freeforgem"
 (cd host && cargo build --release)
@@ -34,7 +55,7 @@ fi
 
 D=dist/freeforgem-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 # HiveOS custom miner package: freeforgem-<version>_hiveos.tar.gz with a top-level freeforgem/ folder ("_hiveos" has no -,
@@ -44,7 +65,7 @@ tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 HV=${VERSION//-/}
 H=dist/hive/freeforgem
 rm -rf dist/hive; mkdir -p "$H"
-cp host/target/release/freeforgem "$LIB" "$NLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
 sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"
 chmod +x "$H"/h-*.sh "$H/freeforgem"

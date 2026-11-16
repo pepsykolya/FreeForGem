@@ -7,6 +7,7 @@ loads the prebuilt search library from this directory at run time (`--backend au
 |---|---|
 | `linux-x86_64/libpearlgpu.so` | Linux x86_64, glibc 2.31+ (built on Ubuntu 20.04) |
 | `linux-x86_64/libnoidgpu.so`, `windows-x64/noidgpu.dll` | NOID (Parano1d) search library, since 1.7.0: NVIDIA sm_80+ (RTX 30/40/50, A100/H100), **driver R580+**; kernels for sm_80/86/89/90/120 embedded as cubins (ptxas 13.4, `clmad`); exports only `nd_*` (`gpu/noidgpu.h`); depends only on the NVIDIA driver (libcuda / nvcuda). Separate from the Pearl library, which is unchanged |
+| `linux-x86_64/libproxgpu.so`, `windows-x64/proxgpu.dll` | PROX (Proxima, txid-blake2b) search library (branch prox): the ffgprox kernel A, cubins sm_61/70/75/80/86/89/90/100/120 + PTX, CUDA runtime linked statically (needs only the NVIDIA driver); exports `px_*` and `prox_*` (`gpu/proxgpu.h`). Built from the private ffgprox repo (`build-proxgpu.sh` in docker nvidia/cuda:12.8.1-devel-ubuntu20.04, glibc 2.31 / `build-proxgpu.ps1` with CUDA 12.9 + VS 2022) |
 | `windows-x64/pearlgpu.dll`, `windows-x64/pearlgpu.lib` | Windows 10/11 x64 (static CUDA runtime and MSVC CRT; `.lib` is the import library) |
 | `windows-x64/pearlgpu_amd.dll` | Windows 10/11 x64, AMD GPUs (OpenCL; RDNA2 and newer — tested on RX 6800 XT), since 1.6.0 |
 | `windows-x64/amduv.exe` | Windows, AMD: clock/voltage tuner for `--auto-uv` (ADLX), since 1.6.0 |

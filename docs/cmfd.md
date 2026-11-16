@@ -175,8 +175,7 @@ ignored, which tee inherits, so the launcher must reset SIGINT to default or tee
   CMFD uses the `--uv-offset` list the same way.
 * Without `--uv-max`: CMP 30HX/40HX +150; CMP 50HX (TU102: PCI id 0x1e09 or "50HX" in the name) +330 (was +225 before 1.7.7);
   Turing RTX 20xx / GTX 16xx +225 (owner's CMP 50HX rigs hold +220 and more); others +495 (compute capability 7.5 decides; the name when NVML
-  gives none). CMP 50HX mines Pearl at only ~2.6 TH/s per card (int8 tensor cores cut ~17x against the 40HX; same on drivers
-  550.78 and 595.91.07, 3x CMP 50HX rig): not recommended for Pearl (GPU tables in README/MANUAL/HIVEOS). Search start: RTX 50 (sm_120) at least +300, RTX 40 at least +200 (a default start
+  gives none). CMP 50HX mines Pearl at ~67 TH/s per card at lock 1300 and ~77 TH/s at 1500 on driver 610.43.03 (4x CMP 50HX rig, 166-176 W per card; only ~2.6 TH/s on the older drivers 550.78 and 595.91.07, int8 tensor cores cut ~17x there; GPU tables in README/MANUAL/HIVEOS). Search start: RTX 50 (sm_120) at least +300, RTX 40 at least +200 (a default start
   at or above a lower `--uv-max` is dropped). An explicit `--uv-max` above the card default is used, with a WARNING.
 * Start log: `auto-uv: GPUn (bus .., NAME): range +A..+B (max: <source>; start: <source>)`.
 * uv.json gets `cap` (the limit of the tuning). Saved offset above the current limit: run at the limit after a quick check, the

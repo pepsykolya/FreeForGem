@@ -134,6 +134,30 @@ pub fn mined_ok(dir: &Path, uuids: &[String]) {
     }
 }
 
+/// How long after a crash the records of the cards still tell who failed (a restart takes seconds, a HiveOS restart minutes).
+pub const BYSTANDER_SECS: u64 = 900;
+
+/// 1.7.8: this card's check was cut short by the crash of the process, but was it the card that failed?  A CUDA fault on one card
+/// ends CUDA for the whole process (workers and checks of the others stop with it), and the next start finds a crash marker on each
+/// card that was checking.  `Some(label)` = another card has a fresh record with an Xid (the driver named it) and this one has
+/// none: this card is no culprit and its offset under check must not count as failed.  `None`: it failed too, or nobody was named.
+pub fn bystander(dir: &Path, uuid: &str) -> Option<String> {
+    let _g = LOCK.lock().unwrap();
+    bystander_in(&load(dir)["gpus"], uuid, now())
+}
+
+fn bystander_in(gpus: &Value, uuid: &str, t: u64) -> Option<String> {
+    let last = |r: &Value| r["last_crash"].as_u64().unwrap_or(0);
+    let fresh = |r: &Value| last(r) > 0 && t.saturating_sub(last(r)) <= BYSTANDER_SECS;
+    if gpus.get(uuid).is_some_and(fresh) {
+        return None;
+    }
+    gpus.as_object()?
+        .iter()
+        .find(|(k, r)| k.as_str() != uuid && fresh(r) && r["xid"].as_u64().unwrap_or(0) != 0)
+        .map(|(_, r)| format!("GPU bus {} (Xid {})", r["bus"].as_str().unwrap_or("?"), r["xid"].as_u64().unwrap_or(0)))
+}
+
 /// A process-wide fault that no GPU could be blamed for (no Xid): counted; returns how many in a row (within STREAK_SECS).  After
 /// 3 the caller records a crash for every GPU (each one steps back from its offset at the next start): no endless loop.
 pub fn unknown_crash(dir: &Path) -> u32 {
@@ -383,7 +407,7 @@ pub fn restart_self(why: &str) -> String {
 /// remembered faults; with --uv-reset-all left in a flight sheet every crash restart wiped every profile -> a full retune loop).
 /// The other flags are settings that hold for every start (--minutes restarts its count; --self-test / checks never restart).
 #[cfg_attr(not(unix), allow(dead_code))]
-pub const ONE_SHOT_FLAGS: [&str; 2] = ["--uv-reset", "--uv-reset-all"];
+pub const ONE_SHOT_FLAGS: [&str; 3] = ["--uv-reset", "--uv-reset-all", "--auto-lock-reset"];
 
 /// The arguments of a self-restart: the miner's own without the one-shot flags.
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -629,6 +653,30 @@ mod xid_tests {
         let w = parse_xid_lines("[ 10.0] NVRM: Xid (PCI:0000:0a:00): 13, pid=7777, name=cmfd-v4-replay, x\n", 11.0);
         assert_eq!(foreign_cause(&w, "0000:0a:00", 13, 4242, "freeforgem", &tree), None);
         assert_eq!(foreign_cause(&w, "0000:0a:00", 13, 9999, "freeforgem", &tree), Some((7777, "cmfd-v4-replay".into())));
+    }
+}
+
+#[cfg(test)]
+mod bystander_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_card_with_the_xid_is_the_culprit() {
+        let t = 100_000;
+        let g = json!({
+            "GPU-4": {"bus": "0000:05:00.0", "last_crash": t - 5, "xid": 43},
+            "GPU-6": {"bus": "0000:07:00.0", "last_crash": 0, "xid": 0},
+            "GPU-1": {"bus": "0000:02:00.0", "last_crash": t - BYSTANDER_SECS - 1, "xid": 13},
+        });
+        // the card with the Xid is no bystander; a card without a record is one; an old record of its own does not make it a culprit
+        assert_eq!(bystander_in(&g, "GPU-4", t), None);
+        assert!(bystander_in(&g, "GPU-6", t).unwrap().contains("0000:05:00.0"));
+        assert!(bystander_in(&g, "GPU-1", t).unwrap().contains("Xid 43"));
+        assert!(bystander_in(&g, "GPU-9", t).is_some());
+        // nobody named (no Xid, or the record is old): the old rule, every checking card counts
+        let g = json!({"GPU-4": {"bus": "b", "last_crash": t - 5, "xid": 0}, "GPU-1": {"bus": "c", "last_crash": 5, "xid": 43}});
+        assert_eq!(bystander_in(&g, "GPU-6", t), None);
+        assert_eq!(bystander_in(&json!({}), "GPU-6", t), None);
     }
 }
 

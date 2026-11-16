@@ -260,7 +260,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
         if core_opt.is_none() && mem_opt.is_none() && moff.is_none() && hive.is_none() {
             continue;
         }
-        let bus = match gpu::device_pci_bus_id(dev) {
+        let bus = match bus_id(dev) {
             Ok(b) => b,
             Err(e) => {
                 lg(format!("GPU{dev}: no PCI bus id ({e:#}); left alone"));
@@ -361,6 +361,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     if !checks.is_empty() {
         spawn_mem_lock_check(checks);
     }
+    spawn_lock_keeper();
     Some(Guard)
 }
 
@@ -448,9 +449,123 @@ fn spawn_mem_lock_check(cards: Vec<(i32, String, u32)>) {
     });
 }
 
+/// Lock keeper (1.7.8, all coins): HiveOS `nvidia-oc` (at a miner start, an OC change in the web UI) and other OC tools reset the
+/// clock locks; NVML cannot read a lock back, so the keeper watches the effect: a card that held its lock under load and then runs
+/// above it (core) or off it (memory) in `KEEP_NEED` samples in a row has lost it, and the lock of this run is set again (one line in
+/// the log).  Quiet otherwise: a sample every `KEEP_POLL_S`, nothing is written to a card that holds, at most `OC_RESETS_MAX` re-sets
+/// an hour per card (then it stands down and says so).  The offset has its own keeper in each tuner (and PROX `--uv-offset`).
+const KEEP_POLL_S: u64 = 15;
+const KEEP_BUSY_PCT: u32 = 70;
+const KEEP_NEED: u32 = 2;
+
+#[derive(Default)]
+struct Track {
+    armed: bool, // the lock was seen holding under load (a lock that never held, e.g. a clock the driver does not honour, is not chased)
+    miss: u32,
+}
+
+/// Tolerance of a clock sample against its lock: core 3 % (at least 30 MHz: the clock moves in 15 MHz bins), memory 5 % (at least 30).
+fn keep_tol(k: Kind, requested: u32) -> u32 {
+    match k {
+        Kind::Core => (requested / 33).max(30),
+        Kind::Mem => (requested / 20).max(30),
+    }
+}
+
+/// One sample of a locked clock.  Returns the clock the card runs at when the lock is judged lost (`KEEP_NEED` busy samples in a
+/// row off the lock after it was seen holding), else `None`.  Core: only ABOVE the lock counts (below = power / thermal limit);
+/// memory: either side.  Idle samples change nothing.
+fn keep_judge(t: &mut Track, k: Kind, requested: u32, actual: u32, util: u32) -> Option<u32> {
+    if requested == 0 || util < KEEP_BUSY_PCT {
+        return None;
+    }
+    let tol = keep_tol(k, requested);
+    let off = match k {
+        Kind::Core => actual > requested + tol,
+        Kind::Mem => actual.abs_diff(requested) > tol,
+    };
+    if !off {
+        t.armed = true;
+        t.miss = 0;
+        return None;
+    }
+    if !t.armed {
+        return None;
+    }
+    t.miss += 1;
+    if t.miss >= KEEP_NEED {
+        t.armed = false;
+        t.miss = 0;
+        return Some(actual);
+    }
+    None
+}
+
+fn spawn_lock_keeper() {
+    let _ = std::thread::Builder::new().name("clock-keep".into()).spawn(move || {
+        let mut tr: std::collections::HashMap<(String, bool), (Track, crate::hiveoc::ResetLimit, bool)> = Default::default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(KEEP_POLL_S));
+            let g = state().lock().unwrap();
+            let Some(st) = g.as_ref() else { return }; // restored / shut down
+            if st.suspended {
+                continue;
+            }
+            for it in &st.items {
+                for (k, on, mhz) in [(Kind::Core, it.core_locked, it.core_mhz), (Kind::Mem, it.mem_locked, it.mem_mhz)] {
+                    if !on {
+                        continue;
+                    }
+                    let e = tr.entry((it.bus.clone(), matches!(k, Kind::Core))).or_default();
+                    if e.2 {
+                        continue; // stood down
+                    }
+                    let (actual, util) = match k {
+                        Kind::Core => (st.nv.clock_mhz(it.dev), st.nv.util_gpu(it.dev)),
+                        Kind::Mem => (st.nv.mem_clock_mhz(it.dev), st.nv.util_gpu(it.dev)),
+                    };
+                    let (Some(actual), Some(util)) = (actual, util) else { continue };
+                    let Some(now) = keep_judge(&mut e.0, k, mhz, actual, util) else { continue };
+                    let name = if matches!(k, Kind::Core) { "core" } else { "memory" };
+                    if !e.1.allow() {
+                        e.2 = true;
+                        lg(format!(
+                            "GPU bus {}: the {name} clock lock {mhz} MHz was lost again (the card runs at {now} MHz): {} times within an hour already, so the miner stands down on this lock (restart the miner once the OC is settled)",
+                            it.bus,
+                            crate::hiveoc::OC_RESETS_MAX
+                        ));
+                        continue;
+                    }
+                    let r = if matches!(k, Kind::Core) { st.nv.set_core_locked(it.dev, mhz) } else { st.nv.set_mem_locked(it.dev, mhz) };
+                    match r {
+                        Ok(()) => lg(format!("GPU bus {}: the {name} clock lock {mhz} MHz was reset by an OC apply (HiveOS nvidia-oc or another tool; the card ran at {now} MHz under load); set again", it.bus)),
+                        Err(e) => lg(format!("GPU bus {}: the {name} clock lock {mhz} MHz was reset (the card runs at {now} MHz) and cannot be set again ({e:#})", it.bus)),
+                    }
+                    crate::faults::note_foreign_change(&it.bus);
+                }
+            }
+        }
+    });
+}
+
 /// Core lock (MHz) with the best Pearl TMAC/J on RTX 30 (Ampere).  Source: RTX 3070 frequency sweeps (pearl-miner JOURNAL, night 10):
 /// 1530 MHz = -1.9% speed, -5.4% power, +3.6% TMAC/J against 1560; 1515 and below is a plateau.  Only a hint: nothing is set.
 pub const AMPERE_PEARL_LOCK: u32 = 1530;
+
+/// PCI bus id of a device ordinal: from the library of the coin that is mining (set by `set_bus_resolver`: proxgpu / noidgpu), else
+/// from the Pearl library.  A PROX or NOID run must not need pearlgpu just to find its cards' NVML handles (1.7.8).
+static BUS_RESOLVER: std::sync::OnceLock<fn(i32) -> anyhow::Result<String>> = std::sync::OnceLock::new();
+
+pub fn set_bus_resolver(f: fn(i32) -> anyhow::Result<String>) {
+    let _ = BUS_RESOLVER.set(f);
+}
+
+fn bus_id(dev: i32) -> anyhow::Result<String> {
+    match BUS_RESOLVER.get() {
+        Some(f) => f(dev),
+        None => gpu::device_pci_bus_id(dev),
+    }
+}
 
 /// RTX 30 (GA10x, sm_86; a CMP 70HX/90HX is not one) whose core lock is missing or above `AMPERE_PEARL_LOCK`.
 pub(crate) fn ampere_hint_needed(name: &str, cc: Option<(i32, i32)>, lock: Option<u32>) -> bool {
@@ -571,6 +686,30 @@ pub fn resume() {
     }
 }
 
+/// An OC apply was seen on `bus` (its offset was reset): this run's clock locks go back first, before the offset is set again or a
+/// check runs at it (1.7.8; the live test on an RTX 3070: a verified +240 re-checked at the unlocked 2055 MHz gave Xid 43 and was
+/// stepped back).  Sets the locks of the card unconditionally; false = nothing of this run on that card / paused by idle mode.
+pub fn reassert(bus: &str) -> bool {
+    let g = state().lock().unwrap();
+    let Some(st) = g.as_ref().filter(|st| !st.suspended) else { return false };
+    let mut any = false;
+    for it in st.items.iter().filter(|it| it.bus.eq_ignore_ascii_case(bus)) {
+        let r = [
+            it.core_locked.then(|| st.nv.set_core_locked(it.dev, it.core_mhz)),
+            it.mem_locked.then(|| st.nv.set_mem_locked(it.dev, it.mem_mhz)),
+            it.mem_off.then(|| st.nv.set_mem_offset(it.dev, it.mem_off_mhz)),
+        ];
+        any |= r.iter().any(Option::is_some);
+        for e in r.into_iter().flatten().filter_map(|r| r.err()) {
+            lg(format!("GPU bus {}: cannot set the clocks again ({e:#})", it.bus));
+        }
+        if it.core_locked || it.mem_locked {
+            lg(format!("GPU bus {}: the clock locks of this run are set again first (an OC apply was seen), before the offset", it.bus));
+        }
+    }
+    any
+}
+
 /// Restores clock settings when dropped (normal shutdown).  Signal handlers call `restore_all` directly.
 pub struct Guard;
 impl Drop for Guard {
@@ -588,7 +727,7 @@ pub fn expand_i32(raw: &str, n: usize, flag: &str) -> Result<Vec<Option<i32>>> {
     expand(raw, n, flag, |s| s.trim().trim_start_matches('+').parse::<i32>().ok())
 }
 fn expand<T: Copy>(raw: &str, n: usize, flag: &str, parse: impl Fn(&str) -> Option<T>) -> Result<Vec<Option<T>>> {
-    let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
+    let parts = crate::uv::list_parts(raw);
     if parts.len() == 1 {
         let v = parse(parts[0]).ok_or_else(|| anyhow::anyhow!("{flag}: '{}' is not a valid number", parts[0]))?;
         return Ok(vec![Some(v); n]);
@@ -647,6 +786,43 @@ mod tests {
         assert_eq!(mem_lock_verdict(405, &s), Some(810));
         let idle = vec![(810, 0), (810, 0), (810, 5), (810, 20)];
         assert_eq!(mem_lock_verdict(405, &idle), None);
+    }
+
+    #[test]
+    fn lock_keeper_judges_a_lost_core_lock() {
+        let mut t = Track::default();
+        // never seen holding: not chased (the clock above the lock from the start)
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1800, 100), None);
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1800, 100), None);
+        // holds (with the 15 MHz bin noise), then lost: two busy samples in a row
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1500, 100), None);
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1515, 100), None);
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1860, 100), None); // first miss
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1500, 100), None); // a hold in between resets the count
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1860, 100), None);
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1860, 100), Some(1860));
+        // after a re-set it has to hold again before it is judged again
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1860, 100), None);
+        // idle samples and a clock below the lock (power limit) change nothing
+        let mut t = Track::default();
+        assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1500, 100), None);
+        for _ in 0..5 {
+            assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1900, 10), None);
+            assert_eq!(keep_judge(&mut t, Kind::Core, 1500, 1200, 100), None);
+        }
+    }
+
+    #[test]
+    fn lock_keeper_judges_a_lost_memory_lock() {
+        let mut t = Track::default();
+        assert_eq!(keep_judge(&mut t, Kind::Mem, 810, 810, 99), None);
+        assert_eq!(keep_judge(&mut t, Kind::Mem, 810, 7001, 99), None);
+        assert_eq!(keep_judge(&mut t, Kind::Mem, 810, 7001, 99), Some(7001));
+        // a lock the card never honoured (RTX 3070: 405 accepted, runs 810) is not chased
+        let mut t = Track::default();
+        for _ in 0..6 {
+            assert_eq!(keep_judge(&mut t, Kind::Mem, 405, 810, 99), None);
+        }
     }
 
     #[test]
