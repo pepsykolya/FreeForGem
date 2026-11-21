@@ -112,9 +112,10 @@ else
     _ffg_parse "$_l"
     [[ -n $_u1 && $_u1 != "$L_units:$L_mul" ]] && _mixed=1
     [[ -z $_u1 ]] && _u1="$L_units:$L_mul"
-    # per GPU: the line's HiveOS value, and the plain rate per second (hashes / attempts / FW) for a rig of mixed units
+    # per GPU: the line's HiveOS value, and the same rate in kH/s for a rig of mixed units (Rig02 21.11: plain H/s of a Pearl
+    # card, 6.4e13, showed as "1000.0 GH" on the dashboard; in kH/s it shows 63.8 TH like a Pearl-only rig)
     for i in "${!L_ids[@]}"; do
-      _rate[${L_ids[$i]}]="$(awk -v x="${L_ths[$i]}" -v m="$L_mul" -v f="$L_fmt" 'BEGIN{printf f, x*m}') $(awk -v x="${L_ths[$i]}" -v m="$L_mul" -v u="$L_units" 'BEGIN{printf "%.0f", x*m*(u=="khs"?1000:1)}')"
+      _rate[${L_ids[$i]}]="$(awk -v x="${L_ths[$i]}" -v m="$L_mul" -v f="$L_fmt" 'BEGIN{printf f, x*m}') $(awk -v x="${L_ths[$i]}" -v m="$L_mul" -v u="$L_units" 'BEGIN{printf "%.12g", x*m*(u=="khs"?1:0.001)}')"
     done
     (( ${L_up:-0} > _up )) && _up=${L_up:-0}
     _acc=$(( _acc + ${L_acc:-0} )); _rej=$(( _rej + ${L_rej:-0} ))
@@ -129,8 +130,8 @@ else
   # a newer release found by the miner (update.rs, 1.7.5): "1.7.5 0.652 TH/W, need update!!"
   _new=; [[ -f $_ffgp_dir/update-available ]] && _new=$(tr -cd '0-9A-Za-z.' < "$_ffgp_dir/update-available" | head -c 20)
   [[ -n $_new ]] && _ver="$_ver, need update!!"
-  # mixed units (a split of coins with other units): HiveOS takes one hs_units, so every card is given as its plain rate per second
-  _units=$_hu; [[ $_mixed == 1 ]] && _units=hs
+  # mixed units (a split of coins with other units): HiveOS takes one hs_units, so every card is given in kH/s
+  _units=$_hu; [[ $_mixed == 1 ]] && _units=khs
   _hs=(); _b=(); _t=(); _f=()
   # per-GPU values in device order (devices are numbered in PCI bus order, see h-run.sh); a split lists every group's cards
   mapfile -t _order < <(printf '%s\n' "${!_rate[@]}" | sort -n)
