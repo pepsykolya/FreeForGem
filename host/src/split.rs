@@ -52,7 +52,40 @@ pub struct Group {
 }
 
 fn lg(m: impl AsRef<str>) {
-    println!("split: {}", m.as_ref());
+    // coloured by its kind (color.rs) like any line; a light-blue name inside keeps the line's own colour after it
+    let line = keep_outer(crate::color::paint(format!("split: {}", m.as_ref())));
+    crate::conout::emit(false, format!("{line}
+").into_bytes());
+}
+
+/// `ESC[33m ... ESC[96mneb ESC[0m ... ESC[0m` → the outer colour comes back after every inner reset.
+fn keep_outer(line: String) -> String {
+    match line.strip_prefix("[").and_then(|r| r.split_once('m')) {
+        Some((code, body)) if line.ends_with(RESET) && body.len() >= RESET.len() => {
+            let outer = format!("[{code}m");
+            let body = &body[..body.len() - RESET.len()];
+            format!("{outer}{}{RESET}", body.replace(RESET, &format!("{RESET}{outer}")))
+        }
+        _ => line,
+    }
+}
+
+/// Light blue (owner 21.11.2026: «при сплите в логах майнера название монет или алгоритмов нужно выделить голубым цветом»):
+/// the group in front of every line of a group's miner, and the coin names in the supervisor's lines.  No colour when
+/// colours are off (--no-color, NO_COLOR, FFG_COLOR=0); h-stats.sh strips the codes before it parses.
+const BLUE: &str = "[96m";
+const RESET: &str = "[0m";
+
+fn blue(s: &str) -> String {
+    blue_if(crate::color::enabled(), s)
+}
+
+fn blue_if(on: bool, s: &str) -> String {
+    if on { format!("{BLUE}{s}{RESET}") } else { s.to_string() }
+}
+
+fn group_tag(name: &str) -> String {
+    format!("{} ", blue(&format!("[{name}]")))
 }
 
 /// The `--split` value of the command line (`--split X` or `--split=X`); none in a child of a split.
@@ -362,7 +395,9 @@ fn spawn(r: &mut Run) -> Result<()> {
         }
     }
     let mut ch = cmd.spawn().map_err(|e| anyhow!("cannot start {}: {e}", exe.display()))?;
-    let tag = format!("[{}] ", r.g.name);
+    #[cfg(windows)]
+    win_job::adopt(&ch);
+    let tag = group_tag(&r.g.name);
     for (out, err) in [(ch.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), false), (ch.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>), true)] {
         let Some(out) = out else { continue };
         let tag = tag.clone();
@@ -375,19 +410,89 @@ fn spawn(r: &mut Run) -> Result<()> {
                     Ok(0) | Err(_) => return,
                     Ok(_) => {
                         let s = String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string();
-                        if err {
-                            eprintln!("{tag}{s}");
-                        } else {
-                            println!("{tag}{s}");
-                        }
+                        // the child's line coloured by its kind (as any line of this process), the group in light blue in front
+                        crate::conout::emit(err, format!("{tag}{}
+", crate::color::paint(s)).into_bytes());
                     }
                 }
             }
         });
     }
-    lg(format!("group {} started (pid {}): GPU{} on {}", r.g.name, ch.id(), r.g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(",GPU"), coins::spec(r.g.coin).name));
+    lg(format!("group {} started (pid {}): GPU{} on {}", blue(&r.g.name), ch.id(), r.g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(",GPU"), blue(coins::spec(r.g.coin).name)));
     r.child = Some(ch);
     Ok(())
+}
+
+/// Windows: the groups' miners (and their per-GPU engine processes) live in a job object that is killed with the supervisor,
+/// so a supervisor that dies (killed, crashed) never leaves miners behind (two miners on one card at the next start).  A
+/// normal stop (Ctrl-C, console close) reaches every process of the console first; this is only the hard case.
+#[cfg(windows)]
+mod win_job {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Basic {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct Extended {
+        basic: Basic,
+        io: [u64; 6],
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+    const _: () = assert!(std::mem::size_of::<Extended>() == 144);
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(attrs: *mut std::ffi::c_void, name: *const u16) -> *mut std::ffi::c_void;
+        fn SetInformationJobObject(job: *mut std::ffi::c_void, class: i32, info: *const std::ffi::c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
+    }
+
+    struct Job(usize);
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+
+    fn job() -> Option<usize> {
+        JOB.get_or_init(|| unsafe {
+            let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let mut info = Extended::default();
+            info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(h, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, &info as *const Extended as *const _, std::mem::size_of::<Extended>() as u32);
+            // the handle is never closed: it closes when this process ends, and that is the point
+            (ok != 0).then_some(Job(h as usize))
+        })
+        .as_ref()
+        .map(|j| j.0)
+    }
+
+    pub fn adopt(ch: &std::process::Child) {
+        let Some(j) = job() else {
+            super::lg("cannot create the job object: a killed supervisor would leave its group miners running");
+            return;
+        };
+        if unsafe { AssignProcessToJobObject(j as *mut _, ch.as_raw_handle() as *mut _) } == 0 {
+            super::lg(format!("group miner pid {} not in the job object ({}): a killed supervisor would leave it running", ch.id(), std::io::Error::last_os_error()));
+        }
+    }
 }
 
 /// A pause before a group starts again: 10 s, 3 ends within 10 min = 10 min (rule 4a: a crash loop does not hammer the card).
@@ -411,13 +516,13 @@ pub fn run(spec: &str, argv: &[String]) -> Result<()> {
     let count = crate::nvml::Nvml::load().ok().and_then(|n| n.device_count().ok());
     let groups = parse_spec(spec, count)?;
     if groups.len() == 1 {
-        lg(format!("one group only ({}): the same as --algo {} --devices ...", groups[0].name, coins::spec(groups[0].coin).name));
+        lg(format!("one group only ({}): the same as --algo {} --devices ...", blue(&groups[0].name), blue(coins::spec(groups[0].coin).name)));
     }
     if let Some(d) = argv.iter().position(|a| a == "--devices" || a == "--device") {
         bail!("--split sets the cards of every group: leave out {} (found at argument {})", argv[d], d + 1);
     }
     for g in &groups {
-        lg(format!("group {}: GPU{} -> {} ({})", g.name, g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(",GPU"), coins::spec(g.coin).name, coins::spec(g.coin).unit));
+        lg(format!("group {}: GPU{} -> {} ({})", blue(&g.name), g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(",GPU"), blue(coins::spec(g.coin).name), coins::spec(g.coin).unit));
     }
     recover_stale(argv, &groups);
     let stop = Arc::new(AtomicBool::new(false));
@@ -441,14 +546,14 @@ pub fn run(spec: &str, argv: &[String]) -> Result<()> {
                     r.exits.push(Instant::now());
                     let wait = backoff(&mut r.exits);
                     r.start_at = Instant::now() + wait;
-                    lg(format!("group {} ended ({st}); the other groups mine on; it starts again in {} s{}", r.g.name, wait.as_secs(), if wait.as_secs() >= 600 { " (3 ends in 10 min: PAUSED)" } else { "" }));
+                    lg(format!("group {} ended ({st}); the other groups mine on; it starts again in {} s{}", blue(&r.g.name), wait.as_secs(), if wait.as_secs() >= 600 { " (3 ends in 10 min: PAUSED)" } else { "" }));
                 }
             } else if Instant::now() >= r.start_at {
                 if let Err(e) = spawn(r) {
                     r.exits.push(Instant::now());
                     let wait = backoff(&mut r.exits);
                     r.start_at = Instant::now() + wait;
-                    lg(format!("group {} FAILED to start: {e:#}; again in {} s", r.g.name, wait.as_secs()));
+                    lg(format!("group {} FAILED to start: {e:#}; again in {} s", blue(&r.g.name), wait.as_secs()));
                 }
             }
         }
@@ -541,6 +646,15 @@ mod tests {
         let g = parse_spec("ting:0;ting:1", Some(2)).unwrap();
         assert_eq!(child_args(&v("--split ting:0;ting:1"), &g[1], 1), v("--api-port 4069 --algo ting --devices 1"));
         assert_eq!(child_args(&v("--split ting:0;ting:1"), &g[0], 0), v("--algo ting --devices 0"));
+    }
+
+    #[test]
+    fn blue_names_keep_the_line_colour() {
+        assert_eq!(blue_if(true, "[neb]"), "[96m[neb][0m");
+        assert_eq!(blue_if(false, "[neb]"), "[neb]");
+        let l = format!("[33mgroup {} ended, PAUSED[0m", blue_if(true, "neb"));
+        assert_eq!(keep_outer(l), "[33mgroup [96mneb[0m[33m ended, PAUSED[0m");
+        assert_eq!(keep_outer("plain".into()), "plain");
     }
 
     #[test]
