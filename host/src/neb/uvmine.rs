@@ -30,6 +30,9 @@ pub struct Sample {
     pub attempts: u64,
     /// wrong results of this card (CPU check of a hit, canary, audit, model probe, worker errors; monotonic)
     pub bad: u64,
+    /// 1.0.12: crashes of this card's own engine process (a sticky CUDA error, the process died / hung: iso.rs; monotonic, also
+    /// counted in `bad`): a GPU fault like an Xid, not a wrong result (no refining above the step)
+    pub crashes: u64,
     /// results of this card that passed the CPU check (hits and audits; monotonic)
     pub checked: u64,
     /// what the card mines now (dataset slot + model + path); 0 = unknown
@@ -258,6 +261,16 @@ pub fn window(p: &mut impl Probe, at: i32, reference: Option<i32>, secs: f64, c:
             back(&mut |v| p.set_offset(v));
             break;
         }
+        if s.crashes > s0.crashes {
+            // 1.0.12 (PC_AORUS RTX 3080 Ti: "cudaEventSynchronize: unknown error" after the driver's Xid records): the GPU faulted
+            o.fault = true;
+            o.reason = format!(
+                "the engine process of this GPU crashed while mining at {} (a GPU fault: CUDA error / Xid; only this GPU restarts)",
+                if seg_b { format!("{at:+}") } else { format!("{at:+} (seen while back at {:+})", reference.unwrap_or(at)) }
+            );
+            back(&mut |v| p.set_offset(v));
+            break;
+        }
         if s.bad > s0.bad {
             o.reason = format!(
                 "{} wrong result(s) of this GPU while mining at {} (CPU check of a hit / the engine's canary / an audit)",
@@ -453,6 +466,8 @@ pub mod sim {
         pub hang_from: Option<f64>,
         /// the power reading follows a load change this many seconds late (NVML averaging, a memory clock switch)
         pub w_lag: f64,
+        /// 1.0.12: the card's engine process crashes at this time (counted in `crashes` and in `bad`, as the miner counts it)
+        pub crash_at: Option<f64>,
     }
     impl Card {
         pub fn new(power: impl Fn(i32, u64) -> f64 + 'static) -> Card {
@@ -476,6 +491,7 @@ pub mod sim {
                 dead_from: None,
                 hang_from: None,
                 w_lag: 0.0,
+                crash_at: None,
             }
         }
         fn idle_now(&self) -> bool {
@@ -506,7 +522,8 @@ pub mod sim {
                 clk: Some(1650),
                 temp: Some(60),
                 attempts: self.att as u64,
-                bad: self.bad,
+                bad: self.bad + self.crash_at.is_some_and(|c| self.t >= c) as u64,
+                crashes: self.crash_at.is_some_and(|c| self.t >= c) as u64,
                 checked: self.checked,
                 key: k,
                 alive: self.dead_from.map_or(true, |d| self.t < d),
@@ -563,6 +580,23 @@ mod tests {
         // the offset is left at the candidate; the reference was visited in between
         assert_eq!(c.off, 120);
         assert!(c.sets.contains(&90));
+    }
+
+    /// 1.0.12 (PC_AORUS RTX 3080 Ti): +300 was taken, the next paired window (+360 against +300) ends in a crash of the card's
+    /// engine process: a GPU fault (no refining above), not a wrong result; the offset goes back to the reference (+300).
+    #[test]
+    fn a_crash_of_the_engine_process_in_the_window_is_a_fault() {
+        let mut c = Card::new(w3070);
+        c.crash_at = Some(7.0); // in the first A segment (B 5 s busy, then A)
+        let o = window(&mut c, 360, Some(300), 25.0, &Cfg::default());
+        assert!(!o.ok && o.fault && !o.infra, "{o:?}");
+        assert!(o.reason.contains("engine process of this GPU crashed") && o.reason.contains("seen while back at +300"), "{}", o.reason);
+        assert_eq!(c.off, 300);
+        // in a B segment
+        let mut c = Card::new(w3070);
+        c.crash_at = Some(2.0);
+        let o = window(&mut c, 360, Some(300), 25.0, &Cfg::default());
+        assert!(o.fault && o.reason.contains("crashed while mining at +360 (a GPU"), "{}", o.reason);
     }
 
     #[test]

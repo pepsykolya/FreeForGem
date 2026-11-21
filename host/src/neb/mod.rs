@@ -13,6 +13,7 @@
 //! never a second login in the user's session: Suprnova credited the user's shares to the fee login); solo = a fee session to
 //! the FFGN pool during the slot.
 pub mod cli;
+pub mod degraded;
 pub mod fee;
 pub mod gate;
 pub mod gpu;
@@ -214,6 +215,8 @@ pub struct Opts {
     pub lock_mclock: Option<String>,
     pub table_mclock: Option<String>,
     pub moffset: Option<String>,
+    /// 1.0.12: --power-limit / --pl (W, per GPU; powerlimit.rs)
+    pub power_limit: crate::uv::PerGpu,
     pub temp: crate::templimit::Opts,
     pub uv: crate::uv::Opts,
     pub allow_other_dataset: bool,
@@ -558,6 +561,12 @@ fn worker(dev: i32, sh: Arc<Shared>, gs: Arc<GpuStat>) {
                 }
                 fails += 1;
                 let text = format!("{e:#}");
+                // 1.0.12 (nvml.rs): any engine error of this GPU (a CUDA error, its engine process ended / hung): no NVML call for
+                // this GPU from any thread until the driver is done with it and the new context mines (iso.rs starts it earlier,
+                // at the failed call, before the engine process is dropped)
+                if !sh.stop.load(Ordering::Relaxed) {
+                    crate::nvml::gpu_fault(&gs.bus, &text);
+                }
                 // 1.0.11 (iso.rs): a CUDA fault / crash / hang in this GPU's own engine process ends only that process: this GPU
                 // restarts alone (a new engine process), the other GPUs keep mining. It is counted as a crash of this GPU (not as
                 // a wrong result): the tuner and the fault record act on it
@@ -687,6 +696,12 @@ fn iso_crashes(sh: &Shared, gs: &[Arc<GpuStat>], watch: Option<&crate::faults::W
         // another tool's change of the card at the same moment (HiveOS nvidia-oc): not counted (as faults::attribute)
         let foreign = crate::faults::foreign_offset(live.and_then(|l| tune::expected_offset(l, c.dev)), w.offset(k)) || crate::faults::foreign_near(&card.bus);
         let rec = (!foreign).then(|| crate::faults::record_crash(dir, &card.uuid, &card.bus, &card.name, xid.unwrap_or(0), off));
+        if xid == Some(79) {
+            // 1.0.12: the rig goes cautious for auto-uv (uv-xid79.json: no climbing, one GPU at a time; margins for a day)
+            tune::note_xid79(dir, &card.label(), live.is_some());
+            // 1.0.12 (lostgpu.rs): an Xid 79 GPU without attempts since counts as lost (--reboot-on-lost-gpu)
+            crate::lostgpu::note_xid79(c.dev);
+        }
         println!("faults: {}", crate::faults::iso_line(&card.label(), xid, &c.err, others, rec.as_ref()));
     }
 }
@@ -894,6 +909,10 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
         }
         // 1.0.9: the slot's path (engine 0.6.0): the call size follows it (a cheap / table slot screens 10-100x more nonces/s)
         if let Some((p, txt)) = s.path(ds) {
+            // 1.0.12: a GPU that loses its digest table for long (degraded driver after an Xid 79) is reported (degraded.rs)
+            if let Some(l) = degraded::note_path(dev as i32, p == gpu::Path::Table) {
+                println!("{l}");
+            }
             if paths[ds] != Some(p) {
                 let (_, lo, hi) = call_size(Some(p));
                 counts[ds] = counts[ds].clamp(lo, hi);
@@ -951,6 +970,8 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
         let t = Instant::now();
         let out = s.scan(ds, &w.header, start, n, &w.nj.job.target, &w.bound)?;
         last_scan_end = Instant::now();
+        // 1.0.12 (nvml.rs): the GPU mines (the end of its quiet period after a fault waits for this; one atomic load otherwise)
+        crate::nvml::gpu_mining(&gs.bus);
         let dt = t.elapsed().as_secs_f64();
         let done = out.cancelled_done.unwrap_or(n);
         gs.screened.fetch_add(done as u64, Ordering::Relaxed);
@@ -1074,6 +1095,23 @@ fn load_key(ds: usize, model: &[u8; 32], path: &str) -> u64 {
     h.max(1)
 }
 
+/// 1.0.12 (lostgpu.rs): the averaged rate of a lost / DEAD GPU is 0, and the total is the sum of the others: a lost GPU must not
+/// keep its last rate on the HiveOS dashboard for the averaging window (the Watchdog's minimal hashrate rule sees the true total)
+fn zero_lost(mut v: Vec<f64>, lost: &[bool]) -> (Vec<f64>, f64) {
+    for (x, l) in v.iter_mut().zip(lost) {
+        if *l {
+            *x = 0.0;
+        }
+    }
+    let t = v.iter().sum();
+    (v, t)
+}
+
+/// 1.0.12: the --power-limit part of a GPU's stats-line entry (inside its "(W, MA/W)").
+fn pl_tag(w: f64, binds: bool) -> String {
+    format!(", PL {w:.0} W{}", if binds { " capped" } else { "" })
+}
+
 fn now_unix() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as u32
 }
@@ -1111,6 +1149,7 @@ pub fn mine(o: Opts) -> Result<()> {
     let dir = crate::uv::state_dir(&o.uv);
     let buses: Vec<String> = devices.iter().map(|&d| gpu::device_pci_bus_id(d)).collect::<Result<_>>()?;
     o.temp.validate(devices.len())?;
+    o.power_limit.check_count(devices.len(), "--power-limit")?;
     let fee_cfg = fee::config(solo);
     println!(
         "{} {} | NEB ({ALGO_NAME}) | {} | {} | {} device(s) {:?}",
@@ -1127,6 +1166,8 @@ pub fn mine(o: Opts) -> Result<()> {
     if cuda {
         clocks::set_bus_resolver(gpu::device_pci_bus_id);
         clocks::recover(&dir);
+        // 1.0.12: the power limits a killed run left on these GPUs (only theirs: another miner process may own the others)
+        crate::powerlimit::recover(&dir, &buses);
         // D-006: an offset left by a run that was killed is put back at every start, also one without offset options
         crate::offset::recover(&dir);
     }
@@ -1153,6 +1194,11 @@ pub fn mine(o: Opts) -> Result<()> {
         }
     }
     let _clock_guard = if cuda { clocks::apply(&devices, &clock_opts, &dir) } else { None };
+    // 1.0.12: the power limit before auto-uv starts: the tuner measures with it in force
+    if o.power_limit.is_set() && !cuda {
+        println!("power-limit: the CPU backend has no GPU power limit: --power-limit ignored");
+    }
+    let _pl_guard = if cuda { crate::powerlimit::apply(&devices, &buses, &o.power_limit, &dir) } else { None };
     // per GPU: bad, pause, paused, (1.0.10) evaluated attempts, CPU-checked results, load key, alive: shared by the worker and the tuner
     let flags: Vec<tune::Flags> = devices.iter().map(|_| tune::Flags::default()).collect();
     let _off_guard = crate::offset::Guard;
@@ -1412,6 +1458,15 @@ pub fn mine(o: Opts) -> Result<()> {
             opens: AtomicU64::new(0),
             idle_reason: Mutex::new(None),
         });
+        if cuda {
+            // 1.0.12 (nvml.rs): the engine process of `dev` reports its faults by the ordinal; after a GPU's quiet period this
+            // run's clock locks, then its offset are set again (a driver reset may have dropped them)
+            crate::nvml::bind_dev(dev, &gs.bus);
+            crate::nvml::quiet::on_resume(|bus| {
+                crate::clocks::reassert_after_fault(bus);
+                crate::offset::after_fault(bus);
+            });
+        }
         let (sh2, gs2) = (sh.clone(), gs.clone());
         handles.push(std::thread::Builder::new().name(format!("neb-gpu{dev}")).spawn(move || worker(dev, sh2, gs2))?);
         if cuda {
@@ -1450,6 +1505,14 @@ pub fn mine(o: Opts) -> Result<()> {
     // 1.0.4: the rate over the last AVG_WINDOW (per GPU and total): the stats line, the API and HiveOS show it next to the
     // 10 s rate, so a change of the block's dataset (slot 0 Kepler / slot 1 TESS) does not look like a regression
     let mut hist: std::collections::VecDeque<(Instant, Vec<u64>)> = std::collections::VecDeque::new();
+    // 1.0.12 (lostgpu.rs): lost GPUs (Xid 79 / DEAD / gone from NVML) -> 0 on the stats line, the API and HiveOS, and with
+    // --reboot-on-lost-gpu MIN a reboot of the rig; every GPU down for 5 min -> the miner exits (code 3) for HiveOS to take over
+    let mut lostw = if cuda { crate::lostgpu::Watch::for_this_rig(!iso, &dir) } else { crate::lostgpu::Watch::new(0, None, &dir, None) };
+    if let Some(l) = lostw.start_line() {
+        println!("{l}");
+    }
+    let mut all_down = crate::lostgpu::AllDown::default();
+    let mut ever = vec![false; gstats.len()];
     while !stop.load(Ordering::Relaxed) && deadline.map_or(true, |d| start.elapsed() < d) {
         if o.blocks.is_some_and(|b| stats.accepted.load(Ordering::Relaxed) >= b) {
             println!("--blocks {}: reached, stopping", o.blocks.unwrap());
@@ -1487,6 +1550,13 @@ pub fn mine(o: Opts) -> Result<()> {
             }
             for l in &v.lines {
                 println!("faults: {l}");
+            }
+            // 1.0.12: an Xid 79 makes the rig cautious for auto-uv (kept across the restart that follows)
+            if let Some(w) = watch.as_ref() {
+                for (k, _) in v.culprits.iter().filter(|x| x.1 == 79) {
+                    tune::note_xid79(&dir, &w.cards[*k].label(), live.is_some());
+                    crate::lostgpu::note_xid79(w.cards[*k].dev);
+                }
             }
         }
         if !ok_cleared && start.elapsed() >= Duration::from_secs(crate::faults::OK_SECS) {
@@ -1638,28 +1708,68 @@ pub fn mine(o: Opts) -> Result<()> {
         if el >= Duration::from_secs(10) {
             let mut parts = Vec::new();
             let (mut tot, mut tot_w, mut all_w, mut tot_sc) = (0.0, 0.0, true, 0.0);
+            let mono = start.elapsed().as_secs();
+            let mut obs: Vec<crate::lostgpu::Obs> = Vec::with_capacity(gstats.len());
+            let mut failing = 0usize;
+            let work = sh.cur.lock().unwrap().is_some() && im != crate::idle::Mode::Pause;
             for (i, g) in gstats.iter().enumerate() {
                 let n = g.attempts.load(Ordering::Relaxed);
                 let r = (n - last_n[i]) as f64 / el.as_secs_f64();
+                // 1.0.12 (lostgpu.rs): is this GPU lost (DEAD, an Xid 79 and no attempts since, NVML no longer sees it)?
+                let (alive, moved) = (g.alive.load(Ordering::Relaxed), n != last_n[i]);
+                ever[i] |= moved;
+                let nvml_lost = alive && !moved && power.as_ref().is_some_and(|(nv, d)| d[i].is_some_and(|h| nv.gpu_lost(h, &g.bus)));
+                let why = crate::lostgpu::lost_why(alive, moved, crate::lostgpu::xid79_seen(g.dev), nvml_lost);
+                // down or failing: lost, or no attempts although it has work and is not held on purpose (an auto-uv check, a
+                // temperature stop) or by a reason of its own that a restart does not cure (a job this dataset file cannot mine);
+                // a GPU that has not mined yet in this run gets 10 min (the first engine start, a JIT compile)
+                let held = g.pause.load(Ordering::Relaxed) || g.paused.load(Ordering::Relaxed) || crate::templimit::duty(g.dev) == Some(0) || g.idle_reason.lock().unwrap().is_some();
+                if why.is_some() || (work && !held && !moved && (ever[i] || mono >= crate::lostgpu::START_GUARD_SECS)) {
+                    failing += 1;
+                }
+                obs.push(crate::lostgpu::Obs { dev: g.dev, bus: crate::uv::short_bus(&g.bus), why: why.map(str::to_string) });
                 last_n[i] = n;
                 tot += r;
                 let sc = g.screened.load(Ordering::Relaxed);
                 tot_sc += (sc - last_sc[i]) as f64 / el.as_secs_f64();
                 last_sc[i] = sc;
                 let w = power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h)));
+                // 1.0.12: this run's --power-limit of the GPU (", PL 140 W"; "capped" while it binds under load)
+                let pl = crate::powerlimit::info(&g.bus).map_or(String::new(), |(p, b)| pl_tag(p, b));
                 let pw = match w {
                     Some(w) if w > 0.0 => {
                         tot_w += w;
-                        format!(" ({:.0} W, {:.4} MA/W)", w, r / 1e6 / w)
+                        format!(" ({:.0} W{pl}, {:.4} MA/W)", w, r / 1e6 / w)
                     }
                     _ => {
                         all_w = false;
-                        String::new()
+                        if pl.is_empty() { String::new() } else { format!(" ({})", pl.trim_start_matches(", ")) }
                     }
                 };
-                parts.push(format!("GPU{} {:.3}{}{}{}{}", g.dev, r / 1e6, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, crate::status::tag(g.dev), crate::templimit::tag(g.dev)));
+                let state = if !alive { " DEAD" } else if obs[i].why.is_some() { " LOST" } else { "" };
+                parts.push(format!("GPU{} {:.3}{}{}{}{}", g.dev, r / 1e6, pw, state, crate::status::tag(g.dev), crate::templimit::tag(g.dev)));
             }
             rate = tot;
+            let lost_now: Vec<bool> = obs.iter().map(|o| o.why.is_some()).collect();
+            lostw.tick(
+                &obs,
+                mono,
+                now_unix() as u64,
+                &mut |l| {
+                    println!("{l}");
+                    crate::conout::flush(); // in the log before the reboot
+                },
+                &mut |c| crate::lostgpu::run_os(c),
+            );
+            crate::lostgpu::publish_tags(lostw.tags(mono));
+            if let Some(secs) = all_down.tick(failing, gstats.len(), mono) {
+                let e = crate::lostgpu::all_down_exit(gstats.len(), secs);
+                stop.store(true, Ordering::SeqCst);
+                crate::offset::restore_all();
+                clocks::restore_all();
+                eprintln!("ERROR: {}", e.msg);
+                return Err(e.into());
+            }
             let now_n: Vec<u64> = last_n.clone();
             hist.push_back((Instant::now(), now_n.clone()));
             while hist.len() > 2 && hist.front().is_some_and(|(t, _)| t.elapsed() > AVG_WINDOW) {
@@ -1670,8 +1780,7 @@ pub fn mine(o: Opts) -> Result<()> {
                 Some((t0, n0)) if hist.len() >= 2 && t0.elapsed() >= Duration::from_secs(5) => {
                     let secs = t0.elapsed().as_secs_f64();
                     let v: Vec<f64> = now_n.iter().zip(n0).map(|(a, b)| a.saturating_sub(*b) as f64 / secs).collect();
-                    let t = v.iter().sum();
-                    Some((v, t))
+                    Some(zero_lost(v, &lost_now))
                 }
                 _ => None,
             };
@@ -1767,7 +1876,9 @@ pub fn mine(o: Opts) -> Result<()> {
                     _ => String::new(),
                 },
                 if unheld.is_empty() { String::new() } else { format!("  [LOCK NOT HELD: {}]", unheld.join(",")) }
-                    + &tune::tags().iter().map(|w| format!("  [AUTO-UV {w}]")).collect::<String>(),
+                    + &tune::tags().iter().map(|w| format!("  [AUTO-UV {w}]")).collect::<String>()
+                    + &degraded::tags().iter().map(|w| format!("  [{w}]")).collect::<String>()
+                    + &lostw.stats_tags(mono).iter().map(|w| format!("  [{w}]")).collect::<String>(),
                 mem_part
             );
             if let Some(a) = &api {
@@ -1789,7 +1900,7 @@ pub fn mine(o: Opts) -> Result<()> {
                         blocks_sub: if solo { ld(&stats.submitted) } else { ld(&sh.blocks) },
                         blocks_acc: if solo { ld(&stats.accepted) } else { 0 },
                         bad,
-                        gpus: gstats.iter().enumerate().map(|(i, g)| api::Gpu { dev: g.dev, name: g.name.clone(), bus: g.bus.clone(), attempts: g.attempts.load(Ordering::Relaxed), screened: g.screened.load(Ordering::Relaxed), alive: g.alive.load(Ordering::Relaxed), bad: g.bad.load(Ordering::Relaxed) + g.crashes.load(Ordering::Relaxed), power: power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h))), lock_not_held: crate::clocks::not_held(&g.bus), rate_avg: avg.as_ref().and_then(|a| a.0.get(i).copied()), mem_stuck: clocks::mem_stuck(&g.bus), kep1_kernel: g.kep1.lock().unwrap().clone(), model_gap_ms: Some(g.gap_ms.load(Ordering::Relaxed)).filter(|&x| x > 0) }).collect(),
+                        gpus: gstats.iter().enumerate().map(|(i, g)| api::Gpu { dev: g.dev, name: g.name.clone(), bus: g.bus.clone(), attempts: g.attempts.load(Ordering::Relaxed), screened: g.screened.load(Ordering::Relaxed), alive: g.alive.load(Ordering::Relaxed), lost: lost_now[i], bad: g.bad.load(Ordering::Relaxed) + g.crashes.load(Ordering::Relaxed), power: power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_w(h))), lock_not_held: crate::clocks::not_held(&g.bus), rate_avg: avg.as_ref().and_then(|a| a.0.get(i).copied()), mem_stuck: clocks::mem_stuck(&g.bus), kep1_kernel: g.kep1.lock().unwrap().clone(), model_gap_ms: Some(g.gap_ms.load(Ordering::Relaxed)).filter(|&x| x > 0), power_limit: power.as_ref().and_then(|(nv, d)| d[i].and_then(|h| nv.power_limit_w(h))), power_limit_ours: crate::powerlimit::info(&g.bus) }).collect(),
                     },
                 );
             }
@@ -1937,6 +2048,21 @@ mod tests {
         for u in ["pearl-eu2.luckypool.io:3360", "stratum+ssl://pool.proximamine.com:3334", "stratum+tcp://nebula.example:1", "10.0.0.5:3442", "cmfd+tls://1.2.3.4:5?pin=ab", "stratum+tcp://prl.suprnova.cc:7000"] {
             assert!(!looks_like_neb_pool(u), "{u}");
         }
+    }
+
+    #[test]
+    fn power_limit_tag_of_the_stats_line() {
+        // inside the GPU's "(W, MA/W)": h-stats.sh still reads "GPUn RATE" and the first MA/W after "total"
+        assert_eq!(super::pl_tag(140.0, false), ", PL 140 W");
+        assert_eq!(super::pl_tag(115.0, true), ", PL 115 W capped");
+    }
+
+    /// 1.0.12 (lostgpu.rs): a lost GPU's 5 min average is 0 on the stats line (h-stats.sh shows it), the total is the true one
+    #[test]
+    fn a_lost_gpu_averages_zero_and_the_total_is_the_true_one() {
+        let (v, t) = super::zero_lost(vec![10e6, 7e6, 9e6], &[false, true, false]);
+        assert_eq!((v, t), (vec![10e6, 0.0, 9e6], 19e6));
+        assert_eq!(super::zero_lost(vec![1.0, 2.0], &[false, false]).1, 3.0);
     }
 
     #[test]

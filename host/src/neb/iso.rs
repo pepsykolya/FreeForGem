@@ -492,6 +492,16 @@ impl Remote {
             self.r.set_read_timeout(Some(timeout))?;
             read_frame(&mut self.r)
         });
+        // 1.0.12 (nvml.rs): a failed call is a fault of this GPU: its NVML quiet period starts now, before the engine process is
+        // stopped / dropped (its end is when the driver resets the GPU: the miner crashed in nvml.dll there, PC_AORUS 3080 Ti)
+        if !matches!(got, Ok((R_OK, _))) {
+            let why = match &got {
+                Ok((R_ERR, b)) => String::from_utf8_lossy(b).into_owned(),
+                Ok((x, _)) => format!("an unknown reply {x} of its engine process"),
+                Err(e) => format!("its engine process during {what}: {e}"),
+            };
+            crate::nvml::fault_dev(self.dev, &why);
+        }
         match got {
             Ok((R_OK, b)) => {
                 let mut d = Dec::new(&b);

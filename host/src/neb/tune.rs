@@ -29,6 +29,187 @@ const CHECK_K: u32 = 12;
 const CHECK_COUNT: u32 = 1 << 22;
 const DEF_MAX: i32 = 495;
 const DISABLE_SECS: u64 = 24 * 3600;
+/// 1.0.12: `Entry::pause_why` of a pause after a real verdict (every offset down to 0 failed on this GPU's own checks)
+const PAUSE_VERDICT: &str = "verdict";
+
+/// 1.0.12: a saved 24 h pause counts only when it was written after a verdict (see `Entry::pause_why`)
+fn pause_honored(e: &Entry) -> bool {
+    e.pause_why == PAUSE_VERDICT
+}
+
+/// 1.0.12 (the 12x RTX 2060 SUPER rig, LAS-rig5.md, 21.11.2026): after a reboot auto-uv resumed GPU1/2/3 straight at their saved
+/// +375, they crashed there again and on the steps below (+345, +330, +315: an Xid 31 storm), GPU1 then fell off the bus (Xid 79)
+/// and GPU2 could not reopen its device. A "confirmed" offset of a card that crashed within the last day is not trusted after a
+/// restart: a card with a crash record (`Entry::crash_log`) younger than RECENT_CRASH_SECS, or any card of a rig that saw an Xid 79
+/// that recently, resumes at a margin below its saved offset (`resume_margin`) and climbs back from there under the usual rules,
+/// never above the saved offset. One day: the crashes of that rig came within hours of each other, and a card that ran a day
+/// without a crash gets its saved offset back at once.
+pub const RECENT_CRASH_SECS: u64 = 24 * 3600;
+/// 1.0.12: an offset that mined this long without a fault of its card is the card's "stable" offset (`Entry::stable`): the resume
+/// margin after a crash. One hour: on the 2060S rig the "confirmed" +375 crashed 11-50 min after the start.
+pub const STABLE_SECS: u64 = 3600;
+/// 1.0.12: crash records kept per profile (the newest; older than RECENT_CRASH_SECS are dropped anyway)
+const CRASH_LOG_MAX: usize = 16;
+/// 1.0.12: two records of the same offset this close are one crash (the crash record of the main loop and the tuner's own)
+const CRASH_SAME_SECS: u64 = 120;
+/// 1.0.12: after an Xid 79 (a GPU fell off the bus) the whole rig is cautious this long (uv-xid79.json, kept across restarts):
+/// no climbing, one GPU at a time for any tuning or re-check. Six hours: it covers the reboot and the first hours after it (the
+/// 2060S rig crashed 11 min to 1 h after its reboot), and a rig with a fixed riser still tunes again the same day.
+pub const XID79_CAUTIOUS_SECS: u64 = 6 * 3600;
+/// 1.0.12: the default auto-uv climb cap of GeForce Turing (CUDA CC 7.5: RTX 20xx / GTX 16xx; not CMP, see `default_max`) when
+/// --uv-max is not given. The 12x RTX 2060 SUPER rig (LAS-rig5.md): the cards that stayed stable mine at +75..+255, the crashes
+/// came from +165 up to +450 (+165, +270, +315 x3, +345, +375 x3, +450), and the cards above +240 saved only a few W against
+/// +255. +240 keeps every stable result of that rig but one step (+255 -> +240) and cuts off the zone of all its crashes but
+/// the +165 ones. The data is one rig of one model (12 cards on gen1/gen2 x1 risers): a default, not a limit; --uv-max N
+/// overrides it.
+pub const TURING_UV_MAX: i32 = 240;
+
+/// 1.0.12: the default --uv-max of a card: `TURING_UV_MAX` for GeForce Turing (CC 7.5, not CMP: the CMP 50HX of Rig05 run
+/// healthy above it), else DEF_MAX; and where it comes from (for the log)
+fn default_max(cc: Option<(i32, i32)>, name: &str) -> (i32, &'static str) {
+    if cc == Some((7, 5)) && !name.contains("CMP") {
+        (TURING_UV_MAX, "default for Turing CC 7.5 (RTX 20xx / GTX 16xx); --uv-max overrides it")
+    } else {
+        (DEF_MAX, "default")
+    }
+}
+
+/// 1.0.12: the climb cap of a card: --uv-max (`given`) when set, else `default_max`; never above HARD_CAP nor the driver's
+/// range `hi`. Returns the cap and where it comes from.
+fn card_max(given: Option<i32>, cc: Option<(i32, i32)>, name: &str, hi: i32) -> (i32, &'static str) {
+    let (def, src) = default_max(cc, name);
+    let (v, src) = match given {
+        Some(v) => (v, "--uv-max"),
+        None => (def, src),
+    };
+    (v.min(uv::HARD_CAP).min(hi), src)
+}
+
+/// 1.0.12: GPUs tuned at a time: one while the rig is cautious after an Xid 79
+fn par_limit(limit: usize, cautious: bool) -> usize {
+    if cautious { 1 } else { limit.max(1) }
+}
+
+/// 1.0.12: the cap of a climb from `at`: no room above `at` while the rig is cautious after an Xid 79
+fn climb_cap(cap: i32, at: i32, cautious: bool) -> i32 {
+    if cautious { cap.min(at) } else { cap }
+}
+
+/// 1.0.12: the crash records of a profile younger than RECENT_CRASH_SECS (unix s, offset)
+fn recent_crashes(e: &Entry, now: u64) -> Vec<(u64, i32)> {
+    e.crash_log.iter().copied().filter(|&(t, _)| now.saturating_sub(t) < RECENT_CRASH_SECS).collect()
+}
+
+/// 1.0.12: a crash / failure of this card at offset `at` (unix s `t`) into its profile: the stable offset goes when it is not
+/// below the crash; records older than RECENT_CRASH_SECS go, at most CRASH_LOG_MAX are kept
+fn note_crash(e: &mut Entry, t: u64, at: i32) {
+    if !e.crash_log.iter().any(|&(x, a)| a == at && x.abs_diff(t) <= CRASH_SAME_SECS) {
+        e.crash_log.push((t, at));
+    }
+    let newest = e.crash_log.iter().map(|x| x.0).max().unwrap_or(t);
+    e.crash_log.retain(|&(x, _)| newest.saturating_sub(x) < RECENT_CRASH_SECS);
+    e.crash_log.sort_unstable();
+    let n = e.crash_log.len();
+    if n > CRASH_LOG_MAX {
+        e.crash_log.drain(..n - CRASH_LOG_MAX);
+    }
+    if e.stable.is_some_and(|s| s >= at) {
+        e.stable = None;
+        e.stable_at = 0;
+    }
+}
+
+/// 1.0.12: a profile written anew (a climb, a resume) keeps the crash history and the stable offset of the one it replaces
+fn merge_history(new: &mut Entry, old: &Entry) {
+    for &(t, at) in &old.crash_log {
+        note_crash(new, t, at);
+    }
+    if new.stable.is_none() {
+        if let Some(s) = old.stable.filter(|&s| !new.crash_log.iter().any(|&(t, a)| a <= s && t >= old.stable_at)) {
+            new.stable = Some(s);
+            new.stable_at = old.stable_at;
+        }
+    }
+}
+
+/// 1.0.12: where a card with recent crashes resumes instead of its saved offset `saved`: the offset that mined STABLE_SECS without
+/// a fault (`stable`, when it is below `saved` and not below the base `floor`), else the base plus half the gap to `saved`, on the
+/// step grid of the base. None: no margin (nothing above the base, or the stable offset is the saved one).
+fn resume_margin(saved: i32, floor: i32, step: i32, stable: Option<i32>) -> Option<(i32, String)> {
+    if saved <= floor {
+        return None;
+    }
+    if let Some(s) = stable.filter(|&s| s >= floor) {
+        return (s < saved).then(|| (s, format!("the last offset that mined {} h without a fault", STABLE_SECS / 3600)));
+    }
+    let step = step.max(1);
+    let at = floor + (saved - floor) / 2 / step * step;
+    (at < saved).then(|| (at, format!("half way from the base {} to the saved {}", signed(floor), signed(saved))))
+}
+
+/// 1.0.12: the rig's Xid 79 (uv-xid79.json next to uv.json): when, and which GPU
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Xid79 {
+    pub at: u64,
+    pub gpu: String,
+}
+
+impl Xid79 {
+    fn file(dir: &std::path::Path) -> std::path::PathBuf {
+        dir.join("uv-xid79.json")
+    }
+    pub fn load(dir: &std::path::Path) -> Option<Xid79> {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(Self::file(dir)).ok()?).ok()?;
+        Some(Xid79 { at: v["at"].as_u64()?, gpu: v["gpu"].as_str().unwrap_or("a GPU").into() })
+    }
+    fn save(&self, dir: &std::path::Path) {
+        let _ = crate::uv::write_atomic(&Self::file(dir), &json!({"at": self.at, "gpu": self.gpu}).to_string());
+    }
+    pub fn reset(dir: &std::path::Path) -> bool {
+        std::fs::remove_file(Self::file(dir)).is_ok()
+    }
+    /// no climbing, one GPU at a time
+    pub fn cautious(&self, now: u64) -> bool {
+        self.at > 0 && now < self.at + XID79_CAUTIOUS_SECS
+    }
+    /// every GPU of the rig resumes below its saved offset
+    pub fn recent(&self, now: u64) -> bool {
+        self.at > 0 && now < self.at + RECENT_CRASH_SECS
+    }
+}
+
+/// 1.0.12: the rig's last Xid 79 known to this process (unix s, 0 = none): uv-xid79.json at the start, then `note_xid79`
+static XID79_AT: AtomicU64 = AtomicU64::new(0);
+/// 1.0.12: re-checks running now (one at a time while the rig is cautious)
+static RECHECKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn rig_xid79() -> Xid79 {
+    Xid79 { at: XID79_AT.load(Ordering::Relaxed), gpu: String::new() }
+}
+
+/// 1.0.12: the rig is cautious after an Xid 79 (XID79_CAUTIOUS_SECS): no climbing, one GPU at a time
+pub fn rig_cautious(now: u64) -> bool {
+    rig_xid79().cautious(now)
+}
+
+fn cautious_line(gpu: &str, left_s: u64) -> String {
+    format!(
+        "CAUTIOUS after the Xid 79 of {gpu} (it fell off the bus: check its riser / power cable; the rig needs a reboot): for {:.1} h more auto-uv climbs nothing and tunes / re-checks one GPU at a time; for {} h after the Xid every GPU resumes below its saved offset",
+        left_s as f64 / 3600.0,
+        RECENT_CRASH_SECS / 3600
+    )
+}
+
+/// 1.0.12: an Xid 79 of `label` (neb/mod.rs fault lines, a tuning step): the rig is cautious for XID79_CAUTIOUS_SECS, kept in
+/// uv-xid79.json for the next starts; `tuning`: auto-uv runs in this process (the warning on the stats line and in the API)
+pub fn note_xid79(dir: &std::path::Path, label: &str, tuning: bool) {
+    let now = uv::now();
+    Xid79 { at: now, gpu: label.to_string() }.save(dir);
+    XID79_AT.store(now, Ordering::Relaxed);
+    if tuning {
+        warn_set("CAUTIOUS", cautious_line(label, XID79_CAUTIOUS_SECS));
+    }
+}
 /// NEB check lengths (as PROX: 30 / 15 / 60, quick 15; the defaults of uv::Opts are Pearl's 180 / 30 / 120 s)
 const WARMUP: u32 = 30;
 /// 1.0.5: 25 s (was 15): the power is averaged only after the first 10 s of load (a steady clock and temperature); RTX 2060
@@ -272,6 +453,13 @@ fn warn(m: String) {
     eprintln!("WARNING auto-uv: {m}");
     UV_WARN.lock().unwrap().push(m);
 }
+/// 1.0.12: a warning of the kind `prefix` (it starts with it) replaces the earlier one of that kind
+fn warn_set(prefix: &str, m: String) {
+    eprintln!("WARNING auto-uv: {m}");
+    let mut w = UV_WARN.lock().unwrap();
+    w.retain(|x| !x.starts_with(prefix));
+    w.push(m);
+}
 pub fn warnings() -> Vec<String> {
     UV_WARN.lock().unwrap().clone()
 }
@@ -282,6 +470,9 @@ pub fn tags() -> Vec<String> {
         .map(|w| {
             if w.starts_with("PAUSED") {
                 "PAUSED".to_string()
+            } else if w.starts_with("CAUTIOUS") {
+                // 1.0.12: the rig after an Xid 79
+                "CAUTIOUS Xid 79".to_string()
             } else if w.contains("auto-uv OFF") {
                 format!("{} OFF 24h", w.split_whitespace().next().unwrap_or("GPU"))
             } else {
@@ -470,6 +661,16 @@ struct Entry {
     verified_at: u64,
     disabled_until: u64,
     stepped_back: u32,
+    /// 1.0.12: why the profile is paused ("verdict": every offset from the start down to 0 failed on this GPU's own checks).
+    /// A pause without it (written before 1.0.12) is not honored: 1.0.10 / 1.0.11 also paused a GPU for 24 h at +0 when its base
+    /// check had no verdict (its worker stopped after ANOTHER GPU's fault; Rig01 21.11.2026, FIELD111.md anomaly 1).
+    pause_why: String,
+    /// 1.0.12: the recent crashes / failures of this card at an offset it mined at or resumed at (unix s, offset; at most
+    /// CRASH_LOG_MAX, none older than RECENT_CRASH_SECS); "crash_log" in uv.json, absent in profiles written before 1.0.12
+    crash_log: Vec<(u64, i32)>,
+    /// 1.0.12: the last offset that mined STABLE_SECS without a fault of this card, and when ("stable_offset", "stable_at")
+    stable: Option<i32>,
+    stable_at: u64,
 }
 
 impl Profile for Entry {
@@ -498,13 +699,23 @@ impl Profile for Entry {
             verified_at: u("verified_at"),
             disabled_until: u("disabled_until"),
             stepped_back: u("stepped_back_in_mining") as u32,
+            pause_why: s("pause_why"),
+            crash_log: v["crash_log"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| Some((x["t"].as_u64()?, x["at"].as_i64()? as i32))).collect())
+                .unwrap_or_default(),
+            stable: v["stable_offset"].as_i64().map(|x| x as i32),
+            stable_at: u("stable_at"),
         })
     }
     fn to_json(&self) -> Value {
         json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "core_lock": self.core_lock, "clk_mhz": self.clk,
                "orig_offset": self.orig, "base_offset": self.base, "offset": self.offset, "step": self.step, "edge": self.edge,
                "watts_base": self.w_base, "watts": self.w, "ghs": self.ghs, "refs": self.refs, "tested_at": self.tested_at,
-               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "stepped_back_in_mining": self.stepped_back})
+               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "stepped_back_in_mining": self.stepped_back,
+               "pause_why": self.pause_why,
+               "crash_log": self.crash_log.iter().map(|&(t, at)| json!({"t": t, "at": at})).collect::<Vec<_>>(),
+               "stable_offset": self.stable, "stable_at": self.stable_at})
     }
     fn same_clocks(&self, o: &Entry) -> bool {
         self.driver == o.driver
@@ -735,6 +946,42 @@ fn plan(crash: Option<profiles::Crash>, prof: Option<SavedProf>, floor: i32, cap
     }
 }
 
+/// 1.0.12: a resume below the saved offset (LAS-rig5.md): check at `at`, then climb back up to `ceiling` at most.
+#[derive(Debug, PartialEq)]
+struct Margin {
+    at: i32,
+    saved: i32,
+    ceiling: i32,
+    why: String,
+}
+
+/// 1.0.12: the margin of a start that would resume at a saved offset (`Plan::Resume` of a saved profile, nothing failed in the
+/// previous run; `Plan::Continue`) when the profile `e` has crashes younger than RECENT_CRASH_SECS or the rig had an Xid 79 that
+/// recently (`rig79`). A start after a failure of the previous run keeps the owner's rule (`plan`: failed - 2 steps, never above
+/// the last confirmed offset) and gets no margin on top. The climb from the margin goes up to the saved offset at most (Continue:
+/// up to `cap`, as before).
+fn margin_plan(p: &Plan, e: &Entry, floor: i32, step: i32, cap: i32, now: u64, rig79: bool) -> Option<Margin> {
+    let (saved, ceiling) = match p {
+        Plan::Resume { failed: None, ladder, .. } => (*ladder.first()?, *ladder.first()?),
+        Plan::Continue { from } => (*from, cap),
+        _ => return None,
+    };
+    let recent = recent_crashes(e, now);
+    let cause = match recent.iter().max() {
+        Some(&(t, at)) => format!(
+            "{} crash(es) / failure(s) of this GPU in the last {} h (the latest at {}, {:.1} h ago)",
+            recent.len(),
+            RECENT_CRASH_SECS / 3600,
+            signed(at),
+            now.saturating_sub(t) as f64 / 3600.0
+        ),
+        None if rig79 => format!("an Xid 79 (a GPU fell off the bus) on this rig in the last {} h", RECENT_CRASH_SECS / 3600),
+        None => return None,
+    };
+    let (at, how) = resume_margin(saved, floor, step, e.stable)?;
+    Some(Margin { at, saved, ceiling: ceiling.max(at), why: format!("{cause}: not straight at the saved {}, at {how}", signed(saved)) })
+}
+
 /// A saved profile is usable unless its offset clearly RAISED the check power against its base (1.0.2 on a 2060 SUPER: +0 -> +60,
 /// 64.4 W -> 87.8 W).  1.0.4: no minimum saving (1.0.3 asked for 3 %); unknown power: usable, as before.
 fn profile_lowered(e: &Entry) -> bool {
@@ -794,6 +1041,9 @@ struct Card {
     mining: AtomicBool,
     /// 1.0.10: a check found no mining load for a long time (no work): not a verdict, nothing disabled
     no_load: AtomicBool,
+    /// 1.0.12: the last base check ended without a verdict (`infra`: its worker stopped after a fault, interrupted, the lock
+    /// does not hold): give_up then pauses nothing
+    no_verdict: AtomicBool,
     /// 1.0.10 (live test): the last window on the mining load ended with a fault / wrong result: the next one first waits until
     /// the card mines cleanly again (uvmine::wait_healthy); the faulting offset and when (unix s), for the crash record
     recover: AtomicBool,
@@ -803,6 +1053,12 @@ struct Card {
     rec_att: AtomicU64,
     rec_since: AtomicU64,
     rec_t: AtomicU64,
+    /// 1.0.12: where `cap` comes from (--uv-max or the card's default, `default_max`)
+    cap_src: &'static str,
+    /// 1.0.12: the offset mined since (unix s) without a fault seen by `tick`, and whether it was saved as the stable offset
+    stable_cur: AtomicI32,
+    stable_since: AtomicU64,
+    stable_saved: AtomicBool,
 }
 
 impl Card {
@@ -849,7 +1105,6 @@ pub struct Params {
     pub confirm: u32,
     /// 1.0.10: the coarse step on the mining load (--uv-coarse, else MINING_COARSE_STEPS fine steps)
     pub coarse_mining: i32,
-    pub max: uv::PerGpu,
     pub min: uv::PerGpu,
     pub reset: bool,
 }
@@ -868,7 +1123,6 @@ impl Params {
             step_secs: pick(o.step_secs, d.step_secs, STEP_SECS),
             confirm: pick(o.confirm_secs, d.confirm_secs, CONFIRM),
             coarse_mining: if o.coarse.is_some() { o.coarse_step() } else { (MINING_COARSE_STEPS * o.step).max(o.step) },
-            max: o.max_offset.clone(),
             min: o.min_offset.clone(),
             reset: o.reset,
         }
@@ -918,6 +1172,9 @@ impl Live {
         // 1.0.5: rig-level trouble for --uv-parallel (an Xid of the tuned card at a high offset is the edge, not the rig's)
         if r.fault && (r.reason.contains("Xid 79") || r.reason.starts_with("timeout")) {
             RIG_TROUBLE.fetch_add(1, Ordering::Relaxed);
+        }
+        if r.fault && r.reason.contains("Xid 79") {
+            note_xid79(&self.db.dir, &c.label(), true);
         }
         if r.infra {
             return self.held_after(c, r);
@@ -995,10 +1252,44 @@ impl Live {
     }
 
     fn check_once(&self, c: &Card, at: i32, secs: u32, refs: &str, reference: Option<i32>) -> Res {
-        if c.mining.load(Ordering::Relaxed) {
-            return self.check_mining(c, at, secs, reference);
+        // 1.0.12 (nvml.rs): no check while the GPU is in its NVML quiet period after a fault (no power / clock readings: a window
+        // there would judge a step on no power at all, and its offset sets are deferred): wait for its end and the resume hooks
+        if let Err(why) = self.wait_nvml(c) {
+            lg(format!("{} {why}: no verdict on {}", c.label(), signed(at)));
+            return Res { infra: true, reason: format!("{why}: no verdict on {}", signed(at)), ..Default::default() };
         }
-        self.check_child(c, at, secs, refs)
+        let faults = crate::nvml::quiet::faults(&c.r.bus);
+        let mut r = if c.mining.load(Ordering::Relaxed) { self.check_mining(c, at, secs, reference) } else { self.check_child(c, at, secs, refs) };
+        // a fault of this GPU during the check that the check itself did not see (its NVML readings stopped): no verdict
+        if r.ok && crate::nvml::quiet::faults(&c.r.bus) != faults {
+            r.ok = false;
+            r.infra = true;
+            r.reason = format!("a fault of this GPU during the check (its NVML calls paused): no verdict on {}", signed(at));
+            lg(format!("{} {}", c.label(), r.reason));
+        }
+        r
+    }
+
+    /// 1.0.12: waits while the GPU's NVML calls pause after a fault (nvml.rs quiet period) and its clocks / offset are set again.
+    fn wait_nvml(&self, c: &Card) -> Result<(), String> {
+        if !crate::nvml::quiet::settling(&c.r.bus) {
+            return Ok(());
+        }
+        let t = Instant::now();
+        let max = crate::nvml::quiet::QUIET_MAX + Duration::from_secs(15);
+        lg(format!("{} waits for the end of its NVML quiet period after a fault (no power readings now)", c.label()));
+        while crate::nvml::quiet::settling(&c.r.bus) {
+            if self.stopped() {
+                return Err("interrupted".into());
+            }
+            if t.elapsed() > max {
+                return Err(format!("the NVML calls of this GPU did not resume within {} s of its fault", max.as_secs()));
+            }
+            // a call ends the quiet period when it is due (the fresh handle, the resume hooks)
+            let _ = self.nv.temp_c(c.nv);
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        Ok(())
     }
 
     /// 1.0.10: a check on the card's own mining load (uvmine::window): it mines and counts all the time.
@@ -1295,12 +1586,14 @@ impl Live {
 
     /// Base check at `base` (falling 30 MHz at a time to 0 like Pearl when it fails); Some((base, result)) or None (nothing passes).
     fn base_check(&self, c: &Card, base: i32) -> Option<(i32, Res)> {
+        c.no_verdict.store(false, Ordering::Relaxed);
         let r = self.check(c, base, self.base_secs(c), "");
         lg(self.line(c, "base", base, &r));
         if r.ok {
             return Some((base, r));
         }
         if r.infra {
+            c.no_verdict.store(true, Ordering::Relaxed);
             return None;
         }
         // 1.7.8 (1.7.7 plan, point 4): a failing start is checked once more before the search goes lower (one failure can be a
@@ -1313,6 +1606,7 @@ impl Live {
                 return Some((base, r));
             }
             if r.infra {
+                c.no_verdict.store(true, Ordering::Relaxed);
                 return None;
             }
         }
@@ -1323,6 +1617,7 @@ impl Live {
                 return Some((b, r));
             }
             if r.infra {
+                c.no_verdict.store(true, Ordering::Relaxed);
                 return None;
             }
         }
@@ -1359,6 +1654,11 @@ impl Live {
             } else if cr.failed() {
                 lg(format!("{} the previous run crashed at {}: tuning up to {}", c.label(), signed(cr.at), signed(cap)));
             }
+        }
+        // 1.0.12: no climbing while the rig is cautious after an Xid 79: the card mines at `at` (saved below)
+        if climb_cap(cap, at, rig_cautious(uv::now())) < cap {
+            lg(format!("{} the rig is cautious after an Xid 79: no climb above {} for now (it goes on at a start after the caution)", c.label(), signed(at)));
+            cap = at;
         }
         let refs = ar.refs.clone();
         let mining = c.mining.load(Ordering::Relaxed);
@@ -1410,6 +1710,12 @@ impl Live {
             if uv::now() >= c.deadline.load(Ordering::Relaxed).min(self.rig_deadline) {
                 over_budget = true;
                 lg(format!("{} the tuning time of this run is used up ({} min per GPU, {} min per run): it mines at the last taken step {}, the climb goes on at the next start", c.label(), CARD_BUDGET_SECS / 60, RIG_BUDGET_SECS / 60, signed(judge.best.at)));
+                return abort;
+            }
+            // 1.0.12: an Xid 79 on the rig during the climb: it stops at the last taken step
+            if rig_cautious(uv::now()) {
+                over_budget = true;
+                lg(format!("{} an Xid 79 on the rig: the climb stops, it mines at the last taken step {}", c.label(), signed(judge.best.at)));
                 return abort;
             }
             self.db.set_good(&c.uuid, Some(good));
@@ -1610,7 +1916,43 @@ impl Live {
         *c.key.lock().unwrap() = k.clone();
         *c.refs.lock().unwrap() = e.refs.clone();
         c.base.store(e.base, Ordering::Relaxed);
-        self.db.save(&c.uuid, "", &k, e);
+        // 1.0.12: the crash history and the stable offset of the profile stay (a climb / resume writes a new entry)
+        let mut e = e.clone();
+        if let Some(old) = self.db.get::<Entry>(&c.uuid, &k) {
+            merge_history(&mut e, &old);
+        }
+        self.db.save(&c.uuid, "", &k, &e);
+    }
+
+    /// 1.0.12: a crash / failure of this card at `at` into the profile `k` (its crash history)
+    fn note_fail(&self, c: &Card, k: &str, at: i32) {
+        if k.is_empty() {
+            return;
+        }
+        if let Some(mut e) = self.db.get::<Entry>(&c.uuid, k) {
+            note_crash(&mut e, uv::now(), at);
+            self.db.save(&c.uuid, "", k, &e);
+        }
+    }
+
+    /// 1.0.12 (`tick`): the card mined at its offset STABLE_SECS without a fault: saved as its stable offset (the resume margin)
+    fn note_stable(&self, c: &Card, t: u64) {
+        let cur = c.cur.load(Ordering::Relaxed);
+        if c.stable_cur.swap(cur, Ordering::Relaxed) != cur || c.stable_since.load(Ordering::Relaxed) == 0 {
+            c.stable_since.store(t, Ordering::Relaxed);
+            c.stable_saved.store(false, Ordering::Relaxed);
+            return;
+        }
+        if t.saturating_sub(c.stable_since.load(Ordering::Relaxed)) < STABLE_SECS || c.stable_saved.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let k = c.key.lock().unwrap().clone();
+        if let Some(mut e) = self.db.get::<Entry>(&c.uuid, &k).filter(|e| e.offset == cur) {
+            e.stable = Some(cur);
+            e.stable_at = t;
+            self.db.save(&c.uuid, "", &k, &e);
+            lg(format!("{} mined {} h at {} without a fault: saved as its stable offset (where it resumes after a crash)", c.label(), STABLE_SECS / 3600, signed(cur)));
+        }
     }
 
     /// One card before mining: a crash marker, a saved profile (quick check) or a new tuning.
@@ -1645,9 +1987,11 @@ impl Live {
         }
         // a crash while mining at a tuned offset (faults.rs): that offset counts as failed
         let mut mined_crash: Option<i32> = None;
+        let mut mined_t: Option<u64> = None;
         if let Some(mut r) = crate::faults::get(&self.db.dir, &c.uuid) {
             if r.n >= 1 && r.offset > start {
                 mined_crash = Some(r.offset);
+                mined_t = (r.last > 0).then_some(r.last);
                 lg(format!("{} crashed while mining at offset {} in the previous run (Xid {}): that offset counts as failed", c.label(), signed(r.offset), r.xid));
                 r.n = 0;
                 crate::faults::put(&self.db.dir, &c.uuid, &r);
@@ -1666,7 +2010,7 @@ impl Live {
         let profs: Vec<(String, Entry)> = self.db.list::<Entry>(&c.uuid, "").into_iter().filter(|(_, e)| e.driver == self.driver).collect();
         // the profile of this lock; without a lock the base check measures the clock under load first
         let mut base_res: Option<(i32, Res)> = None;
-        let sel = match lock {
+        let mut sel = match lock {
             Some(l) => profs.iter().find(|(_, e)| e.core_lock == l).cloned(),
             None => {
                 let Some(b) = self.base_check(c, start) else { return self.give_up(c, start) };
@@ -1675,15 +2019,28 @@ impl Live {
                 profs.iter().filter(|(_, e)| e.core_lock == 0 && (e.clk as i64 - clk as i64).abs() <= 45).max_by_key(|(_, e)| e.verified_at).cloned()
             }
         };
+        let mut drop_sel = false;
         if crash.is_none() {
             if let Some((k, e)) = &sel {
-                if e.disabled_until > uv::now() {
+                if e.disabled_until > uv::now() && !pause_honored(e) {
+                    drop_sel = true;
+                    lg(format!(
+                        "{} profile {k}: the 24 h pause at {} written by {} is not honored (before 1.0.12 a base check without a verdict, e.g. this GPU's worker stopped by another GPU's fault, also paused it): the base is checked again",
+                        c.label(),
+                        signed(e.base),
+                        if e.kernel.is_empty() { "an earlier version" } else { e.kernel.as_str() }
+                    ));
+                } else if e.disabled_until > uv::now() {
                     lg(format!("{} profile {k}: auto-uv paused until the next 24 h (the base failed earlier); mining at {}", c.label(), signed(e.base)));
                     let _ = offset::set(&c.r.bus, e.base);
                     c.cur.store(e.base, Ordering::Relaxed);
                     return;
                 }
             }
+        }
+        if drop_sel {
+            // the pause entry holds no tuning (offset = base = the fallback): a new tuning from the start offset
+            sel = None;
         }
         // 1.0.3 (the owner, 18.11.2026: "not from zero, 2 steps lower"): a saved result or a known failed offset -> a short check at
         // (failed - 2 steps), never above the last confirmed offset, and the card mines; another failure -> 2 steps lower, down to the base
@@ -1698,7 +2055,30 @@ impl Live {
                 lg(format!("{} profile {k}: its offset {} did not lower the check power ({:.1} W -> {:.1} W): not used, tuned again", c.label(), signed(e.offset), e.w_base, e.w));
             }
         }
-        match plan(crash, prof, start, c.cap, self.p.step, mined_crash) {
+        // 1.0.12: the crash of the previous run goes into the profile's crash history (the resume margins of the next starts)
+        if let (Some(at), Some((k, e))) = (mined_crash, sel.as_mut()) {
+            note_crash(e, mined_t.unwrap_or_else(uv::now), at);
+            self.db.save(&c.uuid, "", k, e);
+        }
+        let pl = plan(crash, prof, start, c.cap, self.p.step, mined_crash);
+        // 1.0.12 (LAS-rig5.md): a card with recent crashes (or any card after a recent Xid 79 on the rig) does not resume at its
+        // saved offset: a margin below it, then the climb back (never above the saved offset; no climb while the rig is cautious)
+        let now = uv::now();
+        if let Some((k, e)) = &sel {
+            if let Some(m) = margin_plan(&pl, e, start, self.p.step, c.cap, now, rig_xid79().recent(now)) {
+                self.db.use_key(&c.uuid, k);
+                let Some(lowest) = self.margin_resume(c, k, e, &m, start) else { return };
+                let b = match base_res.take() {
+                    Some(b) => b,
+                    None => match self.base_check(c, start) {
+                        Some(b) => b,
+                        None => return self.give_up(c, start),
+                    },
+                };
+                return self.tune(c, b.0, b.1, c.cap.min(lowest - RESUME_BACK * self.p.step).min(b.0), None);
+            }
+        }
+        match pl {
             Plan::Tune => {
                 // 1.0.10: a new core lock with no profile of its own starts 2 steps below the profile of the nearest higher lock
                 // (climb.rs hint_start: the edge offset grows as the lock goes down), checked there first
@@ -1794,6 +2174,57 @@ impl Live {
         self.tune(c, b.0, b.1, c.cap, crash);
     }
 
+    /// 1.0.12: the resume at the margin `m` below the saved offset of profile `k` (`e`): a RESUME check there, then the climb back
+    /// up (each step must pass its checks and lower the power, never above `m.ceiling`); while the rig is cautious after an Xid 79
+    /// the card only resumes there (no climb). A failure at the margin: the owner's rule, 2 steps lower each time, no climb.
+    /// None: done (mining / stopped); Some(lowest failed): nothing above the base passed.
+    fn margin_resume(&self, c: &Card, k: &str, e: &Entry, m: &Margin, floor: i32) -> Option<i32> {
+        let cautious = rig_cautious(uv::now());
+        lg(format!(
+            "{} profile {k}: {}: resuming at {} instead of {} (a {RESUME} s check), then {}",
+            c.label(),
+            m.why,
+            signed(m.at),
+            signed(m.saved),
+            if cautious { "no climb (the rig is cautious after an Xid 79)".to_string() } else { format!("the climb back up to {} at most, under the usual rules", signed(m.ceiling)) }
+        ));
+        if cautious {
+            return match self.resume(c, Some(e), None, &m.why, &ladder(m.at, floor, self.p.step, true), RESUME, None, floor) {
+                Resumed::Mining | Resumed::Stopped => None,
+                Resumed::Exhausted(l) => Some(l),
+            };
+        }
+        let r = self.check(c, m.at, RESUME, &e.refs);
+        if r.infra {
+            self.leave_unheld(c);
+            return None;
+        }
+        lg(self.line(c, "check of the resume margin", m.at, &r));
+        if r.ok {
+            let mut cap = m.ceiling;
+            if e.edge > m.at {
+                cap = cap.min(e.edge - self.p.step);
+            }
+            if let Some(x) = crate::faults::get(&self.db.dir, &c.uuid).filter(|x| x.offset > m.at && x.n > 0) {
+                cap = cap.min(x.offset - self.p.step);
+            }
+            let mut r = r;
+            if r.refs.is_empty() || r.refs == "-" {
+                r.refs = e.refs.clone();
+            }
+            let edge = if e.edge > m.at { e.edge } else { 0 };
+            self.climb_from(c, e.base.min(m.at), (e.w_base > 0.0).then_some(e.w_base), m.at, r, cap.max(m.at), None, edge);
+            return None;
+        }
+        // failed at the margin: the owner's rule after a failure (2 steps lower each time), no climb
+        self.note_fail(c, k, m.at);
+        let back = RESUME_BACK * self.p.step.max(1);
+        match self.resume(c, Some(e), Some(m.at), &format!("{RESUME_BACK} steps below the failed resume margin {}", signed(m.at)), &ladder(m.at - back, floor, self.p.step, false), RESUME, None, floor) {
+            Resumed::Mining | Resumed::Stopped => None,
+            Resumed::Exhausted(l) => Some(l),
+        }
+    }
+
     /// 1.0.10: a new lock from the hint of a higher lock: a RESUME check at `from`, then the climb upward from it; failing there,
     /// 2 steps lower each time (the rule after a failure), then the base.
     fn start_from_hint(&self, c: &Card, from: i32, start: i32, base_res: Option<(i32, Res)>) {
@@ -1829,6 +2260,8 @@ impl Live {
     #[allow(clippy::too_many_arguments)]
     fn resume(&self, c: &Card, prof: Option<&Entry>, failed: Option<i32>, why: &str, ladder: &[i32], secs: u32, clk: Option<u32>, floor: i32) -> Resumed {
         let mut lowest = failed.unwrap_or(i32::MAX);
+        // 1.0.12: the rungs that failed go into the crash history of the profile
+        let mut fails: Vec<(u64, i32)> = Vec::new();
         for (i, &at) in ladder.iter().enumerate() {
             if i == 0 {
                 lg(format!("{} resuming at {} ({why}): a {secs} s check, then this GPU mines (no new climb from the base)", c.label(), signed(at)));
@@ -1844,6 +2277,7 @@ impl Live {
             lg(self.line(c, "resume check", at, &r));
             if !r.ok {
                 lowest = at;
+                fails.push((uv::now(), at));
                 continue;
             }
             // 1.0.3: a resumed offset whose power is above the profile's base power does not lower it: the next rung down
@@ -1870,6 +2304,9 @@ impl Live {
             };
             if lowest != i32::MAX {
                 e.edge = lowest;
+            }
+            for &(t, x) in &fails {
+                note_crash(&mut e, t, x);
             }
             e.offset = at;
             e.kernel = kernel_id();
@@ -1899,6 +2336,12 @@ impl Live {
             }
             return Resumed::Mining;
         }
+        if let Some(p) = prof {
+            let k = pkey(p);
+            for &(_, x) in &fails {
+                self.note_fail(c, &k, x);
+            }
+        }
         if ladder.is_empty() {
             lg(format!("{} {why}: nothing left above the base {}: mining at the base", c.label(), signed(floor)));
         } else {
@@ -1917,6 +2360,14 @@ impl Live {
             c.cur.store(start, Ordering::Relaxed);
             return;
         }
+        if c.no_verdict.load(Ordering::Relaxed) {
+            // 1.0.12 (Rig01 21.11.2026): a base check without a verdict is no failure of this GPU: nothing is paused or saved, it
+            // mines at its start offset (the OC profile's), the tuning runs again at the next start
+            lg(format!("{} the base check of {} ended without a verdict (see above): nothing paused, nothing saved; mining at {}, tuned at the next start", c.label(), signed(start), signed(start)));
+            let _ = offset::set(&c.r.bus, start);
+            c.cur.store(start, Ordering::Relaxed);
+            return;
+        }
         let at = c.orig.min(0);
         lg(format!("{} no offset from {} down to 0 passes the check: auto-uv paused for 24 h, mining at {}", c.label(), signed(start), signed(at)));
         let _ = offset::set(&c.r.bus, at);
@@ -1925,6 +2376,7 @@ impl Live {
         e.base = at;
         e.offset = at;
         e.disabled_until = uv::now() + DISABLE_SECS;
+        e.pause_why = PAUSE_VERDICT.into();
         if let Some(l) = c.r.core_lock {
             e.core_lock = l;
             self.db.save(&c.uuid, "", &pkey(&e), &e);
@@ -2058,6 +2510,7 @@ impl uvmine::Probe for CardProbe<'_> {
             // 1.0.11: a crash of the card's engine process fails the window like a wrong result (one process: the worker's
             // retry counted in `bad`)
             bad: r.bad.load(Ordering::Relaxed) + r.crashes.load(Ordering::Relaxed),
+            crashes: r.crashes.load(Ordering::Relaxed),
             checked: r.checked.load(Ordering::Relaxed),
             key: r.load_key.load(Ordering::Relaxed),
             alive: r.alive.load(Ordering::Relaxed) && !r.pause.load(Ordering::Relaxed),
@@ -2098,7 +2551,8 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
             lg(format!("GPU{} (bus {}): the core offset cannot be set ({e:#}); not tuned (Linux: root, Windows: Run as administrator)", r.dev, uv::short_bus(&r.bus)));
             continue;
         }
-        let max = o.max_offset.get(i).unwrap_or(DEF_MAX).min(uv::HARD_CAP).min(hi);
+        // 1.0.12: a per-architecture default when --uv-max is not given (TURING_UV_MAX for GeForce CC 7.5)
+        let (max, cap_src) = card_max(o.max_offset.get(i), nv.compute_capability(d), &r.name, hi);
         nv.watch_xid(d);
         let uuid = nv.uuid(d).unwrap_or_else(|_| r.bus.clone());
         v.push(Arc::new(Card {
@@ -2123,18 +2577,37 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
             deadline: AtomicU64::new(u64::MAX),
             mining: AtomicBool::new(false),
             no_load: AtomicBool::new(false),
+            no_verdict: AtomicBool::new(false),
             recover: AtomicBool::new(false),
             fault_at: AtomicI32::new(0),
             fault_t: AtomicU64::new(0),
             rec_att: AtomicU64::new(0),
             rec_since: AtomicU64::new(0),
             rec_t: AtomicU64::new(0),
+            cap_src,
+            stable_cur: AtomicI32::new(i32::MIN),
+            stable_since: AtomicU64::new(0),
+            stable_saved: AtomicBool::new(false),
             r,
         }));
     }
     let mut guard = Guard::load(dir);
     if o.parallel_reset || o.reset_all {
         guard.unpause();
+        // 1.0.12: also the rig's caution after an Xid 79
+        if Xid79::reset(dir) {
+            lg("the rig's caution after an Xid 79 is forgotten (--uv-unpause / --uv-reset-all)");
+        }
+    }
+    // 1.0.12: an Xid 79 of an earlier run (uv-xid79.json): margins for a day, the rig cautious for XID79_CAUTIOUS_SECS
+    let now = uv::now();
+    if let Some(x) = Xid79::load(dir).filter(|x| x.recent(now)) {
+        XID79_AT.fetch_max(x.at, Ordering::Relaxed);
+        if x.cautious(now) {
+            warn_set("CAUTIOUS", cautious_line(&x.gpu, x.at + XID79_CAUTIOUS_SECS - now));
+        } else {
+            lg(format!("an Xid 79 of {} {:.1} h ago: every GPU resumes below its saved offset until {} h after it", x.gpu, (now - x.at) as f64 / 3600.0, RECENT_CRASH_SECS / 3600));
+        }
     }
     let rig = guard.start(uv::now(), env!("CARGO_PKG_VERSION"));
     guard.save(dir);
@@ -2162,7 +2635,7 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
     if o.reset_all && caution_reset(dir) {
         lg("--uv-reset-all: the rig's caution from earlier tunings is forgotten");
     }
-    let cautious = caution_get(dir);
+    let cautious = caution_get(dir).or_else(|| rig_cautious(uv::now()).then(|| "an Xid 79 (a GPU fell off the bus), for some hours".to_string()));
     let (par, why) = if o.parallel.is_none() && cautious.is_none() && !force_child() {
         // 1.0.10: on the mining load a step starts no check process and adds no load (the card mines anyway): all at once
         (n, "all at once: each GPU is tuned on its own mining load, no check processes".to_string())
@@ -2251,7 +2724,9 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
                         }
                         return;
                     }
-                    if g.running < g.limit {
+                    // 1.0.12: one GPU at a time while the rig is cautious after an Xid 79 (also one seen during this run)
+                    let limit = par_limit(g.limit, rig_cautious(uv::now()));
+                    if g.running < limit {
                         g.running += 1;
                         break g.queue.pop_front().unwrap();
                     }
@@ -2308,7 +2783,7 @@ impl Live {
             c.cur.store(c.orig, Ordering::Relaxed);
             return;
         }
-        lg(format!("{}: current offset {}, range {}..{} (max: {})", c.label(), signed(c.orig), signed(c.lo), signed(c.cap), if self.p.max.get(c_pos(self, c)).is_some() { "--uv-max" } else { "default" }));
+        lg(format!("{}: current offset {}, range {}..{} (max: {})", c.label(), signed(c.orig), signed(c.lo), signed(c.cap), c.cap_src));
         // the mark "tuning in progress" before the first check, off when the GPU mines (an end in between is an event)
         {
             let mut g = self.guard.lock().unwrap();
@@ -2387,6 +2862,7 @@ impl Live {
         if let Some(mut e) = self.db.get::<Entry>(&c.uuid, &k) {
             e.offset = nw;
             e.stepped_back += 1;
+            note_crash(&mut e, uv::now(), cur); // 1.0.12: the crash history (resume margins)
             self.db.save(&c.uuid, "", &k, &e);
         }
         if nw <= base {
@@ -2404,6 +2880,8 @@ impl Live {
         c.fault_t.store(uv::now(), Ordering::Relaxed);
         if nw == at {
             lg(format!("{} crashed while mining at {} (its own engine process; only this GPU restarts): already at its base, the offset stays", c.label(), signed(at)));
+            let k = c.key.lock().unwrap().clone();
+            self.note_fail(c, &k, at);
             return;
         }
         if let Err(e) = offset::set(&c.r.bus, nw) {
@@ -2417,6 +2895,7 @@ impl Live {
         if let Some(mut e) = self.db.get::<Entry>(&c.uuid, &k) {
             e.offset = nw;
             e.stepped_back += 1;
+            note_crash(&mut e, uv::now(), at); // 1.0.12: the crash history (resume margins)
             self.db.save(&c.uuid, "", &k, &e);
         }
         c.bad_seen.store(c.r.bad.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -2426,6 +2905,18 @@ impl Live {
     }
 
     fn revalidate(&self, c: &Card) {
+        // 1.0.12: while the rig is cautious after an Xid 79, one re-check at a time (the others wait for their turn)
+        struct Turn;
+        impl Drop for Turn {
+            fn drop(&mut self) {
+                RECHECKS.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        while rig_cautious(uv::now()) && RECHECKS.load(Ordering::SeqCst) > 0 && !self.stopped() {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        RECHECKS.fetch_add(1, Ordering::SeqCst);
+        let _turn = Turn;
         let refs = c.refs.lock().unwrap().clone();
         // 1.0.10: on the mining load (it keeps mining); the check process only when the GPU does not mine now
         let mining = !force_child() && self.wait_load(c, Duration::from_secs(10));
@@ -2602,6 +3093,8 @@ pub fn tick(live: &Arc<Live>) {
             c.next_reval.store(t + 60, Ordering::Relaxed);
             continue;
         }
+        // 1.0.12: an offset mined STABLE_SECS without a fault is the card's stable offset (its resume margin after a crash)
+        live.note_stable(c, t);
         if live.p.reval_h > 0.0 && t >= c.next_reval.load(Ordering::Relaxed) && !c.refs.lock().unwrap().is_empty() {
             c.busy.store(true, Ordering::Relaxed);
             let (l, c) = (live.clone(), c.clone());
@@ -2688,6 +3181,206 @@ pub fn fixed_tick(nv: &Nvml, f: &Fixed) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// 1.0.12 (Rig01 21.11.2026, FIELD111.md anomaly 1): 1.0.10 paused 6 of 8 GPUs for 24 h at +0 (OC profile +275, +60..70 W
+    /// each) because their base check had no verdict: their workers stopped with GPU5's Xid 43 in the one-process engine. Such a
+    /// pause (no `pause_why`) is not honored; a pause written after a real verdict is, and survives the JSON round trip.
+    #[test]
+    fn a_pause_without_a_verdict_is_not_honored() {
+        let rig01 = serde_json::json!({"base_offset": 0, "bus": "0000:05:00.0", "clk_mhz": 0, "core_lock": 1800,
+            "disabled_until": 1795335196u64, "driver": "580.82.07", "edge": 0, "ghs": 0.0, "kernel": "ffgn1.0.10/neb",
+            "name": "NVIDIA GeForce RTX 3070", "offset": 0, "orig_offset": 275, "refs": "", "step": 15,
+            "stepped_back_in_mining": 0, "tested_at": 0, "verified_at": 0, "watts": 0.0, "watts_base": 0.0});
+        let e = Entry::from_json(&rig01).unwrap();
+        assert!(e.disabled_until > 0 && e.pause_why.is_empty());
+        assert!(!pause_honored(&e));
+        let v = Entry { pause_why: PAUSE_VERDICT.into(), ..e.clone() };
+        assert!(pause_honored(&v));
+        let back = Entry::from_json(&v.to_json()).unwrap();
+        assert!(pause_honored(&back));
+        assert_eq!(back.disabled_until, 1795335196);
+    }
+    /// a saved profile of this version (LAS-rig5.md GPU1: confirmed +375, base +0) with crash records at `crashes` (age in s)
+    fn las_gpu1(now: u64, crashes: &[(u64, i32)]) -> Entry {
+        let mut e = Entry { kernel: kernel_id(), driver: "580".into(), core_lock: 1305, base: 0, offset: 375, edge: 450, refs: "a".into(), ..Default::default() };
+        for &(age, at) in crashes {
+            note_crash(&mut e, now - age, at);
+        }
+        e
+    }
+    fn sp(e: &Entry) -> Option<SavedProf> {
+        Some(SavedProf { offset: e.offset, base: e.base, same_kernel: e.kernel == kernel_id() && !e.refs.is_empty(), lowered: profile_lowered(e) })
+    }
+
+    /// 1.0.12 (LAS-rig5.md): after the reboot GPU1/2/3 resumed straight at the saved +375 and crashed there and below. A card with
+    /// crashes in the last 24 h resumes at a margin: the offset that mined 1 h without a fault, else half way from the base.
+    #[test]
+    fn a_restart_after_recent_crashes_resumes_at_a_margin() {
+        let now = 1_800_000_000u64;
+        let e = las_gpu1(now, &[(3 * 3600, 450), (2 * 3600, 495)]);
+        let p = plan(None, sp(&e), 0, 495, 15, None);
+        assert_eq!(lad(&p).0[0], 375); // without the margin: straight at +375 (1.0.11)
+        let m = margin_plan(&p, &e, 0, 15, 495, now, false).expect("a margin");
+        assert_eq!((m.at, m.saved, m.ceiling), (180, 375, 375)); // 0 + (375 / 2 = 187 -> the step grid) = +180, back up to +375 at most
+        assert!(m.why.contains("2 crash(es)") && m.why.contains("half way from the base +0"), "{}", m.why);
+        // the grid is the base's: --uv-min 120 -> 120 + 255 / 2 = 247 -> 120 + 120 = +240
+        assert_eq!(margin_plan(&p, &e, 120, 15, 495, now, false).unwrap().at, 240);
+        // the offset that mined 1 h without a fault is the margin when it is known
+        let mut s = e.clone();
+        s.stable = Some(255);
+        s.stable_at = now - 1800;
+        assert_eq!(margin_plan(&p, &s, 0, 15, 495, now, false).unwrap().at, 255);
+        // ... but not when it is the saved offset itself (no crash at or below it since)
+        s.stable = Some(375);
+        assert_eq!(margin_plan(&p, &s, 0, 15, 495, now, false), None);
+        // an earlier version's profile (Plan::Continue): the margin too, the climb then goes up to the cap as before
+        let old = Entry { kernel: "ffgn1.0.10/neb".into(), ..e.clone() };
+        let p = plan(None, sp(&old), 0, 495, 15, None);
+        assert_eq!(p, Plan::Continue { from: 375 });
+        let m = margin_plan(&p, &old, 0, 15, 495, now, false).unwrap();
+        assert_eq!((m.at, m.ceiling), (180, 495));
+        // nothing above the base: no margin
+        let p = plan(None, prof(0, true), 0, 495, 15, None);
+        assert_eq!(margin_plan(&p, &e, 0, 15, 495, now, false), None);
+    }
+
+    #[test]
+    fn a_restart_after_old_crashes_resumes_at_the_saved_offset() {
+        let now = 1_800_000_000u64;
+        let e = las_gpu1(now, &[(RECENT_CRASH_SECS + 60, 450), (RECENT_CRASH_SECS + 1, 375)]);
+        assert!(recent_crashes(&e, now).is_empty());
+        let p = plan(None, sp(&e), 0, 495, 15, None);
+        assert_eq!(margin_plan(&p, &e, 0, 15, 495, now, false), None);
+        assert_eq!(lad(&p), (vec![375, 345, 315, 285, 255, 225, 195, 165, 135, 105, 75, 45, 15], QUICK));
+        // no crash at all: the saved offset as before
+        let clean = las_gpu1(now, &[]);
+        assert_eq!(margin_plan(&plan(None, sp(&clean), 0, 495, 15, None), &clean, 0, 15, 495, now, false), None);
+        // but a recent Xid 79 on the rig: every card gets the margin
+        let m = margin_plan(&plan(None, sp(&clean), 0, 495, 15, None), &clean, 0, 15, 495, now, true).unwrap();
+        assert_eq!(m.at, 180);
+        assert!(m.why.contains("Xid 79"), "{}", m.why);
+    }
+
+    /// the owner's rule (18.11.2026) stays for every NEW crash: failed - 2 steps, never above the last confirmed offset; a start
+    /// after a failure of the previous run gets no margin on top of it
+    #[test]
+    fn a_new_crash_after_the_margin_resume_goes_two_steps_below_it() {
+        let now = 1_800_000_000u64;
+        // resumed at the margin +180, climbed back to +255, crashed there while mining (crash_back in this run)
+        assert_eq!(crash_target(255, 0, 15), 225);
+        let mut e = las_gpu1(now, &[(3600, 375)]);
+        e.offset = 225;
+        note_crash(&mut e, now, 255);
+        // the next start finds the crash record: 2 steps below it, no margin
+        let p = plan(crash(255, None), sp(&e), 0, 495, 15, Some(255));
+        assert_eq!(lad(&p).0[0], 225);
+        assert_eq!(margin_plan(&p, &e, 0, 15, 495, now, false), None);
+        // a crash far above the confirmed offset: never above the last confirmed
+        let p = plan(crash(375, None), sp(&e), 0, 495, 15, Some(375));
+        assert_eq!(lad(&p).0[0], 225);
+        // the margin's climb never goes above the saved offset
+        let e = las_gpu1(now, &[(600, 450)]);
+        let m = margin_plan(&plan(None, sp(&e), 0, 495, 15, None), &e, 0, 15, 495, now, false).unwrap();
+        assert!(m.ceiling <= e.offset);
+    }
+
+    #[test]
+    fn the_crash_history_of_a_profile() {
+        let now = 1_800_000_000u64;
+        let mut e = Entry { stable: Some(300), stable_at: now - 7200, ..Default::default() };
+        // a crash above the stable offset keeps it, one at or below it drops it
+        note_crash(&mut e, now - 100, 345);
+        assert_eq!(e.stable, Some(300));
+        note_crash(&mut e, now - 50, 300);
+        assert_eq!(e.stable, None);
+        // the main loop's record and the tuner's of the same crash are one
+        note_crash(&mut e, now - 40, 300);
+        assert_eq!(e.crash_log.len(), 2);
+        // at most CRASH_LOG_MAX, older than a day dropped
+        for i in 0..40u64 {
+            note_crash(&mut e, now + i * 600, 100 + i as i32);
+        }
+        assert_eq!(e.crash_log.len(), CRASH_LOG_MAX);
+        assert_eq!(e.crash_log.last(), Some(&(now + 39 * 600, 139)));
+        note_crash(&mut e, now + RECENT_CRASH_SECS + 39 * 600, 90);
+        assert_eq!(e.crash_log, vec![(now + RECENT_CRASH_SECS + 39 * 600, 90)]);
+        // a new entry (a climb / a resume) keeps the history and the stable offset of the old one
+        let old = Entry { crash_log: vec![(now - 600, 375)], stable: Some(240), stable_at: now - 300, ..Default::default() };
+        let mut new = Entry { offset: 255, ..Default::default() };
+        merge_history(&mut new, &old);
+        assert_eq!((new.crash_log.clone(), new.stable), (vec![(now - 600, 375)], Some(240)));
+        // the JSON round trip
+        let back = Entry::from_json(&Entry { kernel: kernel_id(), ..new.clone() }.to_json()).unwrap();
+        assert_eq!((back.crash_log, back.stable, back.stable_at), (vec![(now - 600, 375)], Some(240), now - 300));
+    }
+
+    /// 1.0.12: a uv.json written before 1.0.12 (no crash_log / stable_offset / stable_at) loads: no history, no stable offset
+    #[test]
+    fn an_old_profile_without_the_crash_history_loads() {
+        let v = serde_json::json!({"base_offset": 0, "bus": "0000:02:00.0", "clk_mhz": 0, "core_lock": 1305, "disabled_until": 0,
+            "driver": "580.82.07", "edge": 450, "ghs": 10.1, "kernel": "ffgn1.0.11/neb", "name": "NVIDIA GeForce RTX 2060 SUPER",
+            "offset": 375, "orig_offset": 0, "refs": "x", "step": 15, "stepped_back_in_mining": 0, "tested_at": 1, "verified_at": 1,
+            "watts": 70.0, "watts_base": 80.0});
+        let e = Entry::from_json(&v).unwrap();
+        assert!(e.crash_log.is_empty() && e.stable.is_none() && e.stable_at == 0);
+        assert_eq!((e.offset, e.edge), (375, 450));
+        // a 1.0.12 file with a broken record keeps the good ones
+        let mut v = v;
+        v["crash_log"] = serde_json::json!([{"t": 5, "at": 375}, {"t": "x"}, 7]);
+        v["stable_offset"] = serde_json::Value::Null;
+        let e = Entry::from_json(&v).unwrap();
+        assert_eq!((e.crash_log, e.stable), (vec![(5, 375)], None));
+    }
+
+    /// 1.0.12: an Xid 79 makes the rig cautious for XID79_CAUTIOUS_SECS (no climb, one GPU at a time), kept in uv-xid79.json for
+    /// the next start; every GPU resumes below its saved offset for RECENT_CRASH_SECS; both expire
+    #[test]
+    fn an_xid79_makes_the_rig_cautious_for_some_hours() {
+        let t = 1_800_000_000u64;
+        let x = Xid79 { at: t, gpu: "GPU1 (bus 02, RTX 2060 SUPER)".into() };
+        assert!(x.cautious(t + 1) && x.cautious(t + XID79_CAUTIOUS_SECS - 1) && !x.cautious(t + XID79_CAUTIOUS_SECS));
+        assert!(x.recent(t + XID79_CAUTIOUS_SECS) && !x.recent(t + RECENT_CRASH_SECS));
+        assert!(!Xid79::default().cautious(t) && !Xid79::default().recent(t));
+        // cautious: one GPU at a time, no room above the current offset
+        assert_eq!(par_limit(4, true), 1);
+        assert_eq!(par_limit(4, false), 4);
+        assert_eq!(climb_cap(495, 180, true), 180);
+        assert_eq!(climb_cap(495, 180, false), 495);
+        // across a restart (the file), and the reset
+        let d = std::env::temp_dir().join(format!("ffgn-xid79-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        assert_eq!(Xid79::load(&d), None);
+        x.save(&d);
+        assert_eq!(Xid79::load(&d), Some(x.clone()));
+        assert!(Xid79::reset(&d));
+        assert_eq!(Xid79::load(&d), None);
+        // note_xid79: the file, the process state, the loud warning and its stats-line tag
+        note_xid79(&d, "GPU1 (bus 02, RTX 2060 SUPER)", true);
+        let back = Xid79::load(&d).unwrap();
+        assert_eq!(back.gpu, "GPU1 (bus 02, RTX 2060 SUPER)");
+        assert!(back.cautious(uv::now()) && rig_cautious(uv::now()));
+        assert!(warnings().iter().any(|w| w.starts_with("CAUTIOUS") && w.contains("GPU1 (bus 02") && w.contains("riser / power cable")), "{:?}", warnings());
+        assert!(tags().iter().any(|t| t == "CAUTIOUS Xid 79"), "{:?}", tags());
+        note_xid79(&d, "GPU1 (bus 02, RTX 2060 SUPER)", true);
+        assert_eq!(warnings().iter().filter(|w| w.starts_with("CAUTIOUS")).count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// 1.0.12: GeForce Turing (CC 7.5) climbs to TURING_UV_MAX by default; --uv-max overrides it; CMP and other archs keep DEF_MAX
+    #[test]
+    fn turing_has_its_own_default_cap() {
+        assert_eq!(card_max(None, Some((7, 5)), "NVIDIA GeForce RTX 2060 SUPER", 1000).0, TURING_UV_MAX);
+        assert_eq!(card_max(None, Some((7, 5)), "NVIDIA GeForce GTX 1660 Ti", 1000).0, 240);
+        assert_eq!(card_max(None, Some((7, 5)), "NVIDIA CMP 50HX", 1000).0, DEF_MAX);
+        assert_eq!(card_max(None, Some((8, 6)), "NVIDIA GeForce RTX 3070", 1000).0, DEF_MAX);
+        assert_eq!(card_max(None, None, "NVIDIA GeForce RTX 2060 SUPER", 1000).0, DEF_MAX); // CC unknown: as before
+        let (v, src) = card_max(Some(375), Some((7, 5)), "NVIDIA GeForce RTX 2060 SUPER", 1000);
+        assert_eq!((v, src), (375, "--uv-max"));
+        assert_eq!(card_max(Some(150), Some((7, 5)), "NVIDIA GeForce RTX 2060 SUPER", 1000).0, 150);
+        assert_eq!(card_max(None, Some((7, 5)), "NVIDIA GeForce RTX 2060 SUPER", 200).0, 200); // the driver's range
+        // a saved +375 of a 2060 SUPER resumes at the cap
+        assert_eq!(lad(&plan(None, prof(375, true), 0, TURING_UV_MAX, 15, None)).0[0], 240);
+    }
+
     #[test]
     fn a_crash_while_mining_goes_two_steps_below_it() {
         // 1.0.11 (iso.rs): the owner's rule after a crash: "the failed offset - 2 steps", never below the base
@@ -2764,6 +3457,31 @@ mod tests {
             x => panic!("{x:?}"),
         }
     }
+    /// 1.0.12 (PC_AORUS RTX 3080 Ti, --lock-cclock 1680 --pl 260): +300 "taken, saved (tuning in progress)", then the card faulted
+    /// ("unknown error", now a crash of its engine process: faults::sticky).  The owner's rule: failed - 2 steps, never above the
+    /// last confirmed (here: the last taken) offset.
+    #[test]
+    fn a_crash_right_after_a_taken_step() {
+        let ip = Entry { kernel: climbing_id(), core_lock: 1680, base: 0, offset: 300, w_base: 300.0, w: 259.5, refs: "a".into(), ..Default::default() };
+        let p = SavedProf { offset: ip.offset, base: ip.base, same_kernel: ip.kernel == kernel_id() && !ip.refs.is_empty(), lowered: profile_lowered(&ip) };
+        // the fault in the next paired window (+360 against +300): the trying marker / fault_offset name +360; a restart resumes
+        // 2 steps below it but not above the last taken +300
+        match plan(Some(profiles::Crash { at: 360, good: Some(300) }), Some(p), 0, 495, 15, None) {
+            Plan::Resume { failed, ladder, .. } => assert_eq!((failed, ladder[0], ladder.get(1).copied()), (Some(360), 300, Some(270))),
+            x => panic!("{x:?}"),
+        }
+        // the fault at the taken step itself (its confirmation, or mining at it): +300 is the crash offset -> +270
+        match plan(Some(profiles::Crash { at: 300, good: Some(240) }), Some(p), 0, 495, 15, None) {
+            Plan::Resume { failed, ladder, .. } => assert_eq!((failed, ladder[0]), (Some(300), 270)),
+            x => panic!("{x:?}"),
+        }
+        // the miner survives now: a crash while mining at the taken +300 steps it back in the run (tick -> crash_back): +270
+        assert_eq!(crash_target(300, 0, 15), 270);
+        // and again: 2 steps lower each time, down to the base
+        assert_eq!(crash_target(270, 0, 15), 240);
+        assert_eq!(crash_target(15, 0, 15), 0);
+    }
+
     #[test]
     fn parallel_tuning() {
         // start: 1 on 6+ GPUs, else 2 (never more than the GPUs); cautious rig: 1; --uv-parallel: as given

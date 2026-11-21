@@ -20,6 +20,7 @@ struct Args {
     lock_mclock: Option<String>, // --lock-mclock: memory clock MHz
     table_mclock: Option<String>, // --table-mclock: memory clock MHz while the digest-table path runs (NEB, 1.0.11)
     moffset: Option<String>,     // --moffset: memory clock offset MHz (may be negative)
+    power_limit: uv::PerGpu,     // FFGN 1.0.12: --power-limit / --pl: power limit W (one value, or one per device); optional, never on by default
     backend: Option<String>,     // --backend cuda|cpu
     pool_given: bool,
     pool_check: bool,            // --pool-check: log in to every --pool entry (login + a job), print the verdicts, exit
@@ -123,8 +124,9 @@ OPTIONS:
                          A GPU that crashes while mining (Xid) is named in the log and remembered in gpu-faults.json: a
                          crashed undervolt offset is tuned below, a crash at your own offset twice in a row lowers it
                          (HiveOS profile value, then 60 MHz steps), a GPU with nothing left to lower is left out for 1 h
-    --uv-max N           highest offset the tuner tries (at most 600). Default per card: RTX 20xx / GTX 16xx 225, CMP 50HX 330,
-                         CMP 30HX/40HX 150, all others 495
+    --uv-max N           highest offset the tuner tries (at most 600). Default: GeForce Turing (RTX 20xx / GTX 16xx, CUDA
+                         CC 7.5) +240 (since FFGN 1.0.12: a 12x RTX 2060 SUPER rig crashed from +165 to +450, its stable cards
+                         mine at +75..+255), all others (CMP too) 495; --uv-max N overrides the default
     --uv-min N           offset the tuner starts from; a start that fails steps down 30 MHz (default: RTX 3070/3060 Ti by
                          the core lock, RTX 3080/3090 +180; else the HiveOS/driver offset or 120; RTX 40: at least 200,
                          RTX 50: at least 300)
@@ -139,7 +141,14 @@ OPTIONS:
                          for the rig (uv-parallel.json). The check processes start 3 s apart
     --uv-unpause         forget the remembered caution and the guards of auto-uv (a rig paused after 2 restarts / reboots
                          during a tuning within an hour, GPUs off for 24 h after 3 failures in a row); also --uv-reset-all.
-                         Each run tunes at most 10 min per GPU and 60 min in all; the rest goes on at the next start
+                         Each run tunes at most 10 min per GPU and 60 min in all; the rest goes on at the next start.
+                         Since FFGN 1.0.12: a GPU that crashed (or failed a check at its offset) within the last 24 h does not
+                         restart straight at its saved offset: it resumes at the last offset that mined 1 h without a fault,
+                         else half way between its start offset and the saved one, and climbs back from there (never above
+                         the saved offset). An Xid 79 (a GPU fell off the bus: check its riser / power cable, reboot the
+                         rig) makes the whole rig cautious for 6 h, kept across restarts (uv-xid79.json): no climbing, one
+                         GPU at a time, [AUTO-UV CAUTIOUS Xid 79] on the stats line; and for 24 h every GPU resumes below its
+                         saved offset as above. --uv-unpause / --uv-reset-all forget it
     --uv-coarse N        climbing step in MHz (default: 2 x --uv-step = 30): the search climbs in N MHz steps and, at the first
                          failing step, tries --uv-step steps inside that interval only (about half the steps, the same edge).
                          A driver fault (Xid / hang) on a coarse step is not refined: the result is one step below the last
@@ -155,11 +164,27 @@ OPTIONS:
     --table-mclock N     NEB: lock the memory clock to N MHz (e.g. 810) only while a GPU mines on the pure digest-table path,
                          which barely uses the memory (RTX 3070: -0.5 % rate, -10 W, +8-10 % MA/W); every other path, the
                          full-path trial and each new model's table build run at the full memory clock. Same list syntax;
-                         needs root/Administrator
+                         needs root/Administrator. With it the automatic L=3 is taken only when it beats the pure table by
+                         more than 10 % (the lock's per-watt gain; env NEBGPU_L3_AUTO_GAIN overrides)
+    --tbig MODE          NEB: partial L=3 digest table of the TESS slot (engine 0.8.1): auto (default) = built in slices while
+                         the pair table mines, sized per model from the measured build speed and the measured mining time
+                         per model, none when it would not pay back (+1 % net or less, e.g. slow / Turing cards); on = all
+                         the free VRAM at the model start; off. Exact: the same tickets as the full path
+    --tbig-gb G          NEB: at most G GB for the TESS triples (default: the free VRAM minus a reserve for the Kepler table)
     --keep-hive-mem      keep the HiveOS OC profile's memory lock even when it is below the maximum (NEB mines much slower)
     --single-process     every GPU's engine in the miner process (before 1.0.11). Default: one engine process per GPU, so a
                          CUDA fault on one GPU (Xid 31/43, an illegal memory access) restarts only that GPU in a few seconds
                          while the others keep mining (FFG_SINGLE_PROCESS=1 or FFGN_SINGLE_PROCESS=1 does the same)
+    --reboot-on-lost-gpu MIN   opt-in (default off; root / Administrator): a GPU LOST - fallen off the bus (Xid 79), its
+                         engine cannot reopen the device after the retries (DEAD), or NVML no longer sees it - for MIN
+                         minutes reboots the rig: HiveOS sreboot (/hive/sbin/sreboot), else systemctl reboot; Windows
+                         shutdown /r /t 60. Never in the first 10 min of the miner, at most once per 60 min (the time is
+                         kept in reboot-on-lost-gpu.json in the state folder, across reboots); a WARNING line with the GPU,
+                         its bus, how long it is lost and the command comes first (log, stats line, API). Off with
+                         --single-process or FFG_NO_REBOOT=1 (then it only logs). Recommended on rigs: 10.
+                         Always (without it): a lost GPU shows 0 on the stats line / API / HiveOS, and when every GPU is
+                         down or not mining for 5 min although there is work, the miner exits with code 3 so that HiveOS
+                         (its miner restart and Watchdog), start.ps1 or systemd takes over
     --ramp-ms N          after a pause (pool or node lost, no job, idle mode, an auto-uv check) the GPUs go back to full load
                          one by one, N ms apart (default: 500 on rigs of 4+ GPUs, else 0); a new block's model is built
                          30 ms apart per GPU on such rigs (no synchronous power step of all cards)
@@ -171,6 +196,14 @@ OPTIONS:
                          0 = none); else reset
                          --auto-uv: an OC apply (HiveOS) that resets the tuned offset while mining gets
                          it back after a quick check; a stop during a check is not a failure
+    --power-limit N      (alias --pl N) optional, off by default (the lock + offset are the working limiters): set the GPU
+                         power limit to N W (NVML, like nvidia-smi -pl; needs root/Administrator): one value for all, or one
+                         per device in --devices order, e.g. --pl 140,115,140 ('-' = leave that GPU's limit as it is, e.g.
+                         the HiveOS one; a list must have one value per GPU). Clamped to the card's range (logged). The limit
+                         before is put back on exit, on Ctrl-C and at the next start after a crash
+                         (power-limit-restore-<bus>.json per GPU; on HiveOS the OC profile's power limit); an OC apply that
+                         changes it while mining is undone (logged; at most 4 times an hour per GPU). auto-uv measures with
+                         the limit in force; when it holds the clocks down under load (power cap) the log says so once
     --auto-lock          opt-in (NVIDIA, root/Administrator; turns on --auto-uv): choose the core
                          clock lock per GPU by measurement. Each lock of the range, highest first, is mined at its own auto-uv
                          profile (a new lock is tuned first), then 45 s settle + 120 s measured (hash rate, NVML watts, clock);
@@ -223,7 +256,7 @@ pub fn main() -> Result<()> {
     }
     // per-GPU list options may be given without quotes (`--lock-cclock 1500 1650`, HiveOS Extra config / .bat values split on
     // spaces): the numbers that follow such an option are joined to its value (uv::is_list_value)
-    const LIST_OPTS: [&str; 11] = ["--devices", "--device", "--uv-offset", "--uv-max", "--uv-min", "--temp-limit", "--temp-stop", "--lock-cclock", "--lock-mclock", "--moffset", "--table-mclock"];
+    const LIST_OPTS: [&str; 13] = ["--devices", "--device", "--uv-offset", "--uv-max", "--uv-min", "--temp-limit", "--temp-stop", "--lock-cclock", "--lock-mclock", "--moffset", "--table-mclock", "--power-limit", "--pl"];
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let mut joined: Vec<String> = Vec::with_capacity(raw.len());
     let mut i = 0;
@@ -256,6 +289,7 @@ pub fn main() -> Result<()> {
         lock_mclock: None,
         table_mclock: None,
         moffset: None,
+        power_limit: uv::PerGpu::Unset,
         backend: None,
         pool_given: false,
         pool_check: false,
@@ -318,11 +352,32 @@ pub fn main() -> Result<()> {
             "--allow-other-dataset" => a.allow_other_dataset = true,
             "--keep-hive-mem" => a.keep_hive_mem = true,
             "--single-process" => a.single_process = true,
+            "--reboot-on-lost-gpu" => crate::lostgpu::set_minutes(crate::lostgpu::parse_minutes(&val()?)?),
             "--ramp-ms" => {
                 // 1.0.5: ms between GPUs that go back to full load after a pause (0 = all at once; auto: 500 on 6+ GPUs)
                 let v: u64 = val()?.trim().parse().map_err(|_| anyhow::anyhow!("--ramp-ms needs a number of milliseconds"))?;
                 ensure!(v <= 10_000, "--ramp-ms {v}: at most 10000");
                 unsafe { std::env::set_var("FFG_RAMP_MS", v.to_string()) };
+            }
+            "--tbig" => {
+                // FFGN 1.0.12 (nebgpu 0.8.1, R112.md): the partial L=3 table of the TESS slot. auto (default): built in slices
+                // while the pair table mines, as many triples as pay back in a model's measured mining time against the measured
+                // build speed (none below +1 % net, e.g. on slow / Turing cards); on: all the free VRAM at once (0.8.0); off.
+                // The engine reads NEBGPU_TBIG when it opens a GPU (every engine process inherits it).
+                let v = val()?.to_ascii_lowercase();
+                let e = match v.as_str() {
+                    "off" | "0" => "0",
+                    "auto" => "2",
+                    "on" | "1" => "1",
+                    _ => anyhow::bail!("--tbig {v:?}: off, auto or on"),
+                };
+                unsafe { std::env::set_var("NEBGPU_TBIG", e) };
+            }
+            "--tbig-gb" => {
+                // FFGN 1.0.12: upper limit of the TESS triple section in GB (default: the free VRAM minus a reserve)
+                let g: f64 = val()?.trim().parse().map_err(|_| anyhow::anyhow!("--tbig-gb needs a number of GB"))?;
+                ensure!((0.0..=256.0).contains(&g), "--tbig-gb {g}: 0 to 256");
+                unsafe { std::env::set_var("NEBGPU_TBIG_GB", g.to_string()) };
             }
             "--kep1-kernel" => {
                 // 1.0.5: the engine reads NEBGPU_KEP1_PATH when it opens a GPU (this process and the check children)
@@ -377,8 +432,18 @@ pub fn main() -> Result<()> {
             }
             "--lock-cclock" => a.lock_cclock = Some(val()?),
             "--lock-mclock" => a.lock_mclock = Some(val()?),
-            "--table-mclock" => a.table_mclock = Some(val()?),
+            "--table-mclock" => {
+                let v = val()?;
+                // FFGN 1.0.12 (R111.md section 10): with the low memory clock on the pure table, the automatic L=3 (which runs at
+                // the full memory clock) must beat the table by more than the lock's per-watt gain (~+10 %); the engine reads
+                // NEBGPU_L3_AUTO_GAIN when a model's L=3 trial ends (every engine process inherits it). An own value wins.
+                if crate::clocks::l3_gain_wanted(&v) && std::env::var_os("NEBGPU_L3_AUTO_GAIN").is_none() {
+                    unsafe { std::env::set_var("NEBGPU_L3_AUTO_GAIN", crate::clocks::TABLE_MCLOCK_L3_GAIN) };
+                }
+                a.table_mclock = Some(v);
+            }
             "--moffset" => a.moffset = Some(val()?),
+            "--power-limit" | "--pl" => a.power_limit = crate::powerlimit::parse(&val()?, &arg)?,
             "--uv-dir" => a.uv.dir = Some(val()?.into()),
             "--uv-reval-hours" => a.uv.reval_hours = val()?.parse()?,
             "--uv-warmup" => a.uv.warmup_secs = val()?.parse()?,
@@ -442,6 +507,7 @@ pub fn main() -> Result<()> {
     a.uv.validate()?;
     if let Some(d) = &a.devices {
         a.uv.check_counts(d.len())?; // without --devices: checked once the GPUs are counted
+        a.power_limit.check_count(d.len(), "--power-limit")?;
     }
     // NEB: its own GPU library (nebgpu) or the CPU reference; work from a node, a pool or a gate
     let backend = neb::parse_backend(a.backend.as_deref())?;
@@ -473,6 +539,7 @@ pub fn main() -> Result<()> {
         lock_mclock: a.lock_mclock.clone(),
         table_mclock: a.table_mclock.clone(),
         moffset: a.moffset.clone(),
+        power_limit: a.power_limit.clone(),
         temp: a.temp,
         uv: a.uv,
         allow_other_dataset: a.allow_other_dataset,

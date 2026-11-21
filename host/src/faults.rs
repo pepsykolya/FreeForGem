@@ -300,6 +300,7 @@ pub fn iso_line(label: &str, xid: Option<u64>, err: &str, others: usize, rec: Op
         None => "; not counted as a failure of this GPU's offset".to_string(),
     };
     let reboot = if xid == Some(79) {
+        crate::neb::degraded::xid79(label);
         format!("; {}", xid79_line(label))
     } else {
         String::new()
@@ -408,6 +409,7 @@ pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, inject
     // 1.0.12: Xid 79 -> the reboot advice (XID79_ADVICE)
     if let Some(&(i, _)) = culprits.iter().find(|&&(_, x)| x == 79) {
         let label = w.map_or("a GPU".to_string(), |w| w.cards[i].label());
+        crate::neb::degraded::xid79(&label);
         lines.push(xid79_line(&label));
     }
     if fatal && alive == 0 && dead.len() > 1 {

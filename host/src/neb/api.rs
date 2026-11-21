@@ -17,6 +17,8 @@ pub struct Gpu {
     /// 1.0.9: nonces scanned (the engine's cheap filter / digest table screen more nonces than they evaluate)
     pub screened: u64,
     pub alive: bool,
+    /// 1.0.12 (lostgpu.rs): lost (Xid 79 / DEAD / gone from NVML): its rates are 0
+    pub lost: bool,
     pub bad: u64,
     pub power: Option<f64>,
     /// 1.0.3: (core lock, clock under load) when the core lock does not hold on this GPU
@@ -29,6 +31,10 @@ pub struct Gpu {
     pub kep1_kernel: Option<String>,
     /// 1.0.5: idle time of the GPU on the last model change (ms)
     pub model_gap_ms: Option<u64>,
+    /// 1.0.12: the power limit the card is held to now (W, NVML enforced limit)
+    pub power_limit: Option<f64>,
+    /// 1.0.12: (W, binds now) when the limit is this run's --power-limit
+    pub power_limit_ours: Option<(f64, bool)>,
 }
 
 #[derive(Clone, Default)]
@@ -77,14 +83,18 @@ fn summary(s: &Snapshot) -> String {
 fn warnings(s: &Snapshot) -> Vec<String> {
     let mut v: Vec<String> = s.gpus.iter().filter_map(|g| g.lock_not_held.map(|(l, m)| crate::clocks::not_held_message(g.dev, l, m))).collect();
     v.extend(crate::neb::tune::warnings().into_iter().map(|w| format!("auto-uv: {w}")));
+    v.extend(crate::neb::degraded::tags()); // 1.0.12: REBOOT NEEDED (Xid 79) / NO TABLE
+    v.extend(crate::lostgpu::tags()); // 1.0.12: GPU LOST / REBOOTING (--reboot-on-lost-gpu)
     v.extend(s.gpus.iter().filter_map(|g| g.mem_stuck.map(|m| format!("WARNING GPU{}: {}", g.dev, crate::clocks::mem_stuck_message(m)))));
     v
 }
 
 fn gpus(s: &Snapshot) -> String {
-    json!(s.gpus.iter().map(|g| json!({"dev": g.dev, "name": g.name, "bus": g.bus, "attempts": g.attempts, "screened": g.screened, "alive": g.alive, "bad": g.bad, "power_w": g.power, "attempts_per_s_avg": g.rate_avg, "memory_locked_by_oc_mhz": g.mem_stuck,
+    json!(s.gpus.iter().map(|g| json!({"dev": g.dev, "name": g.name, "bus": g.bus, "attempts": g.attempts, "screened": g.screened, "alive": g.alive, "lost": g.lost, "bad": g.bad, "power_w": g.power, "attempts_per_s_avg": if g.lost { Some(0.0) } else { g.rate_avg }, "memory_locked_by_oc_mhz": g.mem_stuck,
         "kep1_kernel": g.kep1_kernel.as_ref().map(|k| k.split(' ').next().unwrap_or("").to_string()), "kep1_kernel_info": g.kep1_kernel, "model_change_idle_ms": g.model_gap_ms,
-        "core_lock_holds": g.lock_not_held.is_none(), "core_lock_not_held": g.lock_not_held.map(|(l, m)| json!({"lock_mhz": l, "clock_mhz": m}))})).collect::<Vec<_>>()).to_string()
+        "core_lock_holds": g.lock_not_held.is_none(), "core_lock_not_held": g.lock_not_held.map(|(l, m)| json!({"lock_mhz": l, "clock_mhz": m})),
+        "power_limit_w": g.power_limit, "power_limit_ours": g.power_limit_ours.is_some(), "power_limit_set_w": g.power_limit_ours.map(|x| x.0),
+        "power_limit_binds": g.power_limit_ours.map(|x| x.1)})).collect::<Vec<_>>()).to_string()
 }
 
 fn metrics(s: &Snapshot) -> String {
@@ -104,8 +114,12 @@ fn metrics(s: &Snapshot) -> String {
         o += &format!("ffgn_gpu_attempts_total{{gpu=\"{}\",bus=\"{}\"}} {}\n", g.dev, g.bus, g.attempts);
         o += &format!("ffgn_gpu_screened_total{{gpu=\"{}\",bus=\"{}\"}} {}\n", g.dev, g.bus, g.screened);
         o += &format!("ffgn_gpu_alive{{gpu=\"{}\"}} {}\n", g.dev, g.alive as u8);
+        o += &format!("ffgn_gpu_lost{{gpu=\"{}\"}} {}\n", g.dev, g.lost as u8);
         if let Some(p) = g.power {
             o += &format!("ffgn_gpu_power_watts{{gpu=\"{}\"}} {p}\n", g.dev);
+        }
+        if let Some(p) = g.power_limit {
+            o += &format!("ffgn_gpu_power_limit_watts{{gpu=\"{}\",ours=\"{}\"}} {p}\n", g.dev, g.power_limit_ours.is_some() as u8);
         }
     }
     o
@@ -144,4 +158,51 @@ pub fn start(addr: &str) -> Handle {
         Err(e) => eprintln!("api: cannot listen on {bind}: {e} (mining continues without the API)"),
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpus_show_the_power_limit() {
+        let s = Snapshot {
+            gpus: vec![
+                Gpu { dev: 0, power_limit: Some(140.0), power_limit_ours: Some((140.0, true)), ..Default::default() },
+                Gpu { dev: 1, power_limit: Some(220.0), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let v: serde_json::Value = serde_json::from_str(&gpus(&s)).unwrap();
+        assert_eq!(
+            (v[0]["power_limit_w"].as_f64(), v[0]["power_limit_ours"].as_bool(), v[0]["power_limit_set_w"].as_f64(), v[0]["power_limit_binds"].as_bool()),
+            (Some(140.0), Some(true), Some(140.0), Some(true))
+        );
+        assert_eq!((v[1]["power_limit_w"].as_f64(), v[1]["power_limit_ours"].as_bool()), (Some(220.0), Some(false)));
+        assert!(v[1]["power_limit_set_w"].is_null() && v[1]["power_limit_binds"].is_null());
+        let m = metrics(&s);
+        assert!(m.contains("ffgn_gpu_power_limit_watts{gpu=\"0\",ours=\"1\"} 140\n") && m.contains("ffgn_gpu_power_limit_watts{gpu=\"1\",ours=\"0\"} 220\n"));
+    }
+
+    /// 1.0.12 (lostgpu.rs): a lost GPU shows 0 (not its last average) and is flagged; the total is the true one (neb/mod.rs zero_lost)
+    #[test]
+    fn a_lost_gpu_shows_zero() {
+        let s = Snapshot {
+            rate: 10e6,
+            rate_avg: Some(10e6),
+            gpus: vec![
+                Gpu { dev: 0, alive: true, rate_avg: Some(10e6), ..Default::default() },
+                Gpu { dev: 1, alive: true, lost: true, rate_avg: Some(7e6), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let v: serde_json::Value = serde_json::from_str(&gpus(&s)).unwrap();
+        assert_eq!((v[0]["lost"].as_bool(), v[0]["attempts_per_s_avg"].as_f64()), (Some(false), Some(10e6)));
+        assert_eq!((v[1]["lost"].as_bool(), v[1]["attempts_per_s_avg"].as_f64()), (Some(true), Some(0.0)));
+        let m = metrics(&s);
+        assert!(m.contains("ffgn_gpu_lost{gpu=\"1\"} 1\n") && m.contains("ffgn_gpu_lost{gpu=\"0\"} 0\n"), "{m}");
+        crate::lostgpu::publish_tags(vec!["GPU LOST: GPU1 (bus 02) 3.0 min: Xid 79: fallen off the PCIe bus".into()]);
+        let j: serde_json::Value = serde_json::from_str(&summary(&s)).unwrap();
+        assert!(j["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().starts_with("GPU LOST: GPU1")), "{j}");
+    }
 }
