@@ -319,7 +319,7 @@ With a pool list (section 22) the fee connection follows you: it always goes to 
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted (see [LICENSE](LICENSE), clause 3).
 
 **Every coin (1.8.0).** The fee is 1 % for every coin and always runs on a connection of its own, never inside your session:
-Pearl and NOID: a second login on your pool (above); PROX: on proximamine (section 21); CMFD: inside the engine, 36 s per hour per
+Pearl and NOID: a second login on your pool (above); PROX: also a second login on your pool, proximamine only as the fallback (solo, suprnova, a refused fee login; section 21); CMFD: inside the engine, 36 s per hour per
 GPU (section 13); NEB: 60 s in every 100 minutes on your pool list, or on the public NEB pools when you mine solo or through a gate
 (worker `ffg`, section 24); Ting: 60 s in every 100 minutes on crypto-connection.net (worker `ffg`; solo without that pool, the
 node's blocks pay the developer during the slot, section 26). A slot whose fee connection was not ready is tried again up to 3 times,
@@ -2029,7 +2029,7 @@ auto-uv начинает поиск на RTX 40 с +200, на RTX 50 — с +300
 (см. [LICENSE](LICENSE), пункт 3). При списке пулов (раздел 22) соединение комиссии следует за вами: на старте слота оно идёт на тот пул, где вы сейчас.
 
 **Все монеты (1.8.0).** Комиссия — 1 % в каждой монете, и у неё всегда своё соединение, внутри вашей сессии она не идёт:
-Pearl и NOID — второй логин на вашем пуле (см. выше); PROX — на proximamine (раздел 21); CMFD — внутри движка, 36 с в час на карту
+Pearl и NOID — второй логин на вашем пуле (см. выше); PROX — тоже второй логин на вашем пуле, proximamine только запасной (соло, suprnova, отказ fee-логину; раздел 21); CMFD — внутри движка, 36 с в час на карту
 (раздел 13); NEB — 60 с из каждых 100 минут на вашем списке пулов, а при соло или работе через шлюз — на публичных пулах NEB
 (воркер `ffg`, раздел 24); Ting — 60 с из каждых 100 минут на crypto-connection.net (воркер `ffg`; в соло без этого пула на время
 слота блоки ноды идут разработчику, раздел 26). Если соединение комиссии к слоту не готово, слот повторяется до 3 раз с шагом
@@ -3703,7 +3703,7 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 抽水是许可证的条件：不得移除、降低或重定向（见 [LICENSE](LICENSE) 第 3 条）。
 
 **所有币种（1.8.0）。** 每个币种的抽水都是 1 %，并且总是使用自己的连接，从不在你的会话里进行：Pearl 和 NOID：在你的矿池上的第二个
-登录（见上文）；PROX：在 proximamine 上（第 21 节）；CMFD：在引擎内部，每张卡每小时 36 秒（第 13 节）；NEB：每 100 分钟 60 秒，
+登录（见上文）；PROX：同样是你矿池上的第二个登录，proximamine 仅作后备（单机、suprnova、抽水登录被拒等；第 21 节）；CMFD：在引擎内部，每张卡每小时 36 秒（第 13 节）；NEB：每 100 分钟 60 秒，
 在你的矿池列表上，单机挖矿或通过网关挖矿时在公共 NEB 矿池上（矿工名 `ffg`，第 24 节）；Ting：每 100 分钟 60 秒，在
 crypto-connection.net 上（矿工名 `ffg`；不接该矿池的单机挖矿时，时段内节点出的块归开发者，第 26 节）。抽水连接在时段到来时尚未就绪，
 则在同一周期内每隔 5 分钟重试，最多 3 次。使用 `--split` 时，每一组按自己显卡的时间支付 1 %（第 27 节）。

@@ -338,7 +338,7 @@ on **the same pool you configured**, under a separate login (worker `ffgp-devfee
 `devfee: back to user`. The first slot comes at a random moment within the first 100 minutes. If the fee login
 can't be served, the slot is skipped; your mining is never blocked.
 
-Every coin pays 1 %, always on a connection of its own: Pearl and NOID a second login on your pool (above), PROX on proximamine,
+Every coin pays 1 %, always on a connection of its own: Pearl and NOID a second login on your pool (above), PROX a second login on your pool too (proximamine only as the fallback),
 CMFD inside the engine (36 s per hour per GPU), NEB on your pool list (solo / through a gate: the public NEB pools), Ting on
 crypto-connection.net (NEB and Ting: worker `ffg`, 60 s in every 100 minutes). A slot whose fee connection was not ready is tried
 again up to 3 times. With `--split` every group pays 1 % of its own cards' time.

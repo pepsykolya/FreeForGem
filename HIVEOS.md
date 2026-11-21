@@ -154,7 +154,7 @@ share of yours (while the GPUs hash and shares were expected) is reconnected, th
 
 1%: 60 s in every 100 minutes, on the same pool you set. See [LICENSE](LICENSE).
 Since 1.8.0 every coin's fee runs on a connection of its own: NEB on your pool list (solo / gate: the public NEB pools), Ting on
-crypto-connection.net, PROX on proximamine, CMFD inside the engine (36 s per hour per GPU). With `--split` every group pays 1 % of
+crypto-connection.net, PROX a second login on your pool (proximamine only as the fallback), CMFD inside the engine (36 s per hour per GPU). With `--split` every group pays 1 % of
 its own cards' time. A slot whose connection was not ready is tried again up to 3 times.
 
 ### NOID (Parano1d), since 1.7.0
@@ -667,5 +667,5 @@ CMFD: движки перезапускаются на следующем пул
 
 1%: 60 секунд из каждых 100 минут, на том же пуле, что указан у вас. Подробнее — в [LICENSE](LICENSE).
 С 1.8.0 комиссия каждой монеты идёт по своему соединению: NEB — на вашем списке пулов (соло / шлюз: публичные пулы NEB), Ting — на
-crypto-connection.net, PROX — на proximamine, CMFD — внутри движка (36 с в час на карту). С `--split` каждая группа платит 1 % времени
+crypto-connection.net, PROX — второй логин на вашем пуле (proximamine только запасной), CMFD — внутри движка (36 с в час на карту). С `--split` каждая группа платит 1 % времени
 своих карт. Если соединение к слоту не готово, слот повторяется до 3 раз.
