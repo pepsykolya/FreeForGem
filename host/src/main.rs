@@ -65,6 +65,7 @@ mod profiles;
 mod profit;
 mod prox;
 mod nvml;
+mod recover;
 mod offset;
 mod powerlimit;
 mod silence;
@@ -1440,6 +1441,12 @@ fn real_main() -> Result<()> {
     std::hint::black_box(&PART_LAYOUT_ID);
     std::hint::black_box(&ASSET_LAYOUT_ID);
     std::hint::black_box(ASSET_LAYOUT_ORDER);
+    // FFGN 1.0.13 (recover.rs): the NVML probe process after a GPU's fault (the driver answers for it: exit 0); before any
+    // coin's parser, so every coin's recovery can start it
+    if std::env::args().nth(1).as_deref() == Some(recover::PROBE_FLAG) {
+        let bus = std::env::args().nth(2).unwrap_or_default();
+        crate::conout::exit(recover::probe_main(&bus));
+    }
     // 1.8.0: a coin with a command line of its own (NEB; coins.rs) runs its module before the Pearl parser below
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // 1.8.0: different coins on different cards (--split): this process only supervises one miner process per group

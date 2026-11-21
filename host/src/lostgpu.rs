@@ -5,7 +5,7 @@
 //! such a card back only after a reboot of the rig, and the rig was found the next morning not mining at all.  Two answers:
 //!
 //! 1. `--reboot-on-lost-gpu MIN` (opt-in, default off): a GPU that is LOST - an Xid 79 ("fallen off the bus") and no attempts
-//!    since, its worker given up because the engine could not reopen the device after the retries (DEAD), or NVML no longer sees
+//!    since, its worker given up because the engine cannot open or reach the device (DEAD; 1.0.13: never for kernel faults), or NVML no longer sees
 //!    it (the handle query fails / "GPU is lost") - and stays lost for MIN minutes makes the miner ask the OS for a reboot:
 //!    HiveOS `sreboot` when present, else `systemctl reboot`; Windows `shutdown /r /t 60 /c "FreeForGem: GPU lost"`.
 //!    Safety: at most one reboot per REBOOT_EVERY_SECS (the state file STATE_FILE in the miner's state dir, kept across reboots
@@ -146,7 +146,7 @@ pub fn xid79_seen(dev: i32) -> bool {
 /// had a handle for it at the start and no longer sees it. A GPU that still makes attempts is never lost.
 pub fn lost_why(alive: bool, moved: bool, xid79: bool, nvml_lost: bool) -> Option<&'static str> {
     if !alive {
-        Some("its engine could not reopen the device after the retries (DEAD)")
+        Some("its engine cannot open or reach the device (DEAD: no device / device count fails / Xid 79 / no NVML handle; kernel faults never give this)")
     } else if moved {
         None
     } else if xid79 {

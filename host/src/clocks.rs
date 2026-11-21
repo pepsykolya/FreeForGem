@@ -909,6 +909,8 @@ pub fn table_mem(dev: i32, low: bool) -> Option<bool> {
             it.tab_used |= low;
             Some(low)
         }
+        // 1.0.13 (Rig01): a call refused in the GPU's quiet period after a fault is no verdict: the lock is set on a later call
+        Err(e) if crate::nvml::is_busy(&e) => None,
         Err(e) => {
             lg(format!(
                 "GPU{dev} (bus {}): --table-mclock: cannot {} ({e:#}); the table memory lock is off for this GPU",

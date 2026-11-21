@@ -104,6 +104,19 @@ pub fn forget(dir: &Path, uuid: &str) {
     }
 }
 
+/// FFG 1.8.0 (recover.rs, a fault-restart): the GPUs whose last crash was recorded within `before` s before `t` (the
+/// restart's time) or just after it: (uuid, record).
+pub fn crashed_near(dir: &Path, t: u64, before: u64) -> Vec<(String, Rec)> {
+    let _g = LOCK.lock().unwrap();
+    load(dir)["gpus"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(u, v)| (u.clone(), Rec::from_json(v)))
+        .filter(|(_, r)| r.last > 0 && r.last + before >= t && r.last <= t + 5)
+        .collect()
+}
+
 /// A crash of this GPU while mining; returns the record with the updated count.
 pub fn record_crash(dir: &Path, uuid: &str, bus: &str, name: &str, xid: u64, offset: Option<i32>) -> Rec {
     let mut r = get(dir, uuid).unwrap_or_default();

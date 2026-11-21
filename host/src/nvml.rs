@@ -343,6 +343,11 @@ impl Nvml {
         }
     }
 
+    /// 1.0.13 (recover.rs): the GPU's quiet period ends now, with a fresh handle (see `quiet::resume_with`).
+    pub fn resume_after_fault(&self, bus: &str) -> Result<()> {
+        quiet::resume_with(bus, |b| self.raw_by_bus(b).map(|h| h as usize))
+    }
+
     fn raw_by_bus(&self, bus: &str) -> Result<*mut c_void> {
         let c = CString::new(bus)?;
         let mut h = std::ptr::null_mut();
@@ -1004,6 +1009,57 @@ pub mod quiet {
         reg().iter().find(|s| s.key == k).map_or(0, |s| s.faults)
     }
 
+    /// 1.0.13 (recover.rs): time since the GPU's fault while its NVML calls are paused (None: not paused).
+    pub fn since_fault(bus: &str) -> Option<Duration> {
+        let k = norm_bus(bus)?;
+        reg().iter().find(|s| s.key == k).and_then(|s| s.fault).map(|t| t.elapsed())
+    }
+
+    /// 1.0.13 (recover.rs): the GPU's quiet period ends NOW (the driver answered a probe made in a process of its own, before
+    /// the GPU's new engine starts), with a fresh handle by its bus id (`lookup`); no resume hooks: the recovery sets the clocks,
+    /// then the safe offset itself, in that order, before the engine starts.  Err: a new fault meanwhile (BUSY) / no handle (GONE).
+    pub fn resume_with(bus: &str, lookup: impl FnOnce(&str) -> Result<usize>) -> Result<()> {
+        let Some(k) = norm_bus(bus) else { return Ok(()) };
+        let (lock, shown, el) = {
+            let mut reg = reg();
+            let i = find_or_add(&mut reg, &k, bus);
+            let s = &mut reg[i];
+            let el = s.fault.map(|t| t.elapsed());
+            if s.fault.take().is_some() {
+                QUIET_N.fetch_sub(1, Ordering::Relaxed);
+            }
+            s.mined = None;
+            s.stale = true;
+            (s.lock.clone(), s.shown.clone(), el)
+        };
+        let fresh = {
+            let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+            lookup(&shown)
+        };
+        let mut reg = reg();
+        let i = find_or_add(&mut reg, &k, bus);
+        let s = &mut reg[i];
+        if s.fault.is_some() {
+            bail!("{BUSY}");
+        }
+        let h = fresh.map_err(|e| anyhow!("{GONE}: {e:#}"))?;
+        s.stale = false;
+        s.cur = h;
+        s.epoch += 1;
+        s.resumed = Some(Instant::now());
+        if !s.handles.contains(&h) {
+            s.handles.push(h);
+        }
+        let line = format!(
+            "nvml: GPU bus {}: NVML calls for this GPU resume {} after its fault: the driver answered a probe process; a fresh NVML handle by its bus id, then its clocks and safe offset BEFORE its new engine starts",
+            crate::uv::short_bus(&s.shown),
+            el.map_or("now".into(), |e| format!("{:.0} s", e.as_secs_f64()))
+        );
+        drop(reg);
+        println!("{line}");
+        Ok(())
+    }
+
     /// The miner exits: the quiet period of a GPU is its time part only (its engine does not mine any more).
     pub fn set_exiting() {
         EXITING.store(true, Ordering::Relaxed);
@@ -1443,5 +1499,92 @@ mod tests {
         quiet::gpu_fault("cpu:0", "x");
         assert!(!quiet::is_quiet("cpu:0"));
         quiet::gpu_mining("cpu:0");
+    }
+
+    /// 1.0.13 (recover.rs) through the real quiet period and a mock NVML: the Rig01 sequence (an auto-uv step +365 faults,
+    /// Xid 43; the tuner had +350 confirmed) and the PC_AORUS (Windows) case (the driver still in its reset: the probe PROCESS
+    /// dies with 0xC0000005 twice).  Before the safe state: no NVML call for the GPU in this process (other threads' calls are
+    /// refused); then a fresh handle, the clocks, the offset +335 set and read back, and only then the engine starts.
+    #[test]
+    fn rig01_and_windows_recovery_sets_the_safe_offset_before_the_new_engine() {
+        use crate::recover::{Hw, Opts, Plan, SafeState};
+        use std::cell::{Cell, RefCell};
+        struct H<'a> {
+            nv: &'a Nvml,
+            d: Dev,
+            bus: &'a str,
+            probes: Cell<u32>,
+            cur: Cell<i32>,
+            log: RefCell<Vec<String>>,
+            in_quiet_calls: Cell<usize>,
+        }
+        impl Hw for H<'_> {
+            fn since_fault(&self) -> Option<Duration> {
+                quiet::since_fault(self.bus)
+            }
+            fn probe(&self) -> Result<(), String> {
+                // what the other threads see meanwhile: refused (the Windows fix: no call into nvml.dll during the reset)
+                assert_eq!(self.nv.power_w(self.d), None);
+                assert!(is_busy(&self.nv.set_offset(self.d, OffMode::Gpc, 365).unwrap_err()));
+                self.in_quiet_calls.set(mock::calls_for_bus(self.bus));
+                self.probes.set(self.probes.get() + 1);
+                if self.probes.get() <= 2 { Err("the probe process ended with exit code: 0xc0000005".into()) } else { Ok(()) }
+            }
+            fn resume(&self) -> Result<(), String> {
+                self.log.borrow_mut().push("resume".into());
+                self.nv.resume_after_fault(self.bus).map_err(|e| format!("{e:#}"))
+            }
+            fn apply_clocks(&self) -> Result<(), String> {
+                self.log.borrow_mut().push("clocks".into());
+                self.nv.temp_c(self.d).map(|_| ()).ok_or_else(|| "refused".to_string())
+            }
+            fn set_offset(&self, v: i32) -> Result<(), String> {
+                self.nv.set_offset(self.d, OffMode::Gpc, v).map_err(|e| format!("{e:#}"))?;
+                self.cur.set(v);
+                self.log.borrow_mut().push(format!("offset {v:+}"));
+                Ok(())
+            }
+            fn read_offset(&self) -> Option<i32> {
+                self.nv.get_offset(self.d, OffMode::Gpc).ok().map(|_| self.cur.get())
+            }
+            fn stopped(&self) -> bool {
+                false
+            }
+            fn sleep(&self, d: Duration) {
+                quiet::age(self.bus, d.as_secs_f64()); // the quiet period's clock, without waiting
+            }
+        }
+        let nv = mock::nvml();
+        let bus = "0000:b7:00.0";
+        let d = nv.by_bus(bus).unwrap();
+        let h1 = d.0 as usize;
+        let looked = mock::lookups(bus);
+        quiet::bind_dev(1007, bus); // FreeForGem: a GPU of a coin that reports its mining (NEB)
+        quiet::gpu_fault(bus, "GPU1 scan: cudaEventSynchronize(ctx->ev1[pe]): an illegal memory access was encountered");
+        let before = mock::calls_for_bus(bus);
+        let hw = H { nv: &nv, d, bus, probes: Cell::new(0), cur: Cell::new(365), log: RefCell::new(vec![]), in_quiet_calls: Cell::new(0) };
+        let plan = Plan { crashed: Some(365), confirmed: Some(350), base: 275, step: 15 };
+        let mut lines = vec![];
+        let r = crate::recover::recover_and_start(&hw, &plan, &Opts::default(), &mut |l| lines.push(l), |s: &SafeState| {
+            assert_eq!(hw.cur.get(), 335, "the new engine starts at failed - 2 steps");
+            assert!(!quiet::is_quiet(bus), "its NVML calls are back before the engine");
+            s.clone()
+        });
+        assert!(matches!(r, Ok(SafeState::Ready { offset: Some(335), lowered: true, nvml: true, .. })), "{r:?}");
+        assert_eq!(hw.probes.get(), 3, "two probe processes died (driver in its reset), the third answered");
+        assert_eq!(hw.in_quiet_calls.get(), before, "no NVML call for the GPU in this process before the probe answered");
+        assert_eq!(*hw.log.borrow(), vec!["resume", "clocks", "offset +335"]);
+        assert_eq!(mock::lookups(bus), looked + 1, "one fresh handle");
+        assert!(mock::calls_for_bus(bus) > before, "the calls after the resume reach NVML");
+        // the old handle maps to the fresh one (not the pre-fault handle)
+        assert!(mock::calls(h1).len() <= 1, "{:?}", mock::calls(h1));
+        assert_eq!(nv.power_w(d), Some(200.0));
+        assert!(lines.iter().any(|l| l.contains("does not answer")), "{lines:?}");
+        // a second fault at the safe offset: the same way again (the 1.0.12 run burnt 3 tries at +365 here)
+        quiet::gpu_fault(bus, "GPU1 scan: dtable build: an illegal memory access was encountered");
+        let plan2 = Plan { crashed: Some(335), confirmed: Some(335), base: 275, step: 15 };
+        hw.probes.set(2);
+        let s2 = crate::recover::recover_after_fault(&hw, &plan2, &Opts::default(), &mut |_| {});
+        assert!(matches!(s2, SafeState::Ready { offset: Some(305), lowered: true, .. }), "{s2:?}");
     }
 }

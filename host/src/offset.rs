@@ -24,7 +24,7 @@ struct State {
     cards: Vec<Card>,
 }
 
-fn nvml() -> Option<&'static Nvml> {
+pub(crate) fn nvml() -> Option<&'static Nvml> {
     static N: OnceLock<Option<Nvml>> = OnceLock::new();
     N.get_or_init(|| Nvml::load().ok()).as_ref()
 }
@@ -158,6 +158,60 @@ pub fn after_fault(bus: &str) {
     }
 }
 
+/// 1.0.13 (recover.rs): the offset last APPLIED on a card by this run (set and read back; the owner's at the start), not one
+/// deferred in its quiet period: the offset the card ran at when it faulted.
+fn applied_tab() -> &'static Mutex<Vec<(String, i32)>> {
+    static A: Mutex<Vec<(String, i32)>> = Mutex::new(Vec::new());
+    &A
+}
+
+fn note_applied(bus: &str, v: i32) {
+    let mut a = applied_tab().lock().unwrap_or_else(|e| e.into_inner());
+    a.retain(|x| !crate::nvml::quiet::same_bus(&x.0, bus));
+    a.push((bus.to_string(), v));
+}
+
+/// The offset applied on a managed card now (as far as this run knows); None: not managed.
+pub fn applied(bus: &str) -> Option<i32> {
+    if let Some(v) = applied_tab().lock().unwrap_or_else(|e| e.into_inner()).iter().find(|x| crate::nvml::quiet::same_bus(&x.0, bus)).map(|x| x.1) {
+        return Some(v);
+    }
+    info(bus).map(|i| i.0)
+}
+
+/// 1.0.13 (recover.rs): after a fault the card restarted at a safe offset below the crash: no set of this run goes above it
+/// any more (the owner's rule 2: failed - 2 steps, then a short check and mining, no new climb in this run).
+fn caps() -> &'static Mutex<Vec<(String, i32)>> {
+    static C: Mutex<Vec<(String, i32)>> = Mutex::new(Vec::new());
+    &C
+}
+
+pub fn set_cap(bus: &str, v: i32) {
+    let mut c = caps().lock().unwrap_or_else(|e| e.into_inner());
+    let old = c.iter().find(|x| crate::nvml::quiet::same_bus(&x.0, bus)).map(|x| x.1);
+    c.retain(|x| !crate::nvml::quiet::same_bus(&x.0, bus));
+    c.push((bus.to_string(), old.map_or(v, |o| o.min(v))));
+}
+
+pub fn cap(bus: &str) -> Option<i32> {
+    caps().lock().unwrap_or_else(|e| e.into_inner()).iter().find(|x| crate::nvml::quiet::same_bus(&x.0, bus)).map(|x| x.1)
+}
+
+/// `v` as `set` applies it (the cap after a fault).
+pub fn capped(bus: &str, v: i32) -> i32 {
+    cap(bus).map_or(v, |c| v.min(c))
+}
+
+/// 1.0.13 (recover.rs): the card's offset read now, also right after its quiet period (`current` gives no reading then).
+pub fn read_now(bus: &str) -> Option<i32> {
+    let g = state().lock().unwrap_or_else(|e| e.into_inner());
+    let c = g.as_ref()?.cards.iter().find(|c| c.bus == bus)?;
+    if let Some(s) = sim() {
+        return Some(s.lock().unwrap().get(bus).copied().unwrap_or(c.orig));
+    }
+    nvml()?.get_offset(c.dev, c.mode).ok()
+}
+
 pub fn current(bus: &str) -> Option<i32> {
     // 1.0.12: no reading in the card's quiet period after a fault, nor while its offset is being set again after it (a reading of a
     // reset card is not a change by someone else)
@@ -177,9 +231,15 @@ pub fn set(bus: &str, v: i32) -> Result<()> {
     let g = state().lock().unwrap();
     let Some(c) = g.as_ref().and_then(|s| s.cards.iter().find(|c| c.bus == bus)) else { bail!("GPU bus {bus}: offset not managed") };
     let nv = nvml().unwrap();
-    let v = v.clamp(c.lo, c.hi);
+    let want = v;
+    let v = capped(bus, v).clamp(c.lo, c.hi);
+    if v < want.clamp(c.lo, c.hi) {
+        lg(format!("GPU bus {bus}: offset {want:+} capped at {v:+} (the safe offset this GPU restarted at after its fault in this run)"));
+    }
     if let Some(s) = sim() {
         s.lock().unwrap().insert(bus.to_string(), v);
+        note_applied(bus, v);
+        note_wanted(bus, v, false);
         return Ok(());
     }
     if let Err(e) = nv.set_offset(c.dev, c.mode, v) {
@@ -194,10 +254,13 @@ pub fn set(bus: &str, v: i32) -> Result<()> {
     }
     let r = nv.get_offset(c.dev, c.mode)?;
     if r != v {
-        let _ = nv.set_offset(c.dev, c.mode, c.orig);
+        if nv.set_offset(c.dev, c.mode, c.orig).is_ok() {
+            note_applied(bus, c.orig);
+        }
         bail!("GPU bus {bus}: offset read back {r:+}, expected {v:+}; owner's {:+} put back", c.orig);
     }
     note_wanted(bus, v, false);
+    note_applied(bus, v);
     Ok(())
 }
 
