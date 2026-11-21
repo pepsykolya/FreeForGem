@@ -24,4 +24,21 @@ check neb '[  60s] GPU0 12.345 (150 W, 0.0823 MA/W)  GPU1 12.345 (150 W, 0.0823 
 check neb-avg '[ 600s] GPU0 12.0 (150 W, 0.08 MA/W)  GPU1 13.0 (150 W, 0.087 MA/W) | total 25.0 MA/s, 300 W, 0.083 MA/W | avg 5 min 30.5 MA/s (15.0 15.5) | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)' nebhash 30500.0 'MA/W'
 check neb-solo '[  60s] GPU0 12.345 | total 12.345 MA/s | found 3 (bad 0) | shares 3 | blocks sub 0 acc 0 rej 0' nebhash 12345.0 '1.8.0'
 check cmfd '[ 380s] GPU0 21.76 (237 W, 330742 FW/kWh) | total 87.46 FW/s | x | user sub 1 acc 1 rej 0 | fee sub 0 acc 0 rej 0' forgematrix_v4 0.08746 '1.8.0'
+check ting '[  60s] GPU0 5.128 (102 W, 0.0503 GH/W) group 7  GPU1 5.128 (102 W, 0.0503 GH/W) | total 10.256 GH/s, 204 W, 0.0503 GH/W | candidates 12 | user sub 9 acc 9 rej 0' ting 10256000 '0.0503 GH/W'
+# 1.8.0 split: lines of each group carry "[group] "; the last line of every group is merged
+checkj() { # name log_lines jq_expr expect
+  printf '%s\n' "$2" > "$T/miner.log"
+  ( . "$T/h-stats.sh"; r=$(jq -c "$3" <<< "$stats")
+    if [[ $r == "$4" ]]; then echo "ok   $1: $r"; else echo "FAIL $1: $r (want $4)"; exit 1; fi ) || fail=1
+}
+SPL='[neb] [  50s] GPU0 10.0 (150 W, 0.066 MA/W)  GPU1 11.0 (150 W, 0.073 MA/W) | total 21.0 MA/s, 300 W, 0.070 MA/W | found 1 (bad 0) | user sub 1 acc 1 rej 0 (stale 0)
+[pearl] [  55s] GPU2 60.0 | total 60.0 TH/s, 100 W, 0.600 TH/W | user sub 4 acc 4 rej 1 | fee sub 0 acc 0 rej 0
+[neb] [  60s] GPU0 12.0 (150 W, 0.08 MA/W)  GPU1 13.0 (150 W, 0.087 MA/W) | total 25.0 MA/s, 300 W, 0.083 MA/W | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)
+[neb] split: group neb started'
+checkj split-mixed "$SPL" '[.algo,.hs_units,.hs,.ar,.uptime]' '["nebhash","hs",[12000000,13000000,60000000000000],[7,1],60]'
+checkj split-ver "$SPL" '.ver' '"1.8.0 split: neb 0.083 MA/W + pearl 0.600 TH/W"'
+( printf '%s\n' "$SPL" > "$T/miner.log"; . "$T/h-stats.sh"; [[ $khs == 25000.0 ]] && echo "ok   split-khs: $khs (main group neb)" || { echo "FAIL split-khs: $khs (want 25000.0)"; exit 1; } ) || fail=1
+SPL2='[ting] [  60s] GPU0 5.0 (100 W, 0.05 GH/W) group 7 | total 5.0 GH/s, 100 W, 0.05 GH/W | candidates 1 | user sub 1 acc 1 rej 0
+[ting2] [  61s] GPU1 6.0 (100 W, 0.06 GH/W) group 7 | total 6.0 GH/s, 100 W, 0.06 GH/W | candidates 1 | user sub 2 acc 2 rej 0'
+checkj split-same-unit "$SPL2" '[.algo,.hs_units,.hs,.ar]' '["ting","khs",[5000000,6000000],[3,0]]'
 [[ $fail == 0 ]] && echo "h-stats: all coins ok" || { echo "h-stats: FAILED"; exit 1; }

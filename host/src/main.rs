@@ -66,6 +66,7 @@ mod prox;
 mod nvml;
 mod offset;
 mod silence;
+mod split;
 mod status;
 mod stratum;
 mod templimit;
@@ -1015,7 +1016,11 @@ USAGE:
                          the NEB options: freeforgem --algo neb --help
     freeforgem --pool crypto-connection.net:4073 --wallet ACCOUNT.RIG [OPTIONS]  Ting (DLR): see freeforgem --algo ting --help
     freeforgem --self-test [--algo cmfd|noid|neb|ting] [--devices N]
-    --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb, ting (one coin per run; HiveOS: the flight sheet)
+    --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb, ting (HiveOS: the flight sheet)
+    --split \"COIN:GPUS;...\"  different coins on different cards of one rig, e.g. --split \"neb:0,1;pearl:rest\": one miner
+                         process per group; a value tagged with a coin goes to that group only (--pool neb=URL --wallet
+                         neb=ADDR --lock-cclock pearl=1410), --split-args neb=\"--table-mclock 810\" adds options of one group;
+                         untagged options go to every group; log lines carry the group: [neb] ...
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360); several entries of one coin = pool list:
@@ -1433,6 +1438,13 @@ fn real_main() -> Result<()> {
     std::hint::black_box(ASSET_LAYOUT_ORDER);
     // 1.8.0: a coin with a command line of its own (NEB; coins.rs) runs its module before the Pearl parser below
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // 1.8.0: different coins on different cards (--split): this process only supervises one miner process per group
+    if argv.iter().any(|a| a == "--split-recover") {
+        return split::recover_main(&argv);
+    }
+    if let Some(spec) = split::split_arg(&argv) {
+        return split::run(&spec, &argv);
+    }
     if let Some(c) = coins::module_coin(&argv) {
         return dispatch_module(c);
     }
