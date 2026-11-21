@@ -20,7 +20,7 @@ flate2 = "1"
 rand = "0.9"
 ctrlc = { version = "3", features = ["termination"] }
 socket2 = { version = "0.5", features = ["all"] }
-sha2 = "0.10"   # CMFD self-test: SHA-256 of the official test vector output
+sha2 = { version = "0.10", features = ["compress"] }   # CMFD self-test: SHA-256 of the official test vector output; Ting: compress256 (the midstate)
 # NOID (Parano1d): official Poseidon2b crate (Apache-2.0), pinned to the commit the GPU kernels were verified against
 # (v2.0.x; the PoW code is unchanged in v2.1.0); host-side CPU check of every hit, self-test and tuning reference
 noid_poseidon2b = { git = "https://git.parano1d.org/ignotusnemo/parano1d", rev = "5302b3f303f1b26e0a6a3de6f6d15aad7b3161ea" }

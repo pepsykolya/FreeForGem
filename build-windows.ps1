@@ -17,6 +17,13 @@ if (-not (Test-Path "$lib\nebgpu.dll")) { throw "missing $lib\nebgpu.dll (prebui
 if (-not (Test-Path -LiteralPath $nebset)) { throw "missing $nebset (NEB dataset $($pin['NEB_DATASET_URL']); or set FFG_NEB_DATASET)" }
 if ((Get-FileHash "$lib\nebgpu.dll" -Algorithm SHA256).Hash.ToLower() -ne $pin['NEBGPU_DLL_SHA256']) { throw "$lib\nebgpu.dll is not the pinned NEB engine $($pin['NEBGPU_VERSION'])" }
 if ((Get-FileHash -LiteralPath $nebset -Algorithm SHA256).Hash.ToLower() -ne $pin['NEB_DATASET_SHA256']) { throw "$nebset is not the pinned NEB dataset" }
+# Ting / DLR (1.8.0, the FFGT module): tinggpu.dll (CUDA) + tinggpu_cl.dll (OpenCL), pinned by prebuilt\windows-x64\tinggpu.sha256
+foreach ($l in Get-Content "$lib\tinggpu.sha256") {
+    $h, $f = $l -split '\s+\*?', 2
+    if (-not (Test-Path "$lib\$f")) { throw "missing $lib\$f (prebuilt Ting GPU library)" }
+    $got = (Get-FileHash "$lib\$f" -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $h) { throw "$lib\$f is not the pinned build (sha256 $got, tinggpu.sha256: $h)" }
+}
 
 $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -products * -latest -property installationPath

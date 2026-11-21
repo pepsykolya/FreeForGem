@@ -69,6 +69,7 @@ mod silence;
 mod status;
 mod stratum;
 mod templimit;
+mod ting;
 mod update;
 mod uv;
 mod wintune;
@@ -1012,8 +1013,9 @@ USAGE:
     freeforgem --algo neb --pool stratum+tcp://neb.suprnova.cc:7804 --wallet neb1... [OPTIONS]   NEB (nebhash v2, MA/s); a NEB pool
                          URL (neb.suprnova.cc, work://, neb.ariabrain.com), --node (solo) or --gate selects NEB by itself;
                          the NEB options: freeforgem --algo neb --help
-    freeforgem --self-test [--algo cmfd|noid|neb] [--devices N]
-    --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb (one coin per run; HiveOS: the flight sheet)
+    freeforgem --pool crypto-connection.net:4073 --wallet ACCOUNT.RIG [OPTIONS]  Ting (DLR): see freeforgem --algo ting --help
+    freeforgem --self-test [--algo cmfd|noid|neb|ting] [--devices N]
+    --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb, ting (one coin per run; HiveOS: the flight sheet)
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360); several entries of one coin = pool list:
@@ -1407,6 +1409,7 @@ fn import_legacy_uv(dir: &std::path::Path) {
 fn dispatch_module(c: coins::Coin) -> Result<()> {
     match c {
         coins::Coin::Neb => neb::cli::main(),
+        coins::Coin::Ting => ting::cli::main(),
         other => bail!("{} has no command line of its own", coins::spec(other).name),
     }
 }

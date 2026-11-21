@@ -9,6 +9,7 @@
 #   [  60s] GPU0 12.345 ... | total 24.690 MA/s | found 3 (bad 0) | shares 3 | blocks sub 0 acc 0 rej 0 | ...      (NEB solo: shares to the node)
 # Units per coin (coins.rs): TH/s Pearl, FW/s CMFD, MH/s NOID, GH/s PROX, MA/s NEB (1 MA/s = 10^6 nebhash attempts per second;
 # HiveOS gets attempts/s as hashes, khs = MA/s x 1000). A new coin = one more unit below.
+#   [  60s] GPU0 5.128 (102 W, 0.0503 GH/W) group 7  GPU1 ... | total 10.256 GH/s, 204 W, 0.0503 GH/W | candidates ... | user sub 9 acc 9 rej 0 ...  (Ting)
 _ffgp_dir=$(dirname "${BASH_SOURCE[0]}")
 . "$_ffgp_dir/h-manifest.conf"
 _log="${CUSTOM_LOG_BASENAME}.log"
@@ -25,9 +26,11 @@ else
   mapfile -t _ths < <(grep -oP 'GPU[0-9]+ \K[0-9.]+' <<< "$_line")
   _total=$(grep -oP 'total \K[0-9.]+' <<< "$_line")
   # Pearl: TH/s -> per-GPU khs x1e9, khs x1e9; CMFD (as FreeForgeMiner reports it): FW/s as hs 1:1, khs = FW/s / 1000
-  # NOID: MH/s -> per-GPU khs x1000, khs = MH/s x 1000, algo parano1d; PROX: GH/s -> khs x1e6, algo proxima
+  # NOID: MH/s -> per-GPU khs x1000, khs = MH/s x 1000, algo parano1d; PROX: GH/s -> khs x1e6, algo proxima;
+  # Ting (1.8.0): GH/s with "| candidates" (PROX: "| hits") -> khs x1e6, algo ting (as FFGT)
   if [[ $_line == *' FW/s'* ]]; then _mul=1; _kmul=0.001; _fmt=%.2f; _units=hs; _algo=forgematrix_v4
   elif [[ $_line == *' MH/s'* ]]; then _mul=1000; _kmul=1000; _fmt=%.1f; _units=khs; _algo=parano1d
+  elif [[ $_line == *' GH/s'* && $_line == *'| candidates '* ]]; then _mul=1e6; _kmul=1e6; _fmt=%.0f; _units=khs; _algo=ting
   elif [[ $_line == *' GH/s'* ]]; then _mul=1e6; _kmul=1e6; _fmt=%.0f; _units=khs; _algo=proxima
   elif [[ $_line == *' MA/s'* ]]; then _mul=1000; _kmul=1000; _fmt=%.1f; _units=khs; _algo=nebhash
   else _mul=1e9; _kmul=1e9; _fmt=%.0f; _units=khs; _algo=$CUSTOM_ALGO; fi

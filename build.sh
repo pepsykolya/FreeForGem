@@ -19,6 +19,10 @@ EBSET=${FFG_NEB_DATASET:-prebuilt/neb-datasets.bin}   # NEB main-network dataset
 [ -f "$EBSET" ] || { echo "missing $EBSET (NEB dataset: $NEB_DATASET_URL; or set FFG_NEB_DATASET)"; exit 1; }
 echo "$NEBGPU_SO_SHA256  $EBLIB" | sha256sum -c --quiet || { echo "ERROR: $EBLIB is not the pinned NEB engine $NEBGPU_VERSION"; exit 1; }
 echo "$NEB_DATASET_SHA256  $EBSET" | sha256sum -c --quiet || { echo "ERROR: $EBSET is not the pinned NEB dataset"; exit 1; }
+# Ting / DLR (1.8.0, the FFGT module): tinggpu (CUDA) + tinggpu_cl (OpenCL), pinned by prebuilt/linux-x86_64/libtinggpu.sha256
+TLIB=prebuilt/linux-x86_64/libtinggpu.so
+TLIBCL=prebuilt/linux-x86_64/libtinggpu_cl.so
+(cd prebuilt/linux-x86_64 && sha256sum -c --quiet libtinggpu.sha256) || { echo "prebuilt Ting libraries missing or not the pinned build (libtinggpu.sha256)"; exit 1; }
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' host/Cargo.toml)
 
 # PROX dev fee: the dev account's pool secret is NOT in the source, it is compiled in from FFG_FEE_PASS_PROX (devfee.rs, option_env!).
@@ -63,7 +67,7 @@ fi
 
 D=dist/freeforgem-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" "$TLIB" "$TLIBCL" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
 cp "$EBSET" "$D/neb-datasets.bin"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
@@ -74,7 +78,7 @@ tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 HV=${VERSION//-/}
 H=dist/hive/freeforgem
 rm -rf dist/hive; mkdir -p "$H"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" "$TLIB" "$TLIBCL" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
 sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
 cp "$EBSET" "$H/neb-datasets.bin"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"

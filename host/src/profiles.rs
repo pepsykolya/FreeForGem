@@ -35,6 +35,7 @@ pub const NOID: Sections = Sections { profiles: "noid", trying: "noid_trying", v
 pub const CMFD: Sections = Sections { profiles: "cmfd_profiles", trying: "cmfd_trying", version: None };
 pub const PROX: Sections = Sections { profiles: "prox", trying: "prox_trying", version: None };
 pub const NEB: Sections = Sections { profiles: "neb", trying: "neb_trying", version: None };
+pub const TING: Sections = Sections { profiles: "ting", trying: "ting_trying", version: None };
 
 /// An entry type of a tuner: its JSON form and when two entries are the profile of the same clocks.
 pub trait Profile: Clone {
@@ -325,7 +326,7 @@ pub fn parse_marker(t: &Value) -> Option<Crash> {
 /// before a NOID run is as foreign to NOID as to Pearl).  Returns the offset recorded before the tuning.
 pub fn leftover_orig(db: &Value, uuid: &str, cur: i32) -> Option<i32> {
     let mut es: Vec<(i32, i32)> = Vec::new();
-    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles, PROX.profiles, NEB.profiles] {
+    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles, PROX.profiles, NEB.profiles, TING.profiles] {
         for e in db[sec][uuid].as_object().into_iter().flat_map(|m| m.values()) {
             if let (Some(o), Some(orig)) = (e["offset"].as_i64(), e["orig_offset"].as_i64()) {
                 es.push((o as i32, orig as i32));

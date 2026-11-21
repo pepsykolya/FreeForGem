@@ -8,9 +8,13 @@
 #                                        name has no "noid" in it)
 #   Wallet/worker  (CUSTOM_TEMPLATE)     %WAL%.%WORKER_NAME%  (or just %WAL%)
 # The coin follows the pool URL (cmfd+tls:// = CMFD, a NOID pool = NOID, a Proxima pool or http://NODE = PROX,
-# neb.suprnova.cc / neb.ariabrain.com / work:// = NEB); --algo pearl|cmfd|noid|prox|neb in Extra config forces it.
+# neb.suprnova.cc / neb.ariabrain.com / work:// = NEB; crypto-connection.net, ting://GATE:PORT or node://127.0.0.1:18440 =
+# Ting / DLR); --algo pearl|cmfd|noid|prox|neb|ting in Extra config forces it.
 #   NEB (1.8.0): Pool URL stratum+tcp://neb.suprnova.cc:7804, Wallet template %WAL%.%WORKER_NAME% (neb1...), Pass x
 #   (an ffgn gate / Aria: the Pass field is the token, sent to the FIRST pool only, owner's rule 5).
+#   Ting (1.8.0): Wallet template %WAL%.%WORKER_NAME% (WAL = the Ting account, 64 hex digits); Pass = x for a pool, the rig's
+#   password for an ffgt-gate (Pool URL ting://HOST:PORT, or HOST:PORT with --algo ting in Extra config);
+#   node://127.0.0.1:18440 = solo on a Ting node on this rig (Extra config: --node-dir DIR).
 #   Extra config   (CUSTOM_USER_CONFIG)  extra arguments, e.g. --devices 0,1
 cd "$(dirname "$0")"
 . ./h-manifest.conf
@@ -34,6 +38,16 @@ worker=${WORKER_NAME:-rig}
 extra=${CUSTOM_USER_CONFIG:-}
 if [[ $url == http://* ]]; then
   echo "--algo prox --solo $url --token ${CUSTOM_PASS:-} --seeker-name $worker $extra" > "$CUSTOM_CONFIG_FILENAME"
+  exit 0
+fi
+# Ting / DLR (1.8.0): solo on a node of this rig, or a pool / ffgt-gate with the Pass field passed through
+if [[ $url == node://* ]]; then
+  echo "--algo ting --node ${url#node://} $extra" > "$CUSTOM_CONFIG_FILENAME"
+  exit 0
+fi
+if [[ $url == *crypto-connection* || $url == ting://* || " $extra " == *" --algo ting "* || " $extra " == *" --algo dlr "* ]]; then
+  [[ " $extra " == *" --algo "* ]] || extra="--algo ting $extra"
+  echo "$poolargs --wallet $wallet --worker $worker --password ${CUSTOM_PASS:-x} $extra" > "$CUSTOM_CONFIG_FILENAME"
   exit 0
 fi
 pass=
