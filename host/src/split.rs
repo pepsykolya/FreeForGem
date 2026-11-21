@@ -307,6 +307,14 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
                 }
             }
         }
+        // an untagged option of other coins only (their parsers know it, this coin's does not)
+        if let Some((coins_of, val)) = coin_only(a) {
+            let tagged = val && next.and_then(|n| tag_of(n)).is_some();
+            if !tagged && !coins_of.contains(&g.coin) {
+                i += if val && next.is_some_and(|n| !n.starts_with("--")) { 2 } else { 1 };
+                continue;
+            }
+        }
         // untagged, but this group has a tagged value of the option: not for this group
         if own.contains(a.as_str()) && next.is_some_and(|n| !n.starts_with("--")) {
             i += 2;
@@ -346,6 +354,53 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
     out.push(coins::spec(g.coin).name.into());
     out.push("--devices".into());
     out.push(g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(","));
+    out
+}
+
+/// Options only some coins know (their parser refuses the rest: "unknown argument"). An untagged one goes only to the groups
+/// of those coins; (coins, takes a value). Docs agent 21.11: `--table-mclock 810` untagged made a Pearl group fail at start.
+fn coin_only(opt: &str) -> Option<(&'static [Coin], bool)> {
+    const NEB: &[Coin] = &[Coin::Neb];
+    const TING: &[Coin] = &[Coin::Ting];
+    const NEB_TING: &[Coin] = &[Coin::Neb, Coin::Ting];
+    const CLASSIC: &[Coin] = &[Coin::Pearl, Coin::Noid, Coin::Cmfd, Coin::Prox];
+    Some(match opt {
+        "--table-mclock" | "--tbig" | "--tbig-gb" | "--pl" | "--power-limit" | "--reboot-on-lost-gpu" | "--dataset" | "--gate-listen"
+        | "--gate-slots-bits" | "--gate-token-file" | "--kep1-kernel" | "--ramp-ms" | "--cpu-threads" | "--api" => (NEB, true),
+        "--debug-timing" | "--allow-other-dataset" | "--keep-hive-mem" | "--debug-supr" => (NEB, false),
+        "--node-dir" | "--node-token-file" | "--api-bind" | "--uv-group" => (TING, true),
+        "--no-group" | "--node-allow-remote" => (TING, false),
+        "--node" | "--gate" | "--api-port" => (NEB_TING, true),
+        "--cmfd-batch" | "--cmfd-dir" | "--cmfd-mode" | "--cmfd-model" | "--per-gpu-workers" => (&[Coin::Cmfd], true),
+        "--cmfd-skip-prepare" => (&[Coin::Cmfd], false),
+        "--noid-mode" => (&[Coin::Noid], true),
+        "--solo" | "--token" | "--seeker-name" => (&[Coin::Prox], true),
+        "--target-mode" | "--hash-prefix-len" => (&[Coin::Pearl], true),
+        "--cmp-driver" | "--uv-cpu" => (CLASSIC, false),
+        _ => return None,
+    })
+}
+
+/// The untagged coin-only options of `argv` that group `g` does not get (for one line in the log).
+fn dropped_for(argv: &[String], g: &Group) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        if let Some((_, n)) = split_span(argv, i) {
+            i += n;
+            continue;
+        }
+        let a = argv[i].as_str();
+        if let Some((coins_of, val)) = coin_only(a) {
+            let tagged = val && argv.get(i + 1).and_then(|n| tag_of(n)).is_some();
+            if !tagged && !coins_of.contains(&g.coin) && !out.iter().any(|x| x == a) {
+                out.push(a.to_string());
+            }
+            i += if val { 2 } else { 1 };
+            continue;
+        }
+        i += 1;
+    }
     out
 }
 
@@ -602,6 +657,10 @@ pub fn run(spec: &str, argv: &[String]) -> Result<()> {
         bail!("--split sets the cards of every group: leave out {} (found at argument {})", argv[d], d + 1);
     }
     for g in &groups {
+        let d = dropped_for(argv, g);
+        if !d.is_empty() {
+            lg(format!("group {}: {} not given to it (options of other coins; tag a value, e.g. --table-mclock neb=810)", blue(&g.name), d.join(", ")));
+        }
         lg(format!("group {}: GPU{} -> {} ({})", blue(&g.name), g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(",GPU"), blue(coins::spec(g.coin).name), coins::spec(g.coin).unit));
     }
     recover_stale(argv, &groups);
@@ -738,7 +797,8 @@ mod tests {
         argv.extend(["--split-args".into(), "neb=--table-mclock 810 --no-color".into(), "--split-args".into(), "ting=\"--no-group\"".into()]);
         let g = parse_spec("neb:0;ting:1", Some(2)).unwrap();
         assert_eq!(child_args(&argv, &g[0], 0), v("--api 127.0.0.1:4050 --table-mclock 810 --no-color --algo neb --devices 0"));
-        assert_eq!(child_args(&argv, &g[1], 1), v("--api 127.0.0.1:4051 --no-group --algo ting --devices 1"));
+        // Ting has no --api (NEB's option): it gets its own default port moved for the second group
+        assert_eq!(child_args(&argv, &g[1], 1), v("--no-group --api-port 4069 --algo ting --devices 1"));
         // Ting's default API port (4068) moves for a second group
         let g = parse_spec("ting:0;ting:1", Some(2)).unwrap();
         assert_eq!(child_args(&v("--split ting:0;ting:1"), &g[1], 1), v("--api-port 4069 --algo ting --devices 1"));
@@ -777,6 +837,21 @@ mod tests {
         // a short list: the cards past it take its last value
         assert_eq!(slice_list("1500,1650", &[3, 5]), "1650,1650");
         assert_eq!(slice_list("1500,1650,1800", &[0, 2]), "1500,1800");
+    }
+
+    #[test]
+    fn options_of_other_coins_are_not_given() {
+        let a = v("--split neb:0 pearl:1 ting:2 --table-mclock 810 --auto-uv --no-group --debug-timing --cmfd-mode eco");
+        let g = parse_spec("neb:0 pearl:1 ting:2", Some(3)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--table-mclock 810 --auto-uv --debug-timing --algo neb --devices 0"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--auto-uv --algo pearl --devices 1"));
+        assert_eq!(child_args(&a, &g[2], 2), v("--auto-uv --no-group --api-port 4070 --algo ting --devices 2"));
+        assert_eq!(dropped_for(&a, &g[1]), vec!["--table-mclock", "--no-group", "--debug-timing", "--cmfd-mode"]);
+        // a tagged value of a coin-only option still goes to its coin only
+        let a = v("--split neb:0 pearl:1 --node ting=127.0.0.1:1 --pl neb=140");
+        let g = parse_spec("neb:0 pearl:1", Some(2)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--pl 140 --algo neb --devices 0"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--algo pearl --devices 1"));
     }
 
     #[test]
