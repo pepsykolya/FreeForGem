@@ -218,7 +218,9 @@ Extra config: `--lock-cclock 1800 --auto-uv` (RTX 3070: 1500 = best GH/W, 1800 =
 built in). The memory is locked at its lowest clock by default (SHA-256 does not use it: about -10 % power; `--no-mem-lock` leaves it; a
 memory lock of the HiveOS OC profile is kept; CMP 50HX: the driver has no memory lock). Templates of one tip (solo, gate) or jobs of one
 height (pool) are searched together (about +40 % solo, +25 % pool on RTX 30; `--no-group` turns it off). The dashboard shows GH/s and
-GH/W, algo `ting`. Dev fee 1 % (60 s per 100 min) on crypto-connection.net. Options: `freeforgem --help`, section TING.
+GH/W, algo `ting`. Each GPU mines in an engine process of its own: a CUDA fault on one card restarts only that card in a few
+seconds (HiveOS shows one more `freeforgem` process per GPU; `--single-process` = the old mode). Dev fee 1 % (60 s per 100 min) on
+crypto-connection.net. Options: `freeforgem --algo ting --help`.
 
 ## Русский
 
@@ -412,7 +414,9 @@ Extra config: `--lock-cclock 1800 --auto-uv` (RTX 3070: 1500 — лучшие GH
 он встроен). Память по умолчанию лочится на самой низкой частоте (SHA-256 её не использует: около −10 % мощности; `--no-mem-lock`
 оставляет её; лок памяти из OC-профиля HiveOS сохраняется; у CMP 50HX драйвер не даёт лочить память). Шаблоны одной вершины (соло, шлюз)
 или задания одной высоты (пул) перебираются вместе (около +40 % в соло, +25 % на пуле на RTX 30; `--no-group` выключает). На панели —
-GH/s и GH/W, algo `ting`. Комиссия 1 % (60 с из 100 мин) на crypto-connection.net. Опции: `freeforgem --help`, раздел TING.
+GH/s и GH/W, algo `ting`. Каждая карта майнит в своём процессе движка: сбой CUDA на одной карте перезапускает только её за несколько
+секунд (в HiveOS на каждую карту виден ещё один процесс `freeforgem`; `--single-process` — старый режим). Комиссия 1 % (60 с из 100 мин)
+на crypto-connection.net. Опции: `freeforgem --algo ting --help`.
 
 ### Карты CMP: разблокированный драйвер (по желанию, по умолчанию выключено, 1.7.7)
 
