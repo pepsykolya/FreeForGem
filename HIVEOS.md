@@ -290,6 +290,9 @@ Rules for Extra config:
 - **HiveOS splits Extra config at spaces**, so `--split-args` takes one word: write `--split-args neb=--auto-uv` once for every
   flag of one group, and options with a value as tags (`--table-mclock neb=810`, not `--split-args neb="--table-mclock 810"`).
 - The flight sheet's Pass goes to every group that has no tagged `--password` of its own.
+- **Options only one coin knows need a tag:** `--table-mclock neb=810`, `--pl neb=140`, `--tbig neb=auto`,
+  `--split-args neb=--keep-hive-mem`, `--split-args ting=--no-group`. Untagged, they reach the other group too, and a coin that
+  does not know them stops with `unknown argument` and is restarted again and again.
 
 What the dashboard shows:
 
@@ -592,6 +595,9 @@ GH/s и GH/W, algo `ting`. Каждая карта майнит в своём п
 - **HiveOS режет Extra config по пробелам**, поэтому `--split-args` берёт одно слово: пишите `--split-args neb=--auto-uv` отдельно
   для каждого флага одной группы, а опции со значением — тегом (`--table-mclock neb=810`, а не `--split-args neb="--table-mclock 810"`).
 - Pass из листа уходит во все группы, у которых нет своего `--password` с тегом.
+- **Опциям, которые знает только одна монета, нужен тег:** `--table-mclock neb=810`, `--pl neb=140`, `--tbig neb=auto`,
+  `--split-args neb=--keep-hive-mem`, `--split-args ting=--no-group`. Без тега они попадут и в другую группу, а монета, которая их
+  не знает, остановится с `unknown argument` и будет перезапускаться снова и снова.
 
 Что показывает панель:
 

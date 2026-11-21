@@ -1581,12 +1581,16 @@ groups, two `rest` groups or a GPU the rig does not have stop the start with a m
   gives NEB 1800,1800 and Pearl 1410,1410 (past the end of a short list its last value, section 28). A **tagged list** counts the
   group's own cards: `--lock-cclock pearl=1410,1380` = the first and the second Pearl card. Sliced this way: `--lock-cclock`,
   `--lock-mclock`, `--moffset`, `--table-mclock`, `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`, `--temp-stop`,
-  `--power-limit` / `--pl`.
+  `--power-limit` / `--pl` (the NEB-only ones of them with a tag, see below).
 - **Flags for one group:** `--split-args COIN=--flag`, e.g. `--split-args neb=--auto-uv` (auto-uv on the NEB cards only). On a
   command line `--split-args neb="--table-mclock 810 --auto-uv"` takes several words; **HiveOS splits Extra config at spaces**,
   so there write one word per `--split-args` (`--split-args neb=--auto-uv --split-args neb=--keep-hive-mem`) and give options
   with a value as tags (`--table-mclock neb=810`).
 - `--coin-price neb=X,pearl=Y` is not a tag: it goes to every group as written.
+- **Options only one coin knows must be tagged** (or given with `--split-args`): NEB's `--table-mclock`, `--tbig`, `--tbig-gb`,
+  `--power-limit` / `--pl`, `--keep-hive-mem`, `--reboot-on-lost-gpu`, `--debug-timing`; Ting's `--no-group`, `--no-mem-lock`. An
+  untagged one goes to the other groups too, and a coin that does not know it stops with `unknown argument` (and is started again
+  and again): write `--table-mclock neb=810`, not `--table-mclock 810`.
 
 **How it runs.** The process you start is a supervisor: it starts one miner process of the same program per group
 (`--algo COIN --devices ITS_CARDS` plus that group's options). Every group has its own pool session, dev fee (1 % of its cards'
@@ -3278,12 +3282,16 @@ miner*, Miner *Custom* `freeforgem` (та же ссылка Installation URL), *
   `--lock-cclock 1800,1800,1410,1410` даёт NEB 1800,1800, а Pearl 1410,1410 (за концом короткого списка — его последнее значение,
   раздел 28). **Список с тегом** считает собственные карты группы: `--lock-cclock pearl=1410,1380` — первая и вторая карта Pearl.
   Так нарезаются: `--lock-cclock`, `--lock-mclock`, `--moffset`, `--table-mclock`, `--uv-offset`, `--uv-max`, `--uv-min`,
-  `--temp-limit`, `--temp-stop`, `--power-limit` / `--pl`.
+  `--temp-limit`, `--temp-stop`, `--power-limit` / `--pl` (те из них, что есть только у NEB, — с тегом, см. ниже).
 - **Флаги одной группы:** `--split-args МОНЕТА=--флаг`, например `--split-args neb=--auto-uv` (auto-uv только на картах NEB). В
   командной строке `--split-args neb="--table-mclock 810 --auto-uv"` берёт несколько слов; **HiveOS режет Extra config по
   пробелам**, поэтому там пишите по одному слову на каждый `--split-args` (`--split-args neb=--auto-uv --split-args neb=--keep-hive-mem`),
   а опции со значением — тегом (`--table-mclock neb=810`).
 - `--coin-price neb=X,pearl=Y` — не тег: уходит во все группы как есть.
+- **Опции, которые знает только одна монета, пишите с тегом** (или через `--split-args`): у NEB — `--table-mclock`, `--tbig`,
+  `--tbig-gb`, `--power-limit` / `--pl`, `--keep-hive-mem`, `--reboot-on-lost-gpu`, `--debug-timing`; у Ting — `--no-group`,
+  `--no-mem-lock`. Без тега такая опция уйдёт и в другие группы, и монета, которая её не знает, остановится с `unknown argument` (и
+  будет перезапускаться снова и снова): пишите `--table-mclock neb=810`, а не `--table-mclock 810`.
 
 **Как это работает.** Процесс, который вы запускаете, — супервизор: он запускает по процессу майнера (та же программа) на каждую
 группу (`--algo МОНЕТА --devices ЕЁ_КАРТЫ` плюс опции этой группы). У каждой группы свои сессия пула, комиссия (1 % времени её
@@ -4669,12 +4677,15 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 - **整台矿机的按卡列表会按各组的显卡切分：** `neb:0,1 pearl:2,3` 时，`--lock-cclock 1800,1800,1410,1410` 让 NEB 得到 1800,1800，
   Pearl 得到 1410,1410（超出较短列表末尾的显卡使用其最后一个值，第 28 节）。**带标签的列表**按组内自己的显卡计数：
   `--lock-cclock pearl=1410,1380` = Pearl 的第一张和第二张卡。按此方式切分的选项：`--lock-cclock`、`--lock-mclock`、`--moffset`、
-  `--table-mclock`、`--uv-offset`、`--uv-max`、`--uv-min`、`--temp-limit`、`--temp-stop`、`--power-limit` / `--pl`。
+  `--table-mclock`、`--uv-offset`、`--uv-max`、`--uv-min`、`--temp-limit`、`--temp-stop`、`--power-limit` / `--pl`（其中只有 NEB 才有的选项要带标签，见下）。
 - **单个组的开关：** `--split-args 币种=--开关`，例如 `--split-args neb=--auto-uv`（只在 NEB 显卡上运行 auto-uv）。在命令行中
   `--split-args neb="--table-mclock 810 --auto-uv"` 可以带多个词；**HiveOS 会在空格处拆分 Extra config**，因此在那里每个
   `--split-args` 只写一个词（`--split-args neb=--auto-uv --split-args neb=--keep-hive-mem`），带值的选项用标签写
   （`--table-mclock neb=810`）。
 - `--coin-price neb=X,pearl=Y` 不是标签：按原样发给所有组。
+- **只有一个币种认识的选项必须带标签**（或用 `--split-args`）：NEB 的 `--table-mclock`、`--tbig`、`--tbig-gb`、`--power-limit` /
+  `--pl`、`--keep-hive-mem`、`--reboot-on-lost-gpu`、`--debug-timing`；Ting 的 `--no-group`、`--no-mem-lock`。不带标签时它也会发给
+  其他组，不认识它的币种会以 `unknown argument` 停止（并且反复重启）：请写 `--table-mclock neb=810`，而不是 `--table-mclock 810`。
 
 **运行方式。** 你启动的进程是一个监管进程：它为每个组启动一个同一程序的矿工进程（`--algo 币种 --devices 该组显卡` 加上该组的
 选项）。每个组都有自己的矿池会话、开发者抽水（该组显卡时间的 1 %，使用自己的连接）、频率、本币种的显存策略（NEB：完整显存频率；
