@@ -251,6 +251,53 @@ pub fn init(device: i32) -> Result<()> {
     Ok(())
 }
 
+/// 1.8.0 (PC_AORUS 21.11.2026: `pg_init(0): cudaSetDevice(device): out of memory` right after another CUDA process ended,
+/// its context was still being torn down; the miner exited, then NVML answered 999 and the offset was not put back):
+/// a GPU that cannot give this process a context yet is waited for (every 5 s, up to 60 s) instead of ending the run.
+/// Only the context step is retried: nothing of this process is on the GPU before it.
+pub fn init_wait(device: i32) -> Result<()> {
+    let t0 = std::time::Instant::now();
+    let mut said = false;
+    loop {
+        match init(device) {
+            Ok(()) => {
+                if said {
+                    println!("GPU {device}: the GPU is free now, starting ({} s after the first try)", t0.elapsed().as_secs());
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                let m = format!("{e:#}");
+                if !context_busy(&m) || t0.elapsed() >= std::time::Duration::from_secs(60) {
+                    return Err(e);
+                }
+                if !said {
+                    println!("WARNING GPU {device}: no CUDA context yet ({m}): another process may still be leaving this GPU; waiting up to 60 s");
+                    said = true;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+}
+
+/// The context step failed for a reason that passes by itself (memory still held by an ending process, a busy GPU).
+fn context_busy(m: &str) -> bool {
+    let l = m.to_ascii_lowercase();
+    l.contains("cudasetdevice") && (l.contains("out of memory") || l.contains("busy") || l.contains("unavailable"))
+}
+
+#[cfg(test)]
+mod init_wait_tests {
+    #[test]
+    fn only_the_context_step_is_retried() {
+        assert!(super::context_busy("pg_init(0): cudaSetDevice(device): out of memory"));
+        assert!(super::context_busy("pg_init(1): cudaSetDevice(device): CUDA-capable device(s) is/are busy or unavailable"));
+        assert!(!super::context_busy("pg_init(0): cudaMalloc(A): out of memory"), "a buffer: not retried");
+        assert!(!super::context_busy("pg_init(0): cudaSetDevice(device): invalid device ordinal"));
+    }
+}
+
 pub fn set_job(br_t: &[i8], q1: &[i32], q2: &[i32], n: usize, k: usize) -> Result<()> {
     assert_eq!(br_t.len(), n * 128);
     assert!(q1.len() == k && q2.len() == k);

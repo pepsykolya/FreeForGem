@@ -122,7 +122,7 @@ pub fn spawn(
     ready: Sender<Result<()>>,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().name(format!("gpu{dev}")).spawn(move || {
-        if let Err(e) = gpu::init(dev) {
+        if let Err(e) = gpu::init_wait(dev) {
             let _ = ready.send(Err(e));
             return;
         }
