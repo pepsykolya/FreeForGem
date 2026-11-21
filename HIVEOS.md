@@ -11,10 +11,10 @@ as a different miner: **create a new flight sheet** with Miner name `freeforgem`
 flight sheet keeps running the old miner). Saved `--auto-uv` results are taken over automatically on the first start (from
 `/hive-config/freeforgempear/uv.json`). FreeForGemPear itself continues as the Pearl miner.
 
-**Installation URL (1.7.8):**
+**Installation URL (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
@@ -93,7 +93,8 @@ own settings back when it stops. Same hashrate, fewer watts (RTX 3070 at 1560 MH
 - **Mixed rig:** `--auto-uv` is enough — the limits are chosen per card (since 1.6.2): RTX 20xx / GTX 16xx up to +225,
   CMP 30HX/40HX up to +150 (CMP 50HX: +330), all others up to +495; `grep range` in the miner log shows each GPU's range. For manual
   control give one value per GPU in nvidia-smi order (GPU0, GPU1, ... as in the miner log; or in `--devices` order), no spaces:
-  `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = that GPU's default).
+  `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = that GPU's default). Since 1.8.0 a list may be shorter than the number of
+  GPUs: the last value goes to the remaining ones (see *Per-GPU lists* below).
 
 ### Automatic core lock (optional, `--auto-lock`, new in 1.7.8)
 
@@ -152,6 +153,9 @@ share of yours (while the GPUs hash and shares were expected) is reconnected, th
 ### Developer fee
 
 1%: 60 s in every 100 minutes, on the same pool you set. See [LICENSE](LICENSE).
+Since 1.8.0 every coin's fee runs on a connection of its own: NEB on your pool list (solo / gate: the public NEB pools), Ting on
+crypto-connection.net, PROX on proximamine, CMFD inside the engine (36 s per hour per GPU). With `--split` every group pays 1 % of
+its own cards' time. A slot whose connection was not ready is tried again up to 3 times.
 
 ### NOID (Parano1d), since 1.7.0
 
@@ -203,15 +207,31 @@ resets the lock and the offset: since 1.7.8 the miner sets them again (log: `...
 GPU per hour). The dashboard shows GH/s and GH/W. Pools, options and the dev fee (1%): MANUAL.md, section 21.
 
 ### NEB (Neural Engine Byte), since 1.8.0
-- Custom miner `freeforgem` (the same package), Hash algorithm `nebhash`.
-- Pool URL `stratum+tcp://neb.suprnova.cc:7804` (backup: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`),
-  Wallet template `%WAL%.%WORKER_NAME%` with your `neb1...` wallet, Pass `x`. The URL selects NEB; `--algo neb` in Extra config
-  forces it for another NEB pool.
+
+Flight sheet: coin `NEB` (add it as a custom coin if it is not in the list), wallet `neb1...`, Pool *Configure in miner*, Miner
+*Custom* `freeforgem` (the same Installation URL):
+
+| | Suprnova | your gate (several rigs on one NEB node) |
+|---|---|---|
+| Hash algorithm | `nebhash` | `nebhash` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (the blocks pay the node's `--miner-lock`) |
+| Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (backup: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://GATE_IP:3442` |
+| Pass | `x` | the gate token |
+| Extra config arguments | e.g. `--auto-uv --lock-cclock 1800 --table-mclock 810` | same |
+
+- The URL selects NEB; `--algo neb` in Extra config forces it for another NEB pool.
 - The OC profile may keep Pearl's memory lock (810 MHz): while NEB mines the memory runs at its maximum and the profile's lock is
-  put back when the miner stops. Do not lower the memory for NEB.
-- HiveOS shows khs (MA/s x 1000), the 5-minute rate, MA/W next to the version, `LOCK NOT HELD` and NEB memory warnings.
+  put back when the miner stops. Do not lower the memory for NEB. `--table-mclock 810` lowers it only on the pure digest-table
+  path (RTX 3070: -10 W, +8-10 % MA/W); `--tbig auto` (default) builds a partial L=3 table where it pays back.
+- Engine nebgpu 0.8.1, one engine process per GPU: a CUDA fault on one card restarts only that card (HiveOS shows one more
+  `freeforgem` process per GPU).
+- `--power-limit N` (`--pl N`) is optional and never on by default: the miner limits the power with the core lock and the offset.
+  `--reboot-on-lost-gpu 10` (opt-in) reboots the rig when a GPU has been lost (fallen off the bus) for 10 minutes.
+- HiveOS shows khs (MA/s x 1000), the 5-minute rate, MA/W next to the version, `LOCK NOT HELD`, `NO TABLE`, `GPU LOST`,
+  `REBOOT NEEDED` and NEB memory warnings.
 - A rig that mined NEB with `ffgn-hive` keeps its tuned offsets (`/hive-config/ffgn/uv.json` is imported on the first start).
-- Switching a rig between Pearl and NEB = another flight sheet (one coin per run in 1.8.0).
+- The whole rig on NEB = this flight sheet; NEB on some cards and another coin on the others: *Different coins on different
+  cards* below. Details: MANUAL.md, section 24.
 
 ### Ting / Daler (DLR), since 1.8.0
 
@@ -231,7 +251,85 @@ memory lock of the HiveOS OC profile is kept; CMP 50HX: the driver has no memory
 height (pool) are searched together (about +40 % solo, +25 % pool on RTX 30; `--no-group` turns it off). The dashboard shows GH/s and
 GH/W, algo `ting`. Each GPU mines in an engine process of its own: a CUDA fault on one card restarts only that card in a few
 seconds (HiveOS shows one more `freeforgem` process per GPU; `--single-process` = the old mode). Dev fee 1 % (60 s per 100 min) on
-crypto-connection.net. Options: `freeforgem --algo ting --help`.
+crypto-connection.net. Options: `freeforgem --algo ting --help`. Details: MANUAL.md, section 26.
+
+### Different coins on different cards (`--split`), since 1.8.0
+
+One flight sheet for the whole rig: the **main coin** is set in the flight sheet as usual (its Pool URL, Wallet and Pass), the
+**other coin** goes into *Extra config arguments* with values tagged by its name (`--pool pearl=...`, `--wallet pearl=...`). A
+tagged value replaces the flight sheet's untagged value for that coin's group, so the flight sheet's pool and wallet stay with
+the main coin.
+
+**Example: GPU0 and GPU1 mine NEB on Suprnova, GPU2 and GPU3 Pearl on Kryptex** (replace the placeholder wallets with yours):
+
+1. **Wallets.** A NEB wallet (`neb1...`). The PRL address goes into Extra config, so it needs no wallet entry in HiveOS.
+2. **Flight sheet:** coin `NEB`, the NEB wallet, Pool *Configure in miner*, Miner *Custom* → *Setup Miner Config*:
+
+   | Field | Value |
+   |---|---|
+   | Miner name | `freeforgem` |
+   | Installation URL | the link above (1.8.0) |
+   | Hash algorithm | `nebhash` |
+   | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
+   | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` |
+   | Pass | `x` |
+   | Extra config arguments | `--split neb:0,1 pearl:2,3 --pool pearl=prl-eu.kryptex.network:7048 --wallet pearl=prl1YOUR_PRL_ADDRESS --lock-cclock neb=1800 --lock-cclock pearl=1410 --table-mclock neb=810 --auto-uv` |
+
+3. **Overclocking:** the OC profile may lock the memory of all cards at 810: the NEB cards run at the full memory clock while they
+   mine (and get 810 back on exit), the Pearl cards keep it. The core locks come from `--lock-cclock neb=...` / `pearl=...`.
+4. **Apply** the flight sheet to the rig.
+
+Rules for Extra config:
+
+- **The groups:** `COIN:GPUS` with the GPU numbers of the dashboard (`neb:0,1 pearl:2,3`, ranges `neb:0-3`, one group may take
+  `rest`: `neb:0,1 pearl:rest`). Spaces, `,` and `;` are equal separators, no quotes needed. One card mines one coin.
+- **Untagged options go to every group** (`--auto-uv`, the worker of the template); **tagged** ones only to their coin's group
+  (`--lock-cclock pearl=1410`).
+- **A per-GPU list without a tag is for the whole rig** and is sliced per group: `--lock-cclock 1800,1800,1410,1410` gives NEB
+  1800,1800 and Pearl 1410,1410.
+- **HiveOS splits Extra config at spaces**, so `--split-args` takes one word: write `--split-args neb=--auto-uv` once for every
+  flag of one group, and options with a value as tags (`--table-mclock neb=810`, not `--split-args neb="--table-mclock 810"`).
+- The flight sheet's Pass goes to every group that has no tagged `--password` of its own.
+
+What the dashboard shows:
+
+- the **algo and the total** of the group with the most cards (of groups of equal size, one of them);
+- **every card** with its own rate; when the coins have different units, every card is given as its plain rate per second (NEB
+  attempts/s, Pearl hashes/s), so do not compare those numbers across coins;
+- **accepted / rejected** shares of all groups together;
+- the **version column** lists every group with its efficiency: `1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`, plus tags such as
+  `LOCK NOT HELD` or `GPU LOST` of the group they belong to.
+
+Every group runs as its own miner process with its own pool session, dev fee, clocks, memory policy, tuners and restarts. A group
+that ends restarts on its own after 10 s (after 3 ends within 10 min: a 10-minute pause) while the other groups keep mining.
+`miner stop` stops every group, and each puts its own clocks back. In the miner log (`/var/log/miner/freeforgem/freeforgem.log`)
+every line of a group starts with `[neb]` / `[pearl]` (light blue in the miner screen), the supervisor's own lines with `split:`.
+Tested on a 4-card HiveOS rig (2 NEB + 2 Pearl). Details: MANUAL.md, section 27.
+
+### Per-GPU lists of any length, since 1.8.0
+
+Every per-GPU option (`--lock-cclock`, `--lock-mclock`, `--moffset`, `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`,
+`--temp-stop`, NEB `--table-mclock` and `--power-limit`) takes a list of any length, like the OC lists of HiveOS: a shorter list
+gives its last value to the remaining GPUs, values past the last GPU are ignored, `-` / an empty field / `0` where 0 is not
+valid = that GPU is left alone. So one flight sheet fits rigs with different numbers of cards: on an 8-card rig
+`--table-mclock 810,810,-,-` = 810 on GPU0 and GPU1, the other six untouched (before 1.8.0: "4 values for 8 device(s)" and no
+start). MANUAL.md, section 28.
+
+### Faults and lost GPUs, since 1.8.0
+
+- After a crash auto-uv resumes at the crashed offset **minus 2 steps** (every coin).
+- After a GPU fault the card first gets a **safe state** (the driver's reset, a probe, its clocks and a safe offset), and only
+  then its engine starts again.
+- **FAULTY:** 3 faults within 10 minutes at the safe offset (NEB, Ting): that card pauses 10 minutes, then gets a new engine. Not
+  lost, no reboot needed: check its clocks, power and riser.
+- **DEAD / LOST:** only a card that cannot be opened any more, an Xid 79 (fell off the bus) or a card NVML no longer sees: it
+  counts 0 on the dashboard (never its last rate, so the HiveOS watchdog sees the real total) and the version column shows
+  `GPU LOST` / `REBOOT NEEDED`. Opt-in `--reboot-on-lost-gpu 10` (NEB) reboots the rig after 10 minutes of it (never in the
+  first 10 minutes of the miner, at most once an hour).
+- **Stale shares:** a job the pool answers "job not found" for is dropped at once; when the pool's answers come seconds late the
+  log says `WARNING: the pool answers late` (lost packets on the rig's network: check its network card, cable and switch).
+
+MANUAL.md, section 29.
 
 ## Русский
 
@@ -242,10 +340,10 @@ HiveOS это другой майнер: **создайте новый полё�
 `freeforgempear` продолжит запускать старый майнер). Сохранённые результаты `--auto-uv` подхватываются автоматически при первом
 запуске (из `/hive-config/freeforgempear/uv.json`). Сам FreeForGemPear остаётся майнером Pearl.
 
-**Ссылка для установки (1.7.8):**
+**Ссылка для установки (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
@@ -323,7 +421,8 @@ HiveOS кэширует скачанный архив по имени файла
 - **Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте (с 1.6.2): RTX 20xx / GTX 16xx до +225,
   CMP 30HX/40HX до +150 (CMP 50HX: +330), остальные до +495; `grep range` в логе майнера показывает диапазон каждой карты. Для ручного
   управления — по значению на карту в порядке nvidia-smi (GPU0, GPU1, ... как в логе майнера; или в порядке `--devices`), без пробелов:
-  `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = значение по умолчанию для карты).
+  `--auto-uv --uv-max 225,225,495,495,495,150` (`-` = значение по умолчанию для карты). С 1.8.0 список может быть короче числа
+  карт: оставшиеся получают последнее значение (см. *Списки по картам* ниже).
 
 ### Автовыбор лока ядра (по желанию, `--auto-lock`, новое в 1.7.8)
 
@@ -409,6 +508,34 @@ Extra config: `--auto-uv --lock-cclock 1500` (RTX 3070, RTX 3070 Laptop, RTX 308
 сбрасывает лок и оффсет: с 1.7.8 майнер ставит их заново (в логе `... was reset by an OC apply ... set again`, не больше 4 раз на GPU в час).
 На панели видны GH/s и GH/W. Пулы, опции и комиссия (1%): MANUAL.md, раздел 21.
 
+### NEB (Neural Engine Byte), с 1.8.0
+
+Полётный лист: монета `NEB` (если её нет в списке — добавьте как свою), кошелёк `neb1...`, Pool *Configure in miner*, Miner
+*Custom* `freeforgem` (та же ссылка Installation URL):
+
+| | Suprnova | ваш шлюз (несколько ригов на одной ноде NEB) |
+|---|---|---|
+| Hash algorithm | `nebhash` | `nebhash` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (блоки получает `--miner-lock` ноды) |
+| Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (с резервным: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://IP_ШЛЮЗА:3442` |
+| Pass | `x` | токен шлюза |
+| Extra config arguments | например `--auto-uv --lock-cclock 1800 --table-mclock 810` | то же |
+
+- Монету NEB выбирает сам URL; `--algo neb` в Extra config включает её для другого пула NEB.
+- В профиле разгона можно оставить лок памяти под Pearl (810 МГц): пока майнит NEB, память работает на максимуме, а при остановке
+  майнера лок профиля возвращается. Не опускайте память для NEB. `--table-mclock 810` опускает её только на чистом пути таблицы
+  дайджестов (RTX 3070: −10 Вт, +8–10 % MA/W); `--tbig auto` (по умолчанию) строит частичную таблицу L=3 там, где она окупается.
+- Движок nebgpu 0.8.1, свой процесс движка на каждую карту: сбой CUDA на одной карте перезапускает только её (в HiveOS на каждую
+  карту виден ещё один процесс `freeforgem`).
+- `--power-limit N` (`--pl N`) — только по желанию и по умолчанию никогда не включается: майнер ограничивает мощность локом ядра и
+  offset. `--reboot-on-lost-gpu 10` (по желанию) перезагружает риг, если карта потеряна (отвалилась от шины) 10 минут.
+- HiveOS показывает khs (MA/s x 1000), скорость за 5 минут, MA/W рядом с версией, `LOCK NOT HELD`, `NO TABLE`, `GPU LOST`,
+  `REBOOT NEEDED` и предупреждения NEB о памяти.
+- Риг, который майнил NEB через `ffgn-hive`, сохраняет подобранные offset (`/hive-config/ffgn/uv.json` подхватывается при первом
+  старте).
+- Весь риг на NEB — этот полётный лист; NEB на части карт, а на остальных другая монета — *Разные монеты на разных картах* ниже.
+  Подробно: MANUAL.md, раздел 24.
+
 ### Ting / Daler (DLR), с 1.8.0
 
 Майнер Ting FFGT с 1.8.0 входит в FreeForGem (те же ядра, те же цифры). NVIDIA GTX 10 и новее (CUDA), AMD (OpenCL).
@@ -427,7 +554,84 @@ Extra config: `--lock-cclock 1800 --auto-uv` (RTX 3070: 1500 — лучшие GH
 или задания одной высоты (пул) перебираются вместе (около +40 % в соло, +25 % на пуле на RTX 30; `--no-group` выключает). На панели —
 GH/s и GH/W, algo `ting`. Каждая карта майнит в своём процессе движка: сбой CUDA на одной карте перезапускает только её за несколько
 секунд (в HiveOS на каждую карту виден ещё один процесс `freeforgem`; `--single-process` — старый режим). Комиссия 1 % (60 с из 100 мин)
-на crypto-connection.net. Опции: `freeforgem --algo ting --help`.
+на crypto-connection.net. Опции: `freeforgem --algo ting --help`. Подробно: MANUAL.md, раздел 26.
+
+### Разные монеты на разных картах (`--split`), с 1.8.0
+
+Один полётный лист на весь риг: **основная монета** задаётся в листе как обычно (её Pool URL, Wallet и Pass), **вторая монета**
+пишется в *Extra config arguments* значениями с тегом её имени (`--pool pearl=...`, `--wallet pearl=...`). Значение с тегом заменяет
+для группы этой монеты значение из листа без тега, поэтому пул и кошелёк листа остаются основной монете.
+
+**Пример: GPU0 и GPU1 майнят NEB на Suprnova, GPU2 и GPU3 — Pearl на Kryptex** (кошельки-заглушки замените своими):
+
+1. **Кошельки.** Кошелёк NEB (`neb1...`). Адрес PRL пишется в Extra config, отдельный кошелёк в HiveOS для него не нужен.
+2. **Полётный лист:** монета `NEB`, кошелёк NEB, Pool *Configure in miner*, Miner *Custom* → *Setup Miner Config*:
+
+   | Поле | Значение |
+   |---|---|
+   | Miner name | `freeforgem` |
+   | Installation URL | ссылка выше (1.8.0) |
+   | Hash algorithm | `nebhash` |
+   | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
+   | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` |
+   | Pass | `x` |
+   | Extra config arguments | `--split neb:0,1 pearl:2,3 --pool pearl=prl-eu.kryptex.network:7048 --wallet pearl=prl1ВАШ_АДРЕС_PRL --lock-cclock neb=1800 --lock-cclock pearl=1410 --table-mclock neb=810 --auto-uv` |
+
+3. **Разгон:** профиль может лочить память всех карт на 810: карты NEB на время майнинга получат полную частоту памяти (и 810
+   обратно при выходе), карты Pearl её сохранят. Локи ядра задают `--lock-cclock neb=...` / `pearl=...`.
+4. **Примените** лист к ригу.
+
+Правила для Extra config:
+
+- **Группы:** `МОНЕТА:КАРТЫ` с номерами карт как на панели (`neb:0,1 pearl:2,3`, диапазоны `neb:0-3`, одна группа может взять
+  `rest`: `neb:0,1 pearl:rest`). Пробел, `,` и `;` — равноценные разделители, кавычки не нужны. Одна карта майнит одну монету.
+- **Опции без тега идут во все группы** (`--auto-uv`, воркер из шаблона); **с тегом** — только в группу своей монеты
+  (`--lock-cclock pearl=1410`).
+- **Список по картам без тега — на весь риг**, он нарезается по группам: `--lock-cclock 1800,1800,1410,1410` даёт NEB 1800,1800, а
+  Pearl 1410,1410.
+- **HiveOS режет Extra config по пробелам**, поэтому `--split-args` берёт одно слово: пишите `--split-args neb=--auto-uv` отдельно
+  для каждого флага одной группы, а опции со значением — тегом (`--table-mclock neb=810`, а не `--split-args neb="--table-mclock 810"`).
+- Pass из листа уходит во все группы, у которых нет своего `--password` с тегом.
+
+Что показывает панель:
+
+- **algo и общий хешрейт** группы, в которой больше карт (из групп равного размера — одной из них);
+- **каждую карту** с её собственной скоростью; если у монет разные единицы, каждая карта отдаётся в своих «штуках в секунду» (NEB —
+  попытки/с, Pearl — хеши/с), так что сравнивать эти числа между монетами нельзя;
+- **принятые / отклонённые** шары всех групп вместе;
+- **колонка версии** — каждая группа со своей эффективностью: `1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`, плюс метки вроде
+  `LOCK NOT HELD` или `GPU LOST` той группы, к которой они относятся.
+
+Каждая группа работает своим процессом майнера со своей сессией пула, комиссией, частотами, политикой памяти, тюнерами и
+перезапусками. Завершившаяся группа сама запускается снова через 10 с (после 3 завершений за 10 мин — пауза 10 мин), остальные
+группы майнят дальше. `miner stop` останавливает все группы, и каждая возвращает свои частоты. В логе майнера
+(`/var/log/miner/freeforgem/freeforgem.log`) каждая строка группы начинается с `[neb]` / `[pearl]` (голубым на экране майнера),
+собственные строки супервизора — со `split:`. Проверено на HiveOS-риге из 4 карт (2 NEB + 2 Pearl). Подробно: MANUAL.md, раздел 27.
+
+### Списки по картам любой длины, с 1.8.0
+
+Каждая опция по картам (`--lock-cclock`, `--lock-mclock`, `--moffset`, `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`,
+`--temp-stop`, у NEB — `--table-mclock` и `--power-limit`) принимает список любой длины, как списки разгона HiveOS: короткий список
+отдаёт последнее значение оставшимся картам, значения после последней карты игнорируются, `-` / пустое поле / `0` там, где ноль
+недопустим, — карта не трогается. Поэтому один лист подходит ригам с разным числом карт: на риге из 8 карт
+`--table-mclock 810,810,-,-` — 810 на GPU0 и GPU1, остальные шесть не трогаются (до 1.8.0: «4 values for 8 device(s)», и майнер не
+стартовал). MANUAL.md, раздел 28.
+
+### Сбои и потерянные карты, с 1.8.0
+
+- После падения auto-uv продолжает с упавшего offset **минус 2 шага** (все монеты).
+- После сбоя карта сначала получает **безопасное состояние** (сброс драйвера, проверка, её частоты и безопасный offset), и только
+  потом её движок стартует снова.
+- **FAULTY:** 3 сбоя за 10 минут на безопасном offset (NEB, Ting) — карта отдыхает 10 минут, затем получает новый движок. Она не
+  потеряна, перезагрузка не нужна: проверьте её частоты, питание и райзер.
+- **DEAD / LOST:** только карта, которая больше не открывается, Xid 79 (отвалилась от шины) или карта, которую больше не видит
+  NVML: на панели она считается нулём (а не последней скоростью, поэтому вотчдог HiveOS видит настоящий итог), а в колонке версии —
+  `GPU LOST` / `REBOOT NEEDED`. По желанию `--reboot-on-lost-gpu 10` (NEB) перезагружает риг через 10 минут такого состояния (не в
+  первые 10 минут работы майнера и не чаще раза в час).
+- **Устаревшие шары:** задание, на которое пул ответил «job not found», сразу гасится; если ответы пула приходят с опозданием в
+  секунды, лог пишет `WARNING: the pool answers late` (теряются пакеты в сети рига: проверьте сетевую карту, кабель и свитч).
+
+MANUAL.md, раздел 29.
 
 ### Карты CMP: разблокированный драйвер (по желанию, по умолчанию выключено, 1.7.7)
 
@@ -455,3 +659,6 @@ CMFD: движки перезапускаются на следующем пул
 ### Комиссия разработчика
 
 1%: 60 секунд из каждых 100 минут, на том же пуле, что указан у вас. Подробнее — в [LICENSE](LICENSE).
+С 1.8.0 комиссия каждой монеты идёт по своему соединению: NEB — на вашем списке пулов (соло / шлюз: публичные пулы NEB), Ting — на
+crypto-connection.net, PROX — на proximamine, CMFD — внутри движка (36 с в час на карту). С `--split` каждая группа платит 1 % времени
+своих карт. Если соединение к слоту не готово, слот повторяется до 3 раз.
