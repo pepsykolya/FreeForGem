@@ -11,6 +11,10 @@ PLIB=prebuilt/linux-x86_64/libproxgpu.so   # PROX (Proxima): ffgprox kernel A, c
 [ -f "$LIB" ] || { echo "missing $LIB (prebuilt GPU library)"; exit 1; }
 [ -f "$NLIB" ] || { echo "missing $NLIB (prebuilt NOID GPU library)"; exit 1; }
 [ -f "$PLIB" ] || { echo "missing $PLIB (prebuilt PROX GPU library)"; exit 1; }
+# Ting / DLR (1.8.0, the FFGT module): tinggpu (CUDA) + tinggpu_cl (OpenCL), pinned by prebuilt/linux-x86_64/libtinggpu.sha256
+TLIB=prebuilt/linux-x86_64/libtinggpu.so
+TLIBCL=prebuilt/linux-x86_64/libtinggpu_cl.so
+(cd prebuilt/linux-x86_64 && sha256sum -c --quiet libtinggpu.sha256) || { echo "prebuilt Ting libraries missing or not the pinned build (libtinggpu.sha256)"; exit 1; }
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' host/Cargo.toml)
 
 # PROX dev fee: the dev account's pool secret is NOT in the source, it is compiled in from FFG_FEE_PASS_PROX (devfee.rs, option_env!).
@@ -55,7 +59,7 @@ fi
 
 D=dist/freeforgem-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$TLIB" "$TLIBCL" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 # HiveOS custom miner package: freeforgem-<version>_hiveos.tar.gz with a top-level freeforgem/ folder ("_hiveos" has no -,
@@ -65,7 +69,7 @@ tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 HV=${VERSION//-/}
 H=dist/hive/freeforgem
 rm -rf dist/hive; mkdir -p "$H"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$TLIB" "$TLIBCL" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
 sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"
 chmod +x "$H"/h-*.sh "$H/freeforgem"

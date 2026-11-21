@@ -34,6 +34,11 @@ pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat
 pub fn fee_wallet(pool: &str) -> String {
     if crate::stratum::is_luckypool(pool) { format!("{FEE_WALLET}+{FEE_NOCK}") } else { FEE_WALLET.to_string() }
 }
+/// Ting / DLR (1.8.0, the FFGT module): the FFGT developer account (public part only; its wallet is not on any miner) and the
+/// fee pool.  Worker `ffg`: fee shares of FreeForGem are told apart from FFGT's (`ffgt`) on the pool.
+pub const FEE_ACCOUNT_TING: &str = "15528e405a0233fe8bdecabc69b88a4d845c2308809bd59d81e5f293bceeb670";
+pub const FEE_WORKER_TING: &str = "ffg";
+pub const FEE_POOL_TING: &str = "crypto-connection.net:4073";
 /// One fee slot of SLOT_SECS in every CYCLE_SECS: 60 / 6000 = 1%.
 pub const CYCLE_SECS: u64 = 100 * 60;
 pub const SLOT_SECS: u64 = 60;
@@ -117,6 +122,12 @@ impl DevFee {
         let latest = self.p.cycle.saturating_sub(self.p.slot + TAIL + READY_WINDOW + Duration::from_secs(5));
         let (lo, hi) = (MIN_OFFSET.as_millis() as u64, (latest.as_millis() as u64).max(MIN_OFFSET.as_millis() as u64 + 1));
         self.cycle_start + Duration::from_millis(rand::rng().random_range(lo..hi))
+    }
+
+    /// A `Skipped` slot will be tried again later in this cycle (F-11 retries): a coin's own fallback for a lost fee slot
+    /// (Ting solo: the node's producer switch) waits for the final `Skipped`.
+    pub fn retry_pending(&self) -> bool {
+        self.retries > 0 && matches!(self.phase, Phase::Idle)
     }
 
     /// Should the fee stratum connection be up?  (Between the retries of a slot it stays up: F-11.)
@@ -229,6 +240,28 @@ mod tests {
         t += RETRY_AFTER + Duration::from_secs(1);
         assert_eq!(d.tick(t, true), Change::Started);
         assert!(d.active());
+    }
+
+    #[test]
+    fn only_the_last_skip_of_a_slot_is_final() {
+        // Ting solo falls back to the node's producer switch only when no retry of the slot is left
+        let t0 = Instant::now();
+        let p = Params { cycle: Duration::from_secs(6000), slot: Duration::from_secs(60) };
+        let mut d = DevFee::new(p, t0);
+        d.slot_at = t0 + Duration::from_secs(100);
+        let mut t = t0 + Duration::from_secs(101);
+        assert!(!d.retry_pending());
+        let mut finals = 0;
+        for _ in 0..(RETRIES + 1) {
+            assert_eq!(d.tick(t, false), Change::None);
+            t += READY_WINDOW + Duration::from_secs(1);
+            assert_eq!(d.tick(t, false), Change::Skipped);
+            if !d.retry_pending() {
+                finals += 1;
+            }
+            t += RETRY_AFTER + Duration::from_secs(1);
+        }
+        assert_eq!(finals, 1, "one final skip per slot");
     }
 
     #[test]

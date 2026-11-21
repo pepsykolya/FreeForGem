@@ -30,6 +30,7 @@ pub enum Coin {
     Noid,
     Prox,
     Neb,
+    Ting,
 }
 
 pub struct Spec {
@@ -52,12 +53,15 @@ pub struct Spec {
     pub isolation: bool,
 }
 
-pub const SPECS: [Spec; 5] = [
+pub const SPECS: [Spec; 6] = [
     Spec { coin: Coin::Pearl, name: "pearl", aliases: &["prl", "pearlhash"], hive_algo: "pearlhash", unit: "TH/s", eff_unit: "TH/W", mem: MemPolicy::HiveProfile, own_cli: false, isolation: false },
     Spec { coin: Coin::Cmfd, name: "cmfd", aliases: &["forgematrix", "forgematrix_v4"], hive_algo: "forgematrix_v4", unit: "FW/s", eff_unit: "FW/kWh", mem: MemPolicy::NoHiveLock, own_cli: false, isolation: false },
     Spec { coin: Coin::Noid, name: "noid", aliases: &["parano1d", "poseidon2b"], hive_algo: "parano1d", unit: "MH/s", eff_unit: "MH/W", mem: MemPolicy::HiveProfile, own_cli: false, isolation: false },
     Spec { coin: Coin::Prox, name: "prox", aliases: &["proxima", "txid-blake2b"], hive_algo: "proxima", unit: "GH/s", eff_unit: "GH/W", mem: MemPolicy::HiveProfile, own_cli: false, isolation: false },
     Spec { coin: Coin::Neb, name: "neb", aliases: &["nebhash", "nebhash2", "nebhash-v2"], hive_algo: "nebhash", unit: "MA/s", eff_unit: "MA/W", mem: MemPolicy::FullClock, own_cli: true, isolation: true },
+    // Ting / Daler (DLR), the FFGT module: the memory clock does not matter to SHA-256: the HiveOS profile's lock is kept, else
+    // ting/mod.rs locks the lowest clock that keeps the full core range (as FFGT 0.2.1+; CMP 50HX: the driver has no memory lock)
+    Spec { coin: Coin::Ting, name: "ting", aliases: &["dlr", "daler", "ting-sha256"], hive_algo: "ting", unit: "GH/s", eff_unit: "GH/W", mem: MemPolicy::HiveProfile, own_cli: true, isolation: true },
 ];
 
 pub fn spec(c: Coin) -> &'static Spec {
@@ -109,6 +113,9 @@ pub fn module_coin(argv: &[String]) -> Option<Coin> {
     if argv.first().is_some_and(|a| a == crate::neb::iso::ENGINE_FLAG) || argv.iter().any(|a| a == "--neb-uv-check") {
         return Some(Coin::Neb);
     }
+    if argv.first().is_some_and(|a| a == crate::ting::iso::ENGINE_FLAG) || argv.iter().any(|a| a == "--ting-uv-check") {
+        return Some(Coin::Ting);
+    }
     if let Some(a) = algo_arg(argv) {
         return by_name(&a).filter(|c| spec(*c).own_cli);
     }
@@ -117,6 +124,10 @@ pub fn module_coin(argv: &[String]) -> Option<Coin> {
     }
     if first_pool(argv).is_some_and(|p| crate::neb::looks_like_neb_pool(&p)) {
         return Some(Coin::Neb);
+    }
+    // Ting: a crypto-connection.net pool or a ting:// gate URL; Ting-only node options (--node alone is NEB's sign above)
+    if first_pool(argv).is_some_and(|p| crate::ting::looks_like_ting_pool(&p)) || argv.iter().any(|a| a == "--node-dir" || a == "--node-token-file") {
+        return Some(Coin::Ting);
     }
     None
 }
@@ -134,7 +145,10 @@ mod tests {
         for (n, c) in [("pearl", Coin::Pearl), ("PRL", Coin::Pearl), ("cmfd", Coin::Cmfd), ("noid", Coin::Noid), ("parano1d", Coin::Noid), ("prox", Coin::Prox), ("neb", Coin::Neb), ("NebHash", Coin::Neb), ("nebhash-v2", Coin::Neb)] {
             assert_eq!(by_name(n), Some(c), "{n}");
         }
-        assert_eq!(by_name("ting"), None);
+        for n in ["ting", "DLR", "daler", "ting-sha256"] {
+            assert_eq!(by_name(n), Some(Coin::Ting), "{n}");
+        }
+        assert_eq!((spec(Coin::Ting).hive_algo, spec(Coin::Ting).unit, spec(Coin::Ting).eff_unit), ("ting", "GH/s", "GH/W"));
         assert_eq!(spec(Coin::Neb).hive_algo, "nebhash");
         assert_eq!(spec(Coin::Neb).unit, "MA/s");
         assert!(SPECS.iter().all(|s| s.eff_unit.contains("/W") || s.coin == Coin::Cmfd), "rule 1: efficiency per watt");
@@ -155,6 +169,7 @@ mod tests {
         assert!(isolated_with(Coin::Neb, false, false));
         assert!(!isolated_with(Coin::Neb, true, false));
         assert!(!isolated_with(Coin::Neb, false, true));
+        assert!(isolated_with(Coin::Ting, false, false) && !isolated_with(Coin::Ting, true, false) && !isolated_with(Coin::Ting, false, true));
         for c in [Coin::Pearl, Coin::Noid, Coin::Cmfd, Coin::Prox] {
             assert!(!isolated_with(c, false, false), "{c:?}");
         }
@@ -176,6 +191,16 @@ mod tests {
         assert_eq!(module_coin(&v("--algo noid --pool stratum+ssl://noid.example:443")), None);
         assert_eq!(module_coin(&v("--self-test")), None);
         assert_eq!(module_coin(&v("")), None);
+        // Ting (FFGT module): explicit, by its pool / gate URL, by its node options, its child flags
+        assert_eq!(module_coin(&v("--algo ting --pool 192.168.1.5:4173 --password p")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--pool crypto-connection.net:4073 --wallet 00ab.rig")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--pool ting://192.168.1.5:4173")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--algo ting --node 127.0.0.1:18440 --node-dir /var/lib/ting")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--node 127.0.0.1:18440 --node-dir /var/lib/ting")), Some(Coin::Neb), "--node alone stays NEB's sign");
+        assert_eq!(module_coin(&v("--node-dir /var/lib/ting")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--ting-engine 0")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--ting-uv-check --devices 0 --uv-secs 15")), Some(Coin::Ting));
+        assert_eq!(module_coin(&v("--algo pearl --pool crypto-connection.net:4073")), None, "an explicit classic coin wins");
         // a failover list: the first entry decides
         assert_eq!(module_coin(&v("--pool neb.suprnova.cc:7804,neb.suprnova.cc:7805")), Some(Coin::Neb));
     }

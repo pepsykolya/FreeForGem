@@ -69,6 +69,7 @@ mod silence;
 mod status;
 mod stratum;
 mod templimit;
+mod ting;
 mod update;
 mod uv;
 mod wintune;
@@ -1009,6 +1010,7 @@ USAGE:
     freeforgem --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]       Common Foundry (CMFD)
     freeforgem --algo noid --pool stratum+ssl://HOST:PORT --wallet o1... [OPTIONS] NOID (Parano1d)
     freeforgem --algo prox --pool stratum+ssl://HOST:PORT --wallet ADDR --password SECRET   Proxima (PROX); --solo http://NODE:PORT --token T
+    freeforgem --pool crypto-connection.net:4073 --wallet ACCOUNT.RIG [OPTIONS]  Ting (DLR): see freeforgem --algo ting --help
     freeforgem --self-test [--algo cmfd|noid] [--devices N]
 
 OPTIONS:
@@ -1403,6 +1405,7 @@ fn import_legacy_uv(dir: &std::path::Path) {
 fn dispatch_module(c: coins::Coin) -> Result<()> {
     match c {
         coins::Coin::Neb => neb::cli::main(),
+        coins::Coin::Ting => ting::cli::main(),
         other => bail!("{} has no command line of its own", coins::spec(other).name),
     }
 }

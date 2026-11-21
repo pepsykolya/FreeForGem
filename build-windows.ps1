@@ -9,6 +9,13 @@ $lib = "$PSScriptRoot\prebuilt\windows-x64"
 if (-not (Test-Path "$lib\pearlgpu.lib") -or -not (Test-Path "$lib\pearlgpu.dll")) { throw "missing $lib\pearlgpu.dll / pearlgpu.lib (prebuilt GPU library)" }
 if (-not (Test-Path "$lib\noidgpu.dll")) { throw "missing $lib\noidgpu.dll (prebuilt NOID GPU library)" }
 if (-not (Test-Path "$lib\proxgpu.dll")) { throw "missing $lib\proxgpu.dll (prebuilt PROX GPU library)" }
+# Ting / DLR (1.8.0, the FFGT module): tinggpu.dll (CUDA) + tinggpu_cl.dll (OpenCL), pinned by prebuilt\windows-x64\tinggpu.sha256
+foreach ($l in Get-Content "$lib\tinggpu.sha256") {
+    $h, $f = $l -split '\s+\*?', 2
+    if (-not (Test-Path "$lib\$f")) { throw "missing $lib\$f (prebuilt Ting GPU library)" }
+    $got = (Get-FileHash "$lib\$f" -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $h) { throw "$lib\$f is not the pinned build (sha256 $got, tinggpu.sha256: $h)" }
+}
 
 $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -products * -latest -property installationPath
@@ -39,7 +46,7 @@ $name = "freeforgem-$version-windows-x64"
 $stage = "dist\$name\freeforgem"
 Remove-Item -Recurse -Force "dist\$name" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", windows\start*.bat, windows\start.ps1, `
+Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", "$lib\tinggpu.dll", "$lib\tinggpu_cl.dll", windows\start*.bat, windows\start.ps1, `
     windows\README-WINDOWS.txt, LICENSE, NOTICE, README.md, HIVEOS.md, MANUAL.md $stage
 # CMFD engine (FreeForgeMiner release pinned in cmfd\ENGINE.lock, MIT) as cmfd\; $env:FFGP_NO_CMFD = '1' builds Pearl only
 # $env:FFGP_CMFD_ZIP = a local copy of the pinned release zip (its SHA-256 is still checked), for an engine release not published yet
