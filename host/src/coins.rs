@@ -75,6 +75,32 @@ fn isolated_with(c: Coin, single_flag: bool, env_off: bool) -> bool {
     spec(c).isolation && !single_flag && !env_off
 }
 
+/// 1.8.0 (different coins on different cards, PLAN 3.1a): the group of cards this process mines for, from FFG_GROUP (set by
+/// the split supervisor for each child; letters, digits, '-' and '_' only); None = the whole rig (one process).
+pub fn group() -> Option<String> {
+    group_of(std::env::var("FFG_GROUP").ok().as_deref())
+}
+
+fn group_of(v: Option<&str>) -> Option<String> {
+    let g: String = v?.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(32).collect();
+    (!g.is_empty()).then_some(g)
+}
+
+/// The name of a per-process state file (the restore markers of clocks and offsets: they describe what THIS process changed
+/// and are undone by its next start): `name` for the whole rig, `stem.<group>.ext` for a group, so one group's start never
+/// undoes the clocks of another group that is mining.
+pub fn group_file(name: &str) -> String {
+    group_file_of(name, group().as_deref())
+}
+
+fn group_file_of(name: &str, group: Option<&str>) -> String {
+    match (group, name.rsplit_once('.')) {
+        (Some(g), Some((stem, ext))) => format!("{stem}.{g}.{ext}"),
+        (Some(g), None) => format!("{name}.{g}"),
+        (None, _) => name.to_string(),
+    }
+}
+
 /// The coin of an `--algo` / `--coin` value.
 pub fn by_name(name: &str) -> Option<Coin> {
     let n = name.trim().to_ascii_lowercase();
@@ -147,6 +173,16 @@ mod tests {
         assert_eq!(spec(Coin::Neb).mem, MemPolicy::FullClock);
         assert_eq!(spec(Coin::Cmfd).mem, MemPolicy::NoHiveLock);
         assert_eq!(spec(Coin::Noid).mem, MemPolicy::HiveProfile);
+    }
+
+    #[test]
+    fn restore_markers_per_group() {
+        assert_eq!(group_file_of("clocks-restore.json", None), "clocks-restore.json");
+        assert_eq!(group_file_of("clocks-restore.json", Some("neb")), "clocks-restore.neb.json");
+        assert_eq!(group_of(Some(" pearl-2 ")), Some("pearl-2".into()));
+        assert_eq!(group_of(Some("../x")), Some("x".into()), "no path in a group name");
+        assert_eq!(group_of(Some("")), None);
+        assert_eq!(group_of(None), None);
     }
 
     #[test]

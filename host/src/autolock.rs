@@ -598,6 +598,7 @@ pub fn load_db(path: &Path) -> BTreeMap<String, Rec> {
 
 /// Writes one record into the file (the others are kept as they are: other GPUs, coins, drivers).
 pub fn save_rec(path: &Path, r: &Rec) {
+    let _f = crate::uv::FileLock::take(path); // 1.8.0: per-group processes share the file
     let mut doc = std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
     doc["version"] = json!(1);
     if !doc.get("gpus").is_some_and(Value::is_object) {
@@ -607,7 +608,7 @@ pub fn save_rec(path: &Path, r: &Rec) {
     if let Some(d) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         let _ = std::fs::create_dir_all(d); // a fresh state directory (--uv-dir / $FFGP_STATE_DIR not made yet)
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!("json.tmp{}", std::process::id()));
     let ok = std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, path));
     if let Err(e) = ok {
         lg(format!("cannot write {} ({e}): the sweep goes on, but its points are not kept", path.display()));

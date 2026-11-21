@@ -39,7 +39,7 @@ fn lg(m: impl AsRef<str>) {
 }
 
 fn marker_path(dir: &Path) -> PathBuf {
-    dir.join("ffgn-offset-restore.json")
+    dir.join(crate::coins::group_file("ffgn-offset-restore.json")) // 1.8.0: per group of cards (coins::group_file)
 }
 
 /// The marker name of FFGN 0.9.x and FreeForGem (D-015): still read once, then removed.

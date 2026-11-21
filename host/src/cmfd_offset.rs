@@ -41,7 +41,7 @@ fn lg(m: impl AsRef<str>) {
 }
 
 fn marker_path(dir: &Path) -> PathBuf {
-    dir.join("cmfd-offset-restore.json")
+    dir.join(crate::coins::group_file("cmfd-offset-restore.json")) // 1.8.0: per group of cards (coins::group_file)
 }
 
 /// Puts back the offsets a crashed CMFD run left changed (recorded in the marker), then deletes the marker.

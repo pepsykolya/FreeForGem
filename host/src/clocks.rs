@@ -246,7 +246,7 @@ fn lg(m: impl AsRef<str>) {
 }
 
 fn marker_path(dir: &Path) -> PathBuf {
-    dir.join("clocks-restore.json")
+    dir.join(crate::coins::group_file("clocks-restore.json")) // 1.8.0: per group of cards (coins::group_file)
 }
 
 /// Undo clock locks left by a previous run that did not exit cleanly (crash / power loss / SIGKILL): the locks persist in the

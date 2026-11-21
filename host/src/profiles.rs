@@ -85,6 +85,29 @@ pub fn write_value(dir: &Path, v: &Value) -> Result<(), String> {
     crate::uv::write_atomic(&results_path(dir), &serde_json::to_string_pretty(v).unwrap()).map_err(|e| format!("{e:#}"))
 }
 
+/// `disk` with the sections of `sec` (profiles, crash markers, the version) replaced by those of `mine`; returns `disk`.
+pub fn merge_sections<'a>(disk: &'a mut Value, mine: &Value, sec: Sections) -> &'a Value {
+    if !disk.is_object() {
+        *disk = json!({});
+    }
+    for k in [sec.profiles, sec.trying] {
+        match mine.get(k) {
+            Some(x) => disk[k] = x.clone(),
+            None => {
+                if let Some(m) = disk.as_object_mut() {
+                    m.remove(k);
+                }
+            }
+        }
+    }
+    if sec.version.is_some() {
+        if let Some(x) = mine.get("version") {
+            disk["version"] = x.clone();
+        }
+    }
+    disk
+}
+
 pub struct Store {
     pub dir: PathBuf,
     sec: Sections,
@@ -102,14 +125,26 @@ impl Store {
         let moved = migrate(&mut v);
         let s = Store { dir: dir.to_path_buf(), sec, v: Mutex::new(Value::Null), used: Mutex::new(HashMap::new()), good: Mutex::new(HashMap::new()), log };
         if moved > 0 {
-            s.write_to(&v);
+            s.write_all(&v);
         }
         *s.v.lock().unwrap() = v;
         s
     }
 
-    fn write_to(&self, v: &Value) {
+    /// The whole value as this process has it (a migration of older sections rewrites the file once, at load).
+    fn write_all(&self, v: &Value) {
         if let Err(e) = write_value(&self.dir, v) {
+            (self.log)(&format!("cannot save {}: {e}", results_path(&self.dir).display()));
+        }
+    }
+
+    fn write_to(&self, v: &Value) {
+        // 1.8.0 (per-group processes in one state folder): the file as it is on disk now, with only this coin's sections (and
+        // its "version") taken from this process; another coin's process may have saved its own sections meanwhile
+        let _g = crate::uv::FileLock::take(&results_path(&self.dir));
+        let mut disk = load_value(&self.dir);
+        let merged = merge_sections(&mut disk, v, self.sec);
+        if let Err(e) = write_value(&self.dir, merged) {
             (self.log)(&format!("cannot save {}: {e}", results_path(&self.dir).display()));
         }
     }
@@ -348,6 +383,33 @@ mod tests {
         d
     }
     fn quiet(_: &str) {}
+
+    #[test]
+    fn two_coin_processes_do_not_overwrite_each_other() {
+        // 1.8.0 (different coins on different cards): a Pearl process and a NEB process share one uv.json; each loaded it
+        // before the other saved: neither save may drop the other's section
+        let dir = std::env::temp_dir().join(format!("ffg-prof-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pearl = Store::load(&dir, PEARL, |_| {}, |_| 0);
+        let neb = Store::load(&dir, NEB, |_| {}, |_| 0);
+        pearl.mark_trying("GPU-a", 300);
+        neb.mark_trying("GPU-b", 210);
+        pearl.mark_trying("GPU-a", 315);
+        let v = load_value(&dir);
+        assert_eq!(v[PEARL.trying]["GPU-a"]["offset"], 315, "{v}");
+        assert_eq!(v[NEB.trying]["GPU-b"]["offset"], 210, "the NEB process's marker survives the Pearl save: {v}");
+        // a section of a third coin written by hand stays too
+        let mut w = load_value(&dir);
+        w["noid"] = json!({"GPU-c": {"eff": {"offset": 150}}});
+        write_value(&dir, &w).unwrap();
+        neb.mark_trying("GPU-b", 195);
+        let v = load_value(&dir);
+        assert_eq!(v["noid"]["GPU-c"]["eff"]["offset"], 150);
+        assert_eq!(v[PEARL.trying]["GPU-a"]["offset"], 315);
+        assert!(!dir.join("uv.json.lock").exists(), "the lock is released");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn save_replace_forget_and_marker() {

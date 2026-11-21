@@ -394,11 +394,54 @@ pub fn state_dir(o: &Opts) -> PathBuf {
     home.join("FreeForGem")
 }
 
+/// 1.8.0 (different coins on different cards: one miner process per group of cards, all in one state folder): a lock file
+/// beside a shared state file (uv.json, gpu-faults.json, autolock.json) around its read-modify-write, so one process never
+/// writes back an old copy over another's change.  Best effort: waits up to 2 s, a lock older than 10 s is stale (a process
+/// that died holding it) and is taken over; without the lock the write goes on as before.
+pub(crate) struct FileLock(Option<PathBuf>);
+
+impl FileLock {
+    pub(crate) fn take(target: &Path) -> FileLock {
+        let mut name = target.as_os_str().to_owned();
+        name.push(".lock");
+        let l = PathBuf::from(name);
+        if let Some(d) = l.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        for _ in 0..100 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&l) {
+                Ok(mut f) => {
+                    let _ = write!(f, "{}", std::process::id());
+                    return FileLock(Some(l));
+                }
+                Err(_) => {
+                    let stale = std::fs::metadata(&l).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() >= 10);
+                    if stale {
+                        let _ = std::fs::remove_file(&l);
+                        continue;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+        }
+        FileLock(None)
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        if let Some(l) = &self.0 {
+            let _ = std::fs::remove_file(l);
+        }
+    }
+}
+
 pub(crate) fn write_atomic(path: &Path, data: &str) -> Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    let tmp = path.with_extension("tmp");
+    // 1.8.0: a temporary name of this process (two group processes may write the same file)
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     {
         let mut f = std::fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
         f.write_all(data.as_bytes())?;
@@ -501,7 +544,7 @@ pub(crate) fn results_path(dir: &Path) -> PathBuf {
 }
 
 fn restore_path(dir: &Path) -> PathBuf {
-    dir.join("uv-restore.json")
+    dir.join(crate::coins::group_file("uv-restore.json")) // 1.8.0: per group of cards (coins::group_file)
 }
 
 /// `--uv-reset-all`: forget every saved result of every coin, lock and mode (the restore file is not touched).  `--uv-reset` only

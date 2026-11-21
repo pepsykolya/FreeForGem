@@ -86,6 +86,7 @@ pub fn get(dir: &Path, uuid: &str) -> Option<Rec> {
 
 pub fn put(dir: &Path, uuid: &str, r: &Rec) {
     let _g = LOCK.lock().unwrap();
+    let _f = crate::uv::FileLock::take(&path(dir)); // 1.8.0: per-group processes share the file
     let mut v = load(dir);
     if !v["gpus"].is_object() {
         v["gpus"] = json!({});
@@ -96,6 +97,7 @@ pub fn put(dir: &Path, uuid: &str, r: &Rec) {
 
 pub fn forget(dir: &Path, uuid: &str) {
     let _g = LOCK.lock().unwrap();
+    let _f = crate::uv::FileLock::take(&path(dir));
     let mut v = load(dir);
     if v["gpus"].as_object_mut().is_some_and(|m| m.remove(uuid).is_some()) {
         store(dir, &v);
