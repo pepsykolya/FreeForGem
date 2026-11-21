@@ -1,18 +1,39 @@
 # FreeForGem
 
-**FreeForGem** is a multi-coin GPU miner for **Pearl (PRL)**, **Common Foundry (CMFD)**, **NOID (Parano1d)** and, since 1.7.8, **Proxima (PROX)** with its own
-GPU kernels, a CPU check of every share before it is submitted, a **1% developer fee**, and an optional **per-card automatic
-undervolt** (`--auto-uv`) that finds the lowest safe core voltage of each GPU with bit-exact checks.
+**FreeForGem** is a multi-coin GPU miner for **Pearl (PRL)**, **Common Foundry (CMFD)**, **NOID (Parano1d)**, **Proxima (PROX)** and,
+since 1.8.0, **NEB** and **Ting / Daler (DLR)**, with its own GPU kernels, a CPU check of every share before it is submitted, a
+**1% developer fee**, an optional **per-card automatic undervolt** (`--auto-uv`) that finds the lowest safe core voltage of each
+GPU with bit-exact checks, and, since 1.8.0, **different coins on different cards** of one rig (`--split`).
 
 FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear) (since 1.7.0: binary
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.7.8**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.0**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
   [FreeForGemPear releases](https://github.com/pepsykolya/FreeForGemPear/releases)
+
+## What's new in 1.8.0
+
+* **NEB** (nebhash v2, MA/s): Suprnova pool, solo through your node or a gate for several rigs; engine nebgpu 0.8.1 with one
+  engine process per GPU; full memory clock by default, `--table-mclock 810` for the table path, `--tbig auto`.
+  [MANUAL.md](MANUAL.md), section 24.
+* **Ting / Daler (DLR)** (GH/s): crypto-connection.net, your ffgt-gate or solo on a node; one engine process per GPU. Section 26.
+* **Different coins on different cards:** `--split neb:0,1 pearl:rest` with coin-tagged values (`--pool neb=URL --wallet
+  neb=ADDR --lock-cclock pearl=1410`); one miner process per group, each with its own pool, dev fee, clocks and restarts; works
+  from one HiveOS flight sheet. Section 27.
+* **Per-GPU lists of any length** in every coin: a shorter list gives its last value to the other cards, `-` skips a card
+  (`--table-mclock 810,810,-,-` on 8 cards). Section 28.
+* **Faults:** auto-uv resumes at the crashed offset minus 2 steps; after a GPU fault the card gets a safe state (driver reset,
+  probe, clocks, safe offset) before its engine starts again; FAULTY (a 10-minute pause) instead of DEAD for a card that still
+  opens; opt-in `--reboot-on-lost-gpu MIN`; fewer stale shares and a warning when the rig's network answers late. Section 29.
+* **Every coin:** yellow / orange auto-uv and auto-lock lines, the core lock checked under load (`[LOCK NOT HELD]`), auto-uv
+  climbs while each step lowers the power, dev-fee slots retried, a memory clock policy per coin. Section 25.
+* **New options:** `--split`, `--table-mclock`, `--tbig` / `--tbig-gb`, `--power-limit` / `--pl` (optional, never on by default:
+  the miner limits the power with the core lock and the offset), `--reboot-on-lost-gpu`, `--debug-timing`.
+* **CMFD:** engine FreeForgeMiner 1.2.5 (downloadable from its release page; it also knows the compact mainnet model).
 
 ## Supported coins
 
@@ -22,6 +43,10 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 | **Common Foundry (CMFD)** | ForgeMatrix V4 (`forgematrix_v4`) | NVIDIA RTX 20xx or newer, AMD Radeon (Windows); ~7 GB free GPU memory | a `cmfd+tls://` pool URL or `--algo cmfd` |
 | **NOID (Parano1d)** | Poseidon2b over GF(2^128) (`parano1d`), pool protocol `parano1d-stratum-v1` over TLS | NVIDIA sm_80+ (RTX 30/40/50, A100/H100), driver **580+** | `--algo noid` (or a NOID pool URL) |
 | **Proxima (PROX)** | BLAKE2b-256 over the transaction hash (HiveOS: leave `----`, there is no `proxima` in the list) | NVIDIA GTX 10 / RTX 20/30/40/50 (sm_61+) | `--algo prox` (or a pool host with `prox`, an `innov+tls://` URL, `--solo`) |
+| **NEB** (1.8.0) | nebhash v2 (`nebhash`), MA/s | NVIDIA GTX 10 / RTX 20/30/40/50, CMP | `--algo neb` (or a `neb.suprnova.cc` pool URL, `--node`, `--gate`) |
+| **Ting / Daler (DLR)** (1.8.0) | Ting SHA-256 (HiveOS: leave `----`), GH/s | NVIDIA GTX 10 and newer (CUDA), AMD (OpenCL) | `--algo ting` (or a `crypto-connection.net` pool, a `ting://` gate URL) |
+
+Different coins on different cards of one rig: `--split` (below and [MANUAL.md](MANUAL.md), section 27).
 
 ## Quick start
 
@@ -29,24 +54,27 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 
 Create a **new flight sheet**: Miner **Custom**, then *Setup Miner Config*:
 
-| Field | Pearl | NOID |
-|---|---|---|
-| Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.7.8/freeforgem-1.7.8_hiveos.tar.gz` | same |
-| Hash algorithm | `pearlhash` | `parano1d` |
-| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
-| Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` |
-| Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1300 --auto-uv` |
+| Field | Pearl | NOID | NEB | Ting / DLR |
+|---|---|---|---|---|
+| Miner name | `freeforgem` | `freeforgem` | `freeforgem` | `freeforgem` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | same | same | same |
+| Hash algorithm | `pearlhash` | `parano1d` | `nebhash` | leave `----` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` |
+| Pool URL | `pearl-eu2.luckypool.io:3360` | `stratum+ssl://eu2.innovlab.cc:19601` | `stratum+tcp://neb.suprnova.cc:7804` | `crypto-connection.net:4073` |
+| Pass | empty | empty | `x` | `x` |
+| Extra config arguments | optional, e.g. `--auto-uv` | `--algo noid --noid-mode eff --lock-cclock 1300 --auto-uv` | e.g. `--auto-uv --lock-cclock 1800 --table-mclock 810` | e.g. `--lock-cclock 1800 --auto-uv` |
 
-Use the **HiveOS** file of the release (`freeforgem-1.7.8_hiveos.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Use the **HiveOS** file of the release (`freeforgem-1.8.0_hiveos.tar.gz`) as the Installation URL — not the Linux or Windows archive.
+Two coins on one rig from one flight sheet (main coin in the flight sheet, the other in Extra config): [HIVEOS.md](HIVEOS.md).
 CMFD, NOCK merge mining, overclocking and undervolt on HiveOS: [HIVEOS.md](HIVEOS.md).
 
 **CMP cards (optional, off by default):** under the stock NVIDIA driver they compute about 10 times slower. Adding `cmp-unlock-driver` to *Extra config arguments* (or `sudo ./freeforgem --cmp-driver`) makes the miner install an unlocked driver and **reboot the rig**; it replaces the kernel driver of the whole rig, read MANUAL.md section 20 first.
 
 ### Windows 10/11 x64
 
-Download `freeforgem-1.7.8-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
-pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`),
+Download `freeforgem-1.8.0-windows-x64.zip`, unpack it to a folder without spaces, open the start file for your coin and
+pool (`start-luckypool-eu/ru/us/asia.bat`, `start-kryptex-eu/ru/us/asia.bat` for Pearl, `start-cmfd.bat`, `start-noid.bat`,
+`start-prox.bat`, `start-neb.bat`, `start-ting.bat`),
 replace the example `WALLET` (the developer's address) with your own and run it (as Administrator for `--auto-uv` / clock locks).
 Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details: [MANUAL.md](MANUAL.md#5-windows-1011),
 `README-WINDOWS.txt`.
@@ -54,12 +82,16 @@ Only the NVIDIA driver is needed (AMD Radeon: the AMD Adrenalin driver). Details
 ### Linux x86_64
 
 ```
-tar xzf freeforgem-1.7.8-linux-x86_64.tar.gz
-cd freeforgem-1.7.8
+tar xzf freeforgem-1.8.0-linux-x86_64.tar.gz
+cd freeforgem-1.8.0
 ./freeforgem --self-test                                   # optional: GPU kernel vs CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1                      # Pearl
 ./freeforgem --algo noid --pool stratum+ssl://eu2.innovlab.cc:19601 --wallet o1YOUR_ADDRESS --worker rig1              --noid-mode eff --lock-cclock 1300 --lock-mclock 810 --auto-uv                                # NOID
 ./freeforgem --pool 'cmfd+tls://IP:PORT?pin=64HEX' --wallet cmfd1YOUR_ADDRESS --worker rig1                 # CMFD
+./freeforgem --pool stratum+tcp://neb.suprnova.cc:7804 --wallet neb1YOUR_ADDRESS --worker rig1 --table-mclock 810  # NEB
+./freeforgem --pool crypto-connection.net:4073 --wallet YOUR_TING_ACCOUNT --worker rig1                       # Ting / DLR
+./freeforgem --split neb:0,1 pearl:rest --pool neb=stratum+tcp://neb.suprnova.cc:7804 --wallet neb=neb1YOUR_ADDRESS \
+    --pool pearl=pearl-eu2.luckypool.io:3360 --wallet pearl=prl1YOUR_ADDRESS --worker rig1                    # two coins
 ```
 
 The Linux binary is built on Ubuntu 20.04, so it runs on Ubuntu 20.04+ and HiveOS.
@@ -242,6 +274,62 @@ HiveOS: flight sheet with coin `PROX`, Hash algorithm left at `----`, Extra conf
 in MANUAL.md section 21). If the HiveOS OC (`nvidia-oc`) resets the core / memory lock or the offset, the miner sets them again (1.7.8).
 Windows: `start-prox.bat`. Details: [MANUAL.md](MANUAL.md), section 21.
 
+## NEB (Neural Engine Byte)
+
+Since 1.8.0 the same binary mines **NEB** (nebhash v2) with the NEB module (the FFGN miner moved into FreeForGem; an FFGN command
+line works unchanged with `--algo neb`). Engine nebgpu 0.8.1 (`libnebgpu.so` / `nebgpu.dll`, closed source) and the main-network
+dataset `neb-datasets.bin` are in the packages; every nonce is checked again with the NEB C reference before it is sent. Unit MA/s
+(10^6 attempts per second), efficiency MA/W.
+
+* **Pool:** `stratum+tcp://neb.suprnova.cc:7804` (backup `:7805`), wallet `neb1...`. **Solo:** `--node 127.0.0.1:3441` (your NEB
+  node's work service); **several rigs on one node:** `--gate` beside the node, the rigs use `--pool neb://GATE_IP:3442 --password TOKEN`.
+* **Memory:** NEB is memory bound and runs at the full memory clock (a low lock of the HiveOS OC profile, e.g. Pearl's 810 MHz, is
+  lifted while NEB mines and put back on exit). `--table-mclock 810` locks it low only on the pure digest-table path (RTX 3070:
+  -10 W, +8-10 % MA/W); `--tbig auto` (default) builds a partial L=3 table of the TESS slot where it pays back.
+* **One engine process per GPU:** a CUDA fault on one card restarts only that card; after a fault the card gets a safe offset
+  before its new engine starts (section 29 of the manual).
+* **Optional power limit:** `--power-limit N` / `--pl N` (off by default; the miner's way is the core lock plus the offset).
+* auto-uv / auto-lock as for the other coins; saved NEB profiles of FFGN are taken over on the first start.
+* A 4-minute test of a 1.8.0 build (RTX 3070, Suprnova, lock 1680 MHz, +210, `--table-mclock 810`): about 165 MA/s at 118 W
+  (**1.40 MA/W**); the rate changes with each block's model.
+
+HiveOS: Hash algorithm `nebhash`, Pool URL `stratum+tcp://neb.suprnova.cc:7804`, Pass `x`. Windows: `start-neb.bat`. Options:
+`freeforgem --algo neb --help`. Details: [MANUAL.md](MANUAL.md), section 24.
+
+## Ting / Daler (DLR)
+
+Since 1.8.0 the Ting miner FFGT (0.2.2) is a coin of FreeForGem: the same kernels and results, NVIDIA GTX 10 and newer (CUDA)
+and AMD (OpenCL). Wallet = your Ting account (64 hex digits). Pool `crypto-connection.net:4073` (password `x`), your ffgt-gate
+(`ting://GATE_IP:PORT`, the rig's password) or solo on a node of the rig (`--node 127.0.0.1:18440 --node-dir DIR`). Templates of one
+tip / jobs of one height are searched together (about +40 % solo, +25 % on the pool on RTX 30; `--no-group` turns it off); the memory
+is locked at its lowest clock by default (SHA-256 does not use it); one engine process per GPU. RTX 3070: `--lock-cclock 1500` for
+the best GH/W, `1800` for more GH/s. HiveOS: Hash algorithm left at `----`, coin `DLR`. Windows: `start-ting.bat`. Options:
+`freeforgem --algo ting --help`. Details: [MANUAL.md](MANUAL.md), section 26.
+
+## Different coins on different cards (`--split`)
+
+```
+./freeforgem --split neb:0,1 pearl:rest \
+    --pool neb=stratum+tcp://neb.suprnova.cc:7804 --wallet neb=neb1YOUR_ADDRESS \
+    --pool pearl=prl-eu.kryptex.network:7048 --wallet pearl=prl1YOUR_ADDRESS \
+    --worker rig1 --auto-uv --lock-cclock neb=1800 --lock-cclock pearl=1410
+```
+
+* Groups `COIN:GPUS` (GPU numbers as in nvidia-smi, ranges `2-5`, one group may take `rest`); `;`, `,` and spaces are equal
+  separators, no quotes needed.
+* A value tagged with a coin (`--pool neb=URL`, `--wallet pearl=ADDR`, `--lock-cclock pearl=1410`) goes to that group only and
+  **replaces the untagged value** of the option there; untagged options go to every group. A rig-wide per-GPU list
+  (`--lock-cclock 1800,1800,1410,1410`) is sliced to each group's cards. `--split-args neb=--auto-uv` gives one group a flag
+  (on HiveOS one word per `--split-args`, because HiveOS splits Extra config at spaces).
+* One miner process per group, each with its own pool session, dev fee, clocks, memory policy, tuners and restarts: a group that
+  ends restarts on its own while the others keep mining. Log lines carry the group in light blue: `[neb] [  60s] GPU0 ...`.
+* **HiveOS:** the flight sheet's pool and wallet stay with the main coin, Extra config adds the other coin, e.g.
+  `--split neb:0,1 pearl:2,3 --pool pearl=prl-eu.kryptex.network:7048 --wallet pearl=prl1YOUR_ADDRESS --lock-cclock pearl=1410`.
+  The dashboard shows the algo and total of the group with the most cards, every card's own rate, the shares of all groups and
+  every group's efficiency in the version column (`1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`).
+
+Details: [MANUAL.md](MANUAL.md), section 27; step by step for HiveOS: [HIVEOS.md](HIVEOS.md).
+
 ## Developer fee
 
 1% of the mining time: one 60-second slot in every 100 minutes, at a random moment of the cycle,
@@ -249,6 +337,11 @@ on **the same pool you configured**, under a separate login (worker `ffgp-devfee
 `devfee: next slot in N min`, `devfee: mining 60s for FreeForGem dev (1%)` and
 `devfee: back to user`. The first slot comes at a random moment within the first 100 minutes. If the fee login
 can't be served, the slot is skipped; your mining is never blocked.
+
+Every coin pays 1 %, always on a connection of its own: Pearl and NOID a second login on your pool (above), PROX on proximamine,
+CMFD inside the engine (36 s per hour per GPU), NEB on your pool list (solo / through a gate: the public NEB pools), Ting on
+crypto-connection.net (NEB and Ting: worker `ffg`, 60 s in every 100 minutes). A slot whose fee connection was not ready is tried
+again up to 3 times. With `--split` every group pays 1 % of its own cards' time.
 
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted
 (see [LICENSE](LICENSE), clause 3).

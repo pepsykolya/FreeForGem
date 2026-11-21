@@ -1,4 +1,4 @@
-FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID, PROX, NEB)
+FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID, PROX, NEB, Ting)
 Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE), which applies to FreeForGem.
 
 The GPU kernels, the CUDA library and the host program are original work. The GPU library is
@@ -66,3 +66,7 @@ their own licenses:
     images are from Kermany et al., Cell 172(5), 2018. See docs/mainnet.md of the NEB release.
   - NVIDIA CUDA runtime (cudart) -- linked statically into libnebgpu.so / nebgpu.dll (NVIDIA CUDA Toolkit EULA).
   - cc (build only, MIT / Apache-2.0) compiles the C reference.
+
+* Ting / Daler (1.8.0): the Ting module of the host (host/src/ting/, from FFGT, original work) and the Ting GPU libraries
+  (tinggpu: libtinggpu.so / tinggpu.dll for CUDA, libtinggpu_cl.so / tinggpu_cl.dll for OpenCL; original work, distributed in
+  binary form only, closed source). The sha2 crate (MIT / Apache-2.0) computes the SHA-256 midstate on the CPU.
