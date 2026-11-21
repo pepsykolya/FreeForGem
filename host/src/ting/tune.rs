@@ -902,6 +902,7 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
         }));
     }
     let live = Arc::new(Live { nv, db, p: Params::from(o), driver: nv.driver_version(), cards: v, stop: stop.clone() });
+    register_recovery(&live);
     std::thread::scope(|s| {
         for c in &live.cards {
             let l = live.clone();
@@ -1020,6 +1021,118 @@ impl Live {
             lg(format!("{} re-check skipped (the mining thread did not pause)", c.label()));
         }
         c.r.pause.store(false, Ordering::SeqCst);
+    }
+}
+
+/// FFG 1.8.0 (recover.rs, FFGN 1.0.13): the tuner of this run, for the recovery of a GPU whose engine process crashed (weak: the
+/// tuner's own drop puts the offsets back).
+static LIVE: std::sync::Mutex<Option<std::sync::Weak<Live>>> = std::sync::Mutex::new(None);
+
+fn register_recovery(live: &Arc<Live>) {
+    *LIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::downgrade(live));
+}
+
+fn live_card(bus: &str) -> Option<(Arc<Live>, Arc<Card>)> {
+    let l = LIVE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()?.upgrade()?;
+    let c = l.cards.iter().find(|c| crate::nvml::quiet::same_bus(&c.r.bus, bus))?.clone();
+    Some((l, c))
+}
+
+/// FFG 1.8.0 (recover.rs): the plan of the GPU on `bus` after a crash of its engine process: a tuned GPU (the tuner owns its
+/// offset, no check runs on it: as `crashed_while_mining`) restarts 2 steps below the offset it crashed at (rule 2, never
+/// below its base); any other offset (the owner's, --uv-offset, a check's own child) is not changed.
+pub fn recovery_plan(bus: &str) -> crate::recover::Plan {
+    let none = crate::recover::Plan { crashed: None, confirmed: None, base: 0, step: 15 };
+    let Some((l, c)) = live_card(bus) else { return none };
+    plan_of(c.owned.load(Ordering::Relaxed), c.busy.load(Ordering::Relaxed), c.cur.load(Ordering::Relaxed), c.base.load(Ordering::Relaxed), l.p.step).unwrap_or(none)
+}
+
+fn plan_of(owned: bool, busy: bool, cur: i32, base: i32, step: i32) -> Option<crate::recover::Plan> {
+    (owned && !busy).then(|| crate::recover::Plan { crashed: Some(cur), confirmed: Some(cur), base, step: crate::recover::coin_step(step) })
+}
+
+/// FFG 1.8.0 (recover.rs): the recovery set the GPU's safe offset `to` (below `from`, the crashed one) before its new engine
+/// process: the tuner's offset and saved profile follow (what `crash_back` did, now before the engine instead of after it).
+pub fn after_recovery(bus: &str, from: i32, to: i32) {
+    let Some((l, c)) = live_card(bus) else { return };
+    c.cur.store(to, Ordering::Relaxed);
+    lg(format!("{} crashed while mining at {} (its engine process restarted): offset {} -> {} ({} MHz below it) before its new engine, saved; no tuning from scratch", c.label(), signed(from), signed(from), signed(to), from - to));
+    let k = c.key.lock().unwrap().clone();
+    if let Some(mut e) = l.db.get::<Entry>(&c.uuid, &k) {
+        e.offset = to;
+        e.stepped_back += 1;
+        l.db.save(&c.uuid, "", &k, &e);
+    }
+    if to <= c.base.load(Ordering::Relaxed) {
+        c.owned.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod recovery_plan_tests {
+    use super::*;
+    use crate::recover::safe_offset;
+
+    /// Ting iso: a tuned GPU's engine crashes at +330 (base +210, --uv-step 15): its new engine starts at +300 (crash_back,
+    /// as crash_back did after the engine before); a GPU in a check, or one the tuner does not own: its offset is not changed.
+    #[test]
+    fn a_tuned_gpu_restarts_two_steps_below_its_crash_and_nothing_else_is_lowered() {
+        let p = plan_of(true, false, 330, 210, 15).unwrap();
+        assert_eq!(safe_offset(&p), Some(330 - uv::crash_back(15)));
+        assert_eq!(safe_offset(&plan_of(true, false, 220, 210, 15).unwrap()), Some(210), "never below its base");
+        assert_eq!(safe_offset(&plan_of(true, false, 330, 210, 5).unwrap()), Some(330 - uv::crash_back(5)), "at least 30 MHz");
+        assert!(plan_of(true, true, 330, 210, 15).is_none(), "a check runs on it: its own child handles it");
+        assert!(plan_of(false, false, 330, 210, 15).is_none(), "the owner's / a fixed offset");
+    }
+
+    /// The Rig01 case on a Ting iso GPU (mock NVML side): its engine crashed at the tuned +365, the driver answers 10 s later;
+    /// the new engine process starts only after +335 is set and read back (1.8.0 before: a new engine after 3 s at +365, the
+    /// tuner's step back waited for the quiet period, 3 tries at +365 and the GPU was given up).
+    #[test]
+    fn a_crashed_ting_engine_restarts_only_at_its_safe_offset() {
+        use crate::recover::{Hw, Opts, SafeState, recover_and_start};
+        use std::cell::Cell;
+        use std::time::Duration;
+        struct M {
+            t: Cell<Duration>,
+            cur: Cell<i32>,
+            resumed: Cell<bool>,
+        }
+        impl Hw for M {
+            fn since_fault(&self) -> Option<Duration> {
+                (!self.resumed.get()).then(|| self.t.get())
+            }
+            fn probe(&self) -> Result<(), String> {
+                if self.t.get() >= Duration::from_secs(10) { Ok(()) } else { Err("busy".into()) }
+            }
+            fn resume(&self) -> Result<(), String> {
+                self.resumed.set(true);
+                Ok(())
+            }
+            fn apply_clocks(&self) -> Result<(), String> {
+                Ok(())
+            }
+            fn set_offset(&self, v: i32) -> Result<(), String> {
+                assert!(self.resumed.get(), "no set while the driver resets the GPU");
+                self.cur.set(v);
+                Ok(())
+            }
+            fn read_offset(&self) -> Option<i32> {
+                Some(self.cur.get())
+            }
+            fn stopped(&self) -> bool {
+                false
+            }
+            fn sleep(&self, d: Duration) {
+                self.t.set(self.t.get() + d);
+            }
+        }
+        let hw = M { t: Cell::new(Duration::ZERO), cur: Cell::new(365), resumed: Cell::new(false) };
+        let plan = plan_of(true, false, 365, 275, 15).unwrap();
+        let started_at = recover_and_start(&hw, &plan, &Opts::default(), &mut |_| {}, |_: &SafeState| hw.cur.get()).unwrap();
+        assert_eq!(started_at, 335);
+        let mut b = crate::recover::Budget::new(3, Duration::from_secs(600));
+        assert_eq!(b.note(std::time::Instant::now(), true), crate::recover::Verdict::Retry { counted: false, n: 0 }, "a tuning failure never counts");
     }
 }
 

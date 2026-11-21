@@ -346,6 +346,9 @@ struct Shared {
     open: fn(i32) -> Result<Box<dyn iso::Engine>>,
     /// engine crashes of iso mode, for the main loop's fault record (after ISO_XID_WAIT, so the driver's Xid can arrive)
     crashes: Mutex<Vec<IsoCrash>>,
+    /// FFG 1.8.0 (recover.rs, FFGN 1.0.13): an NVIDIA GPU's crashed engine gets its safe state (the driver's reset, a probe
+    /// process, a fresh NVML handle, its clocks, 2 steps below a tuned offset) BEFORE its new engine process (tests: false)
+    recover: bool,
 }
 
 struct IsoCrash {
@@ -361,6 +364,10 @@ const ISO_XID_WAIT: Duration = Duration::from_millis(1500);
 const RETRY_MAX: usize = 3;
 const RETRY_WINDOW: Duration = Duration::from_secs(600);
 const RETRY_AFTER: Duration = Duration::from_secs(3);
+/// FFG 1.8.0 (FFGN 1.0.13): a GPU FAULTY at its safe offset pauses this long, then a new engine (the other GPUs mine on)
+const FAULTY_PAUSE: Duration = Duration::from_secs(600);
+/// FFG 1.8.0 (FFGN 1.0.13): an engine that could not open a device that is gone this many times in a row: DEAD
+const GONE_OPENS: u32 = 2;
 
 fn open_local(dev: i32) -> Result<Box<dyn iso::Engine>> {
     Ok(Box::new(iso::Local::new(dev)))
@@ -377,35 +384,100 @@ fn now_ms() -> u64 {
 }
 
 fn worker(dev: i32, pos: usize, sh: Arc<Shared>, gs: Arc<GpuStat>) {
-    let mut fails: Vec<Instant> = Vec::new();
+    // FFG 1.8.0 (recover.rs, FFGN 1.0.13): only the faults at a SAFE offset count (a crash of a tuned offset is a tuning failure:
+    // its offset goes down before the new engine); more than RETRY_MAX of them within RETRY_WINDOW = FAULTY (a pause, then a new
+    // engine: not lost); DEAD only for a device that cannot be opened (recover::device_gone) or cannot be reached (Lost)
+    let mut budget = crate::recover::Budget::new(RETRY_MAX as u32, RETRY_WINDOW);
+    let mut gone = 0u32;
+    let beat = || gs.last_call.store(now_ms(), Ordering::Relaxed);
     loop {
+        let opens0 = gs.opens.load(Ordering::Relaxed);
         let r = worker_loop(dev, pos, &sh, &gs);
         let Err(e) = r else { break };
         let msg = format!("{e:#}");
+        let sticky = crate::faults::sticky(&msg) || crate::recover::device_gone(&msg);
         // 1.8.0 iso: an engine process that died / hung, or a sticky CUDA error inside it, ends only that process: a new one
-        // after RETRY_AFTER; the other GPUs keep mining.  Single process: as before (the worker stops, the main loop decides).
-        if !sh.iso || sh.stop.load(Ordering::Relaxed) || !crate::faults::sticky(&msg) {
+        // once it is safe; the other GPUs keep mining.  Single process: as before (the worker stops, the main loop decides).
+        if !sh.iso || sh.stop.load(Ordering::Relaxed) || !sticky {
             eprintln!("GPU{dev}: Ting worker stopped: {msg}");
             *gs.err.lock().unwrap() = Some(msg);
             break;
         }
+        if sh.recover {
+            // no NVML call for this GPU from any thread while the driver resets it (nvml.rs quiet period)
+            crate::nvml::gpu_fault(&gs.bus, &msg);
+        }
         gs.crashes.fetch_add(1, Ordering::Relaxed);
         sh.crashes.lock().unwrap().push(IsoCrash { dev, pos, err: msg.clone(), at: Instant::now() });
-        fails.retain(|t| t.elapsed() < RETRY_WINDOW);
-        fails.push(Instant::now());
-        if fails.len() > RETRY_MAX {
-            eprintln!("GPU{dev}: Ting engine failed {} times within {} min ({msg}): this GPU is given up until the next miner start; the other GPUs keep mining", fails.len(), RETRY_WINDOW.as_secs() / 60);
-            *gs.err.lock().unwrap() = Some(msg);
-            break;
+        let opened = gs.opens.load(Ordering::Relaxed) > opens0;
+        if !opened && crate::recover::device_gone(&msg) {
+            gone += 1;
+            if gone >= GONE_OPENS {
+                eprintln!("GPU{dev}: Ting worker stopped: the device cannot be opened ({msg})");
+                *gs.err.lock().unwrap() = Some(format!("the device cannot be opened: {msg}"));
+                break;
+            }
+        } else if opened {
+            gone = 0;
         }
-        eprintln!("GPU{dev}: Ting engine failed ({msg}): only this GPU restarts in {} s (a new engine process); the other GPUs keep mining", RETRY_AFTER.as_secs());
-        let t = Instant::now();
-        while t.elapsed() < RETRY_AFTER && !sh.stop.load(Ordering::Relaxed) {
-            gs.last_call.store(now_ms(), Ordering::Relaxed);
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        eprintln!("GPU{dev}: Ting engine failed ({msg}): only this GPU restarts: a new engine process once it is safe (the driver's reset, a fresh NVML handle, its clocks and a safe offset first); the other GPUs keep mining");
+        let lowered = if sh.recover {
+            let plan = tune::recovery_plan(&gs.bus);
+            let hw = crate::recover::CoinGpu { bus: gs.bus.clone(), stop: &sh.stop, set: crate::noid::offset::set, read: crate::noid::offset::current, fault_at: None, beat: Some(&beat) };
+            match crate::recover::recover_after_fault(&hw, &plan, &crate::recover::Opts::default(), &mut |l| println!("GPU{dev}: {l}")) {
+                crate::recover::SafeState::Stopped => break,
+                crate::recover::SafeState::Lost(why) => {
+                    eprintln!("GPU{dev}: Ting worker stopped: {why}");
+                    *gs.err.lock().unwrap() = Some(format!("the device cannot be reached: {why}"));
+                    break;
+                }
+                crate::recover::SafeState::Ready { offset, lowered, waited, .. } => {
+                    if let (true, Some(o), Some(c)) = (lowered, offset, plan.crashed) {
+                        tune::after_recovery(&gs.bus, c, o);
+                    }
+                    println!(
+                        "GPU{dev}: safe to start a new engine process after {:.0} s: {}",
+                        waited.as_secs_f64(),
+                        match (offset, plan.crashed) {
+                            (Some(o), Some(c)) if lowered => format!("offset {c:+} -> {o:+} (2 steps below the crash, never below its base), set and read back"),
+                            (Some(o), _) => format!("offset {o:+} (its safe one), read back"),
+                            _ => "its offset is not changed by this run".into(),
+                        }
+                    );
+                    lowered
+                }
+            }
+        } else {
+            let t = Instant::now();
+            while t.elapsed() < RETRY_AFTER && !sh.stop.load(Ordering::Relaxed) {
+                beat();
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            false
+        };
         if sh.stop.load(Ordering::Relaxed) {
             break;
+        }
+        match budget.note(Instant::now(), lowered) {
+            crate::recover::Verdict::Retry { counted: false, .. } => println!("GPU{dev}: the fault was above its safe offset (a tuning failure): it does not count against this GPU"),
+            crate::recover::Verdict::Retry { counted: true, n } => println!("GPU{dev}: fault {n} of {RETRY_MAX} allowed within {} min at its safe offset", RETRY_WINDOW.as_secs() / 60),
+            crate::recover::Verdict::Exhausted { n } => {
+                eprintln!(
+                    "WARNING GPU{dev} (bus {}): FAULTY: {n} faults within {} min at its safe offset (the device itself opens: not lost, no reboot needed): this GPU pauses {} min, then a new engine; check its clocks / power / riser",
+                    crate::uv::short_bus(&gs.bus),
+                    RETRY_WINDOW.as_secs() / 60,
+                    FAULTY_PAUSE.as_secs() / 60
+                );
+                let t = Instant::now();
+                while t.elapsed() < FAULTY_PAUSE && !sh.stop.load(Ordering::Relaxed) {
+                    beat();
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                if sh.stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                budget.clear();
+            }
         }
     }
     gs.alive.store(false, Ordering::Relaxed);
@@ -691,6 +763,9 @@ pub fn mine(o: Opts) -> Result<()> {
     let iso_on = iso::wanted(o.single_process, nvidia);
     if nvidia {
         clocks::set_bus_resolver(gpu::device_pci_bus_id);
+        // FFG 1.8.0 (recover.rs, FFGN 1.0.13): after a fault-restart of the whole process (faults::restart_self) the faulted GPU gets
+        // its safe state (the driver's reset, a probe process, not above its crash - 2 steps) before this run sets clocks or opens it
+        crate::recover::at_restart(&buses, &dir, o.uv.step, &stop, "recover");
         clocks::recover(&dir);
     }
     let mut clock_opts = clocks::ClockOpts {
@@ -871,6 +946,7 @@ pub fn mine(o: Opts) -> Result<()> {
         iso: iso_on,
         open: if iso_on { iso::open } else { open_local },
         crashes: Mutex::new(Vec::new()),
+        recover: iso_on && nvidia && crate::offset::nvml().is_some(),
     });
     if iso_on {
         println!("engine: one process per GPU (a CUDA fault on one GPU restarts only that GPU; --single-process = all GPUs in this process)");
@@ -1252,7 +1328,8 @@ fn iso_crashes(sh: &Shared, gs: &[Arc<GpuStat>], watch: Option<&crate::faults::W
         let foreign = crate::faults::foreign_offset(tuned, w.offset(k)) || crate::faults::foreign_near(&card.bus);
         let rec = (!foreign).then(|| crate::faults::record_crash(dir, &card.uuid, &card.bus, &card.name, xid.unwrap_or(0), off));
         println!("faults: {}", crate::faults::iso_line(&card.label(), xid, &c.err, others, rec.as_ref()));
-        if !foreign {
+        // FFG 1.8.0 (recover.rs): with the recovery the worker sets the 2 steps below BEFORE the new engine (tune::after_recovery)
+        if !foreign && !sh.recover {
             if let Some(l) = live {
                 tune::crashed_while_mining(l, c.dev);
             }
@@ -1385,6 +1462,7 @@ mod tests {
             iso: iso_on,
             open,
             crashes: Mutex::new(Vec::new()),
+            recover: false,
         });
         let gs: Vec<Arc<GpuStat>> = (0..2)
             .map(|d| {
