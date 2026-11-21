@@ -284,19 +284,19 @@ Rules for Extra config:
 - **The groups:** `COIN:GPUS` with the GPU numbers of the dashboard (`neb:0,1 pearl:2,3`, ranges `neb:0-3`, one group may take
   `rest`: `neb:0,1 pearl:rest`). Spaces, `,` and `;` are equal separators, no quotes needed. One card mines one coin.
 - **Untagged options go to every group** (`--auto-uv`, the worker of the template); **tagged** ones only to their coin's group
-  (`--lock-cclock pearl=1410`).
+  (`--lock-cclock pearl=1410`). Options that only some coins have (NEB `--table-mclock`, `--pl`, `--tbig`; Ting `--no-group`; ...)
+  go to those coins' groups by themselves; the miner log has one `split:` line per group with what it left out.
 - **A per-GPU list without a tag is for the whole rig** and is sliced per group: `--lock-cclock 1800,1800,1410,1410` gives NEB
   1800,1800 and Pearl 1410,1410.
 - **HiveOS splits Extra config at spaces**, so `--split-args` takes one word: write `--split-args neb=--auto-uv` once for every
   flag of one group, and options with a value as tags (`--table-mclock neb=810`, not `--split-args neb="--table-mclock 810"`).
-- The flight sheet's Pass goes to every group that has no tagged `--password` of its own.
-- **Options only one coin knows need a tag:** `--table-mclock neb=810`, `--pl neb=140`, `--tbig neb=auto`,
-  `--split-args neb=--keep-hive-mem`, `--split-args ting=--no-group`. Untagged, they reach the other group too, and a coin that
-  does not know them stops with `unknown argument` and is restarted again and again.
+- The flight sheet's Pool URL, Wallet and Pass (and a solo node) are tagged with the flight sheet's coin by the miner's HiveOS
+  scripts, so they reach only that coin's group: a gate password never goes to the other coin's pool.
+- Tag a value (`--table-mclock neb=810`) to be explicit, or to give two groups different values.
 
 What the dashboard shows:
 
-- the **algo and the total** of the group with the most cards (of groups of equal size, one of them);
+- the **algo and the total** of the group with the most cards (of groups with as many cards, the first one in `--split`);
 - **every card** with its own rate; when the coins have different units, every card is given as its plain rate per second (NEB
   attempts/s, Pearl hashes/s), so do not compare those numbers across coins;
 - **accepted / rejected** shares of all groups together;
@@ -589,19 +589,20 @@ GH/s и GH/W, algo `ting`. Каждая карта майнит в своём п
 - **Группы:** `МОНЕТА:КАРТЫ` с номерами карт как на панели (`neb:0,1 pearl:2,3`, диапазоны `neb:0-3`, одна группа может взять
   `rest`: `neb:0,1 pearl:rest`). Пробел, `,` и `;` — равноценные разделители, кавычки не нужны. Одна карта майнит одну монету.
 - **Опции без тега идут во все группы** (`--auto-uv`, воркер из шаблона); **с тегом** — только в группу своей монеты
-  (`--lock-cclock pearl=1410`).
+  (`--lock-cclock pearl=1410`). Опции, которые есть только у некоторых монет (у NEB `--table-mclock`, `--pl`, `--tbig`; у Ting
+  `--no-group`; ...), сами уходят только в группы этих монет; в логе майнера на каждую группу есть строка `split:` о том, что ей не
+  передано.
 - **Список по картам без тега — на весь риг**, он нарезается по группам: `--lock-cclock 1800,1800,1410,1410` даёт NEB 1800,1800, а
   Pearl 1410,1410.
 - **HiveOS режет Extra config по пробелам**, поэтому `--split-args` берёт одно слово: пишите `--split-args neb=--auto-uv` отдельно
   для каждого флага одной группы, а опции со значением — тегом (`--table-mclock neb=810`, а не `--split-args neb="--table-mclock 810"`).
-- Pass из листа уходит во все группы, у которых нет своего `--password` с тегом.
-- **Опциям, которые знает только одна монета, нужен тег:** `--table-mclock neb=810`, `--pl neb=140`, `--tbig neb=auto`,
-  `--split-args neb=--keep-hive-mem`, `--split-args ting=--no-group`. Без тега они попадут и в другую группу, а монета, которая их
-  не знает, остановится с `unknown argument` и будет перезапускаться снова и снова.
+- Pool URL, Wallet и Pass листа (и соло-ноду) скрипты HiveOS майнера помечают тегом монеты листа, поэтому они уходят только в группу
+  этой монеты: пароль шлюза никогда не попадёт на пул другой монеты.
+- Значение с тегом (`--table-mclock neb=810`) — чтобы указать явно или дать двум группам разные значения.
 
 Что показывает панель:
 
-- **algo и общий хешрейт** группы, в которой больше карт (из групп равного размера — одной из них);
+- **algo и общий хешрейт** группы, в которой больше карт (из групп с одинаковым числом карт — первой в `--split`);
 - **каждую карту** с её собственной скоростью; если у монет разные единицы, каждая карта отдаётся в своих «штуках в секунду» (NEB —
   попытки/с, Pearl — хеши/с), так что сравнивать эти числа между монетами нельзя;
 - **принятые / отклонённые** шары всех групп вместе;
