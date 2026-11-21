@@ -7,8 +7,10 @@
 #                                        stratum+ssl://HOST:PORT of a NOID pool (NOID; --algo noid in Extra config if the host
 #                                        name has no "noid" in it)
 #   Wallet/worker  (CUSTOM_TEMPLATE)     %WAL%.%WORKER_NAME%  (or just %WAL%)
-# The coin follows the pool URL (cmfd+tls:// = CMFD, a NOID pool = NOID, a Proxima pool or http://NODE = PROX);
-# --algo pearl|cmfd|noid|prox in Extra config forces it.
+# The coin follows the pool URL (cmfd+tls:// = CMFD, a NOID pool = NOID, a Proxima pool or http://NODE = PROX,
+# neb.suprnova.cc / neb.ariabrain.com / work:// = NEB); --algo pearl|cmfd|noid|prox|neb in Extra config forces it.
+#   NEB (1.8.0): Pool URL stratum+tcp://neb.suprnova.cc:7804, Wallet template %WAL%.%WORKER_NAME% (neb1...), Pass x
+#   (an ffgn gate / Aria: the Pass field is the token, sent to the FIRST pool only, owner's rule 5).
 #   Extra config   (CUSTOM_USER_CONFIG)  extra arguments, e.g. --devices 0,1
 cd "$(dirname "$0")"
 . ./h-manifest.conf
@@ -37,5 +39,10 @@ fi
 pass=
 if [[ $url == *prox* || $url == innov* || " $extra " == *" --algo prox "* || " $extra " == *" --algo proxima "* ]]; then
   [[ -n ${CUSTOM_PASS:-} ]] && pass=" --password $CUSTOM_PASS"
+fi
+# NEB (1.8.0): the Pass field goes to the miner (a gate token / Aria password; "x" changes nothing); the miner sends it to the
+# first pool only
+if [[ $url == *neb.* || $url == work://* || $url == aria://* || $url == *ariabrain* || " $extra " == *" --algo neb "* || " $extra " == *" --coin neb "* || " $extra " == *" --algo nebhash "* ]]; then
+  [[ -n ${CUSTOM_PASS:-} && ${CUSTOM_PASS:-} != x ]] && pass=" --password $CUSTOM_PASS"
 fi
 echo "$poolargs --wallet $wallet --worker $worker$pass $extra" > "$CUSTOM_CONFIG_FILENAME"

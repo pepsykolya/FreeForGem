@@ -658,7 +658,7 @@ pub fn mine(o: Opts) -> Result<()> {
         core_mhz: match &o.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &o.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &o.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
-        no_hive_mem: false,
+        ..clocks::ClockOpts::policy(crate::coins::spec(crate::coins::Coin::Noid).mem)
     };
     // --auto-lock (1.7.8): the saved / measured core lock per GPU (a sweep runs here, before this run touches any clock)
     let mut o = o;
@@ -1041,7 +1041,7 @@ pub fn mine(o: Opts) -> Result<()> {
                     (true, _) => "  [DEVFEE]".to_string(),
                     _ => String::new(),
                 },
-                if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" },
+                format!("{}{}", if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" }, crate::clocks::unheld_tag()),
                 if st[0].job.is_none() && !fee.active() && im == crate::idle::Mode::Full { "  [NO JOB]" } else { "" }
             );
             if bad > last_bad {

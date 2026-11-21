@@ -1,10 +1,10 @@
 # FreeForGemPear — see LICENSE
 [package]
 name = "freeforgem"
-version = "1.7.8"
+version = "1.8.0"
 edition = "2024"
 license-file = "../LICENSE"
-description = "FreeForGem: Pearl (PRL), Common Foundry (CMFD) and NOID (Parano1d) GPU miner"
+description = "FreeForGem: Pearl (PRL), Common Foundry (CMFD), NOID (Parano1d), PROX (Proxima) and NEB (Neural Engine Byte) GPU miner"
 
 [dependencies]
 # Official Pearl crates (ISC), pinned to the upstream commit the miner was verified against
@@ -28,6 +28,10 @@ noid_core = { git = "https://git.parano1d.org/ignotusnemo/parano1d", rev = "5302
 # NOID pools speak stratum over TLS (stratum+ssl://)
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 webpki-roots = "0.26"
+
+[build-dependencies]
+# compiles the NEB C reference (nebref/, Apache-2.0) that re-checks every NEB nonce; already in Cargo.lock (no new crate)
+cc = "1"
 
 [profile.release]
 opt-level = 3

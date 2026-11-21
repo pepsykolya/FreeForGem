@@ -191,7 +191,9 @@ pub fn sticky(err: &str) -> bool {
     let e = err.to_ascii_lowercase();
     ["illegal memory access", "illegal address", "unspecified launch failure", "misaligned address", "illegal instruction", "hardware stack error",
      "an exception occurred on the device", "launch timed out", "ecc error", "uncorrectable", "gpu has fallen off", "cuda_error_illegal",
-     "invalid program counter", "context is destroyed", "injected fault"]
+     "invalid program counter", "context is destroyed", "injected fault",
+     // 1.0.11 (iso.rs): the engine process of the GPU ended or hung
+     "the engine process ended", "the engine process did not answer"]
         .iter()
         .any(|k| e.contains(k))
 }
@@ -200,6 +202,8 @@ pub fn sticky(err: &str) -> bool {
 pub struct Watch {
     nv: Nvml,
     pub cards: Vec<WCard>,
+    /// 1.0.11: Xids read for one card (`take_for`) leave the others' here for the next `take`
+    buf: Mutex<Vec<(usize, Vec<u64>)>>,
 }
 
 pub struct WCard {
@@ -227,12 +231,30 @@ impl Watch {
             nv.watch_xid(h);
             cards.push(WCard { dev: *dev, bus: bus.clone(), uuid, name: name.clone(), h });
         }
-        Some(Watch { nv, cards })
+        Some(Watch { nv, cards, buf: Mutex::new(Vec::new()) })
     }
 
     /// Critical Xids per card since the last call (index into `cards`).
     pub fn take(&self) -> Vec<(usize, Vec<u64>)> {
-        self.cards.iter().enumerate().map(|(i, c)| (i, self.nv.take_xids(c.h))).filter(|(_, x)| !x.is_empty()).collect()
+        let mut b = self.buf.lock().unwrap();
+        self.fill(&mut b);
+        std::mem::take(&mut *b)
+    }
+
+    fn fill(&self, b: &mut Vec<(usize, Vec<u64>)>) {
+        for (i, c) in self.cards.iter().enumerate() {
+            let x = self.nv.take_xids(c.h);
+            if !x.is_empty() {
+                merge_xids(b, i, x);
+            }
+        }
+    }
+
+    /// 1.0.11: the critical Xids of card `i` only (a crash of its own engine process); the other cards' stay for `take`.
+    pub fn take_for(&self, i: usize) -> Vec<u64> {
+        let mut b = self.buf.lock().unwrap();
+        self.fill(&mut b);
+        take_card(&mut b, i)
     }
 
     /// The core offset the card has now.
@@ -243,6 +265,36 @@ impl Watch {
     pub fn by_dev(&self, dev: i32) -> Option<usize> {
         self.cards.iter().position(|c| c.dev == dev)
     }
+}
+
+fn merge_xids(b: &mut Vec<(usize, Vec<u64>)>, i: usize, x: Vec<u64>) {
+    match b.iter_mut().find(|e| e.0 == i) {
+        Some(e) => e.1.extend(x),
+        None => b.push((i, x)),
+    }
+}
+
+fn take_card(b: &mut Vec<(usize, Vec<u64>)>, i: usize) -> Vec<u64> {
+    match b.iter().position(|e| e.0 == i) {
+        Some(p) => b.remove(p).1,
+        None => Vec::new(),
+    }
+}
+
+/// 1.0.11 (iso.rs): the line of a crash of ONE GPU's engine process: that GPU failed (its own process), the others mine on.
+/// `rec`: the crash record written (None: not counted, e.g. another tool changed the card at the same moment, or no NVML).
+pub fn iso_line(label: &str, xid: Option<u64>, err: &str, others: usize, rec: Option<&Rec>) -> String {
+    let what = match xid {
+        Some(x) if x > 0 => format!("Xid {x} reported by the driver for this GPU"),
+        _ => "no Xid reported by the driver".to_string(),
+    };
+    let tail = match rec {
+        Some(r) => format!("; crash {} in a row at offset {} remembered", r.n, signed(r.offset)),
+        None => "; not counted as a failure of this GPU's offset".to_string(),
+    };
+    format!(
+        "{label} FAILED in its own engine process ({what}: {err}): only this GPU restarts (a new engine process); {others} other GPU worker(s) keep mining{tail}"
+    )
 }
 
 /// Test hook (tests only): FFG_TEST_FAULT=<dev>:<secs> makes the worker of CUDA device `dev` fail with a sticky-looking error
@@ -449,6 +501,24 @@ mod tests {
         assert_eq!(got, a(&["--algo", "noid", "--auto-uv", "--lock-cclock", "1500"]));
         // a value that only looks like a flag stays (the worker name of a flight sheet)
         assert_eq!(restart_args(a(&["--worker", "--uv-reset-rig"]).into_iter()), a(&["--worker", "--uv-reset-rig"]));
+    }
+
+    #[test]
+    fn iso_crash_xids_and_line() {
+        // a crash of one GPU's engine process takes only that card's Xids; another card's stay for the next take
+        let mut b = Vec::new();
+        merge_xids(&mut b, 0, vec![31]);
+        merge_xids(&mut b, 2, vec![43]);
+        merge_xids(&mut b, 0, vec![13]);
+        assert_eq!(take_card(&mut b, 0), vec![31, 13]);
+        assert_eq!(take_card(&mut b, 0), Vec::<u64>::new());
+        assert_eq!(b, vec![(2, vec![43])]);
+        let r = Rec { n: 2, offset: 165, ..Default::default() };
+        let l = iso_line("GPU11 (bus 0f, 2060S)", Some(31), "GPU11: the engine process ended during a scan (exit code: 1)", 11, Some(&r));
+        assert!(l.contains("GPU11 (bus 0f, 2060S) FAILED in its own engine process (Xid 31") && l.contains("only this GPU restarts") && l.contains("11 other GPU worker(s) keep mining") && l.contains("crash 2 in a row at offset +165"), "{l}");
+        let l = iso_line("GPU3", None, "x", 0, None);
+        assert!(l.contains("no Xid") && l.contains("not counted"), "{l}");
+        assert!(sticky("GPU0: the engine process did not answer a scan within 30 s (a hung GPU?): it was stopped"));
     }
 
     #[test]

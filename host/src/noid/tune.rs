@@ -718,8 +718,9 @@ impl Tuner<'_> {
         self.db.use_key(&c.uuid, &key);
         let Some(e) = self.db.entry(&c.uuid, mode) else { return self.tune(c, crash) };
         if let Some(at) = crash_at {
-            let want = if e.offset < at { e.offset } else { at - uv::crash_back(self.o.step.max(1)) };
-            lg(format!("{} NOID profile {key}: {} {} after a quick check (no tuning from scratch)", c.label(), if e.offset < at { "back to the verified" } else { "30 MHz below the crash:" }, signed(want)));
+            // rule 2 (1.8.0): crashed - 2 steps, never above the last verified
+            let want = uv::crash_resume(at, e.offset, self.o.step.max(1));
+            lg(format!("{} NOID profile {key}: crashed at {}: {} {} after a quick check (no tuning from scratch)", c.label(), signed(at), if want == e.offset && e.offset < at { "back to the verified" } else { "2 steps below the crash:" }, signed(want)));
             return self.step_down(c, &e, want);
         }
         let why = if e.driver != self.driver {
@@ -1004,6 +1005,11 @@ impl Tuner<'_> {
             let mut seen: Vec<(i32, f64, f64)> = vec![(last_ok, good.0, good.1)]; // (offset, MH/s, W) of every passed step
             let mut infra: Option<Res> = None;
             let s = climb::climb(last_ok, Some(good.1).filter(|&w| w > 0.0), None, max, step, coarse, |o, g, mhz, refine| {
+                // 1.8.0 (rule 5, all coins): a core lock that does not hold under load (clocks.rs keeper) ends the tuning of this GPU
+                if let Some((l, m)) = crate::clocks::not_held(&c.r.bus) {
+                    lg(format!("{} WARNING the core clock lock {l} MHz does not hold (runs at {m} MHz under load): auto-uv is off for this GPU, it stays at its last good offset", c.label()));
+                    return climb::StepOut { abort: true, ..Default::default() };
+                }
                 self.db.s.set_good(&c.uuid, Some(g)); // the crash marker of this check remembers it
                 let r = self.check(c, o, self.step_secs());
                 if r.infra {
@@ -1041,7 +1047,7 @@ impl Tuner<'_> {
                 good = (m, w);
             }
             if s.plateau {
-                lg(format!("{} power no longer drops above {} (voltage floor: the two steps above it, up to {}, saved < 0.5 W per 15 MHz each): stopping here, no edge searched beyond", c.label(), signed(last_ok), signed(s.flat_top)));
+                lg(format!("{} the power stopped falling above {} (the next steps up to {} did not lower it by more than 0.5 W, or it rose): stopping there", c.label(), signed(last_ok), signed(s.flat_top)));
                 plateau = true;
             }
         }

@@ -156,6 +156,87 @@ fn stagger_ms() -> u64 {
     std::env::var("FFG_START_STAGGER_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1500)
 }
 
+/// FFGN 1.0.5 (NEB, 1.8.0 in FreeForGem): GPUs of the process (set by the miner before the GPU threads start); rigs of 6+ GPUs get the soft ramp
+pub static GPUS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+/// rigs of this many GPUs or more get the soft ramp and the model jitter by default (the coordinator: 4+)
+pub const RAMP_GPUS: usize = 4;
+
+/// Milliseconds between GPUs that go back to full load after a pause (FFG_RAMP_MS / --ramp-ms; auto: 500 on 6+ GPUs, else 0).
+pub fn ramp_ms() -> u64 {
+    std::env::var("FFG_RAMP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(if GPUS.load(std::sync::atomic::Ordering::Relaxed) >= RAMP_GPUS { 500 } else { 0 })
+}
+
+/// FFGN 1.0.5: a GPU that resumes full load after a pause (pool / node back, a new job after none, idle mode off, an
+/// auto-uv check over) takes the next free slot of the ramp: on a rig the GPUs come back one by one, ramp_ms() apart,
+/// not all in the same instant (hive3070SS: 12 GPUs, all dropped and lost from the bus at once). One GPU: no wait.
+pub fn ramp_gate(stop: &std::sync::atomic::AtomicBool) {
+    static NEXT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let step = std::time::Duration::from_millis(ramp_ms());
+    if step.is_zero() {
+        return;
+    }
+    let at = {
+        let mut n = NEXT.lock().unwrap();
+        let now = std::time::Instant::now();
+        let at = match *n {
+            Some(t) if t > now => t,
+            _ => now,
+        };
+        *n = Some(at + step);
+        at
+    };
+    while std::time::Instant::now() < at && !stop.load(std::sync::atomic::Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// FFGN 1.0.5: a new model (every block) is built on the GPUs at slightly different moments: GPU position x this many ms
+/// (auto: 30 on 6+ GPUs, else 0; FFG_MODEL_JITTER_MS overrides). 12 GPUs: the last one 330 ms after the first.
+pub fn model_jitter(pos: usize) -> std::time::Duration {
+    let ms = std::env::var("FFG_MODEL_JITTER_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(if GPUS.load(std::sync::atomic::Ordering::Relaxed) >= RAMP_GPUS { 30 } else { 0 });
+    std::time::Duration::from_millis(ms * pos as u64)
+}
+
+#[cfg(test)]
+mod ramp_tests {
+    use super::*;
+    #[test]
+    fn ramp_defaults() {
+        // one test: the env and GPUS are process-wide
+        unsafe { std::env::remove_var("FFG_RAMP_MS") };
+        unsafe { std::env::remove_var("FFG_MODEL_JITTER_MS") };
+        GPUS.store(1, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(ramp_ms(), 0);
+        assert!(model_jitter(5).is_zero());
+        GPUS.store(3, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(ramp_ms(), 0);
+        GPUS.store(4, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(ramp_ms(), 500);
+        GPUS.store(12, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(ramp_ms(), 500);
+        assert_eq!(model_jitter(11).as_millis(), 330);
+        // the slots of the ramp: three GPUs resuming at once start ~0, 500, 1000 ms
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let t = std::time::Instant::now();
+        let h: Vec<_> = (0..3).map(|_| std::thread::spawn(|| {
+            let s = std::sync::atomic::AtomicBool::new(false);
+            let t = std::time::Instant::now();
+            ramp_gate(&s);
+            t.elapsed().as_millis()
+        })).collect();
+        let mut w: Vec<u128> = h.into_iter().map(|x| x.join().unwrap()).collect();
+        w.sort();
+        assert!(w[0] < 100 && (400..700).contains(&w[1]) && (900..1300).contains(&w[2]), "{w:?}");
+        unsafe { std::env::set_var("FFG_RAMP_MS", "0") };
+        assert_eq!(ramp_ms(), 0);
+        ramp_gate(&stop);
+        assert!(t.elapsed().as_millis() < 2000);
+        unsafe { std::env::remove_var("FFG_RAMP_MS") };
+        GPUS.store(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+
 /// Before a GPU's first launch (1.7.3): the GPUs start mining one by one, STAGGER apart, so 4-8 cards do not jump to full
 /// power in the same instant (Rig05: 4x CMP 50HX lost power right at the miner start).  Pearl and NOID workers call it.
 pub fn stagger_start(dev: i32, stop: &std::sync::atomic::AtomicBool) {

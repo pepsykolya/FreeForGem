@@ -478,7 +478,7 @@ pub fn mine(o: Opts) -> Result<()> {
         core_mhz: match &o.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &o.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &o.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
-        no_hive_mem: false,
+        ..clocks::ClockOpts::policy(crate::coins::spec(crate::coins::Coin::Prox).mem)
     };
     let mut clock_opts = clock_opts;
     // ffgprox 0.1.1: the memory clock locked at the lowest value that keeps the full core range (BLAKE2b does not use the video
@@ -960,7 +960,7 @@ pub fn mine(o: Opts) -> Result<()> {
                     (true, _) => "  [DEVFEE]".to_string(),
                     _ => String::new(),
                 },
-                if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" },
+                format!("{}{}", if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" }, crate::clocks::unheld_tag()),
                 if jobs[0].is_none() && !fee.active() && im == crate::idle::Mode::Full { "  [NO JOB]" } else { "" }
             );
             win = Instant::now();

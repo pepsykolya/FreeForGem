@@ -548,12 +548,13 @@ dependencies = [
 
 [[package]]
 name = "freeforgem"
-version = "1.7.8"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bincode",
  "blake3",
+ "cc",
  "ctrlc",
  "flate2",
  "noid_core",

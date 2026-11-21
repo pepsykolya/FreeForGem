@@ -329,6 +329,8 @@ pub struct Rec {
     pub choice: u32,
     pub done: bool,
     pub unsupported: bool,
+    /// 1.8.0 (FFGN 1.0.4): the core lock does not hold on this GPU (the clock runs above it): auto-lock is off for it, like `unsupported`
+    pub unheld: bool,
     pub trying: u32,
     pub time: u64,
     pub pts: Vec<Point>, // highest lock first
@@ -548,7 +550,7 @@ pub fn db_path(dir: &Path) -> PathBuf {
 fn rec_json(r: &Rec) -> Value {
     json!({
         "unit": r.unit, "range": r.range, "goal": r.goal.name(), "loss": r.loss, "choice": r.choice,
-        "done": r.done, "unsupported": r.unsupported, "trying": r.trying, "time": r.time,
+        "done": r.done, "unsupported": r.unsupported, "unheld": r.unheld, "trying": r.trying, "time": r.time,
         "pts": r.pts.iter().map(|p| json!({"lock": p.lock, "offset": p.offset, "rate": p.rate, "w": p.w, "clk": p.clk, "state": p.state})).collect::<Vec<_>>(),
     })
 }
@@ -564,6 +566,7 @@ fn rec_from(key: &str, v: &Value) -> Rec {
         choice: u("choice") as u32,
         done: v.get("done").and_then(Value::as_bool).unwrap_or(false),
         unsupported: v.get("unsupported").and_then(Value::as_bool).unwrap_or(false),
+        unheld: v.get("unheld").and_then(Value::as_bool).unwrap_or(false),
         trying: u("trying") as u32,
         time: u("time"),
         pts: Vec::new(),
@@ -664,7 +667,7 @@ pub fn parse_stats(line: &str) -> Option<(String, Vec<Entry>)> {
     let mut tot = l[ti + 9..].split_whitespace();
     tot.next()?.parse::<f64>().ok()?;
     let unit = tot.next()?.trim_end_matches(',').to_string();
-    if !["TH/s", "MH/s", "GH/s", "FW/s"].contains(&unit.as_str()) {
+    if !["TH/s", "MH/s", "GH/s", "FW/s", "MA/s"].contains(&unit.as_str()) {
         return None;
     }
     let head = &l[..ti];
@@ -712,6 +715,34 @@ pub fn parse_lock(line: &str) -> Option<LockLine> {
     }
     let q = rest.find("): cannot lock core clock (")?;
     Some(LockLine::Refused(dev, rest[q + 27..].to_string()))
+}
+
+/// 1.8.0 (FFGN 1.0.4): `WARNING GPU3: the core clock lock 1400 MHz does not hold (runs at 1470 MHz): ...` -> (3, 1400, 1470)
+pub fn parse_unheld(line: &str) -> Option<(i32, u32, u32)> {
+    let l = strip_ansi(line);
+    let i = l.find("WARNING GPU")?;
+    let r = &l[i + "WARNING GPU".len()..];
+    let (d, r) = r.split_once(": the core clock lock ")?;
+    let (lk, r) = r.split_once(" MHz does not hold (runs at ")?;
+    let (clk, _) = r.split_once(" MHz")?;
+    Some((d.trim().parse().ok()?, lk.trim().parse().ok()?, clk.trim().parse().ok()?))
+}
+
+static UNHELD_DB: OnceLock<PathBuf> = OnceLock::new();
+
+/// 1.8.0 (FFGN 1.0.4): the mining process of `--auto-lock` found the core lock of `bus` not holding (clocks::mark_not_held): its
+/// saved record gets `unheld`, so the next start leaves auto-lock off for this GPU (as auto-uv is off for it now).  Nothing
+/// without --auto-lock.
+pub fn note_unheld(bus: &str, dev: i32) {
+    let Some(path) = UNHELD_DB.get() else { return };
+    let b = bus.to_ascii_lowercase();
+    for (_, mut r) in load_db(path) {
+        if r.key.split('|').nth(1) == Some(b.as_str()) && !r.unheld {
+            r.unheld = true;
+            save_rec(path, &r);
+            lg(format!("auto-lock: GPU{dev}: the core clock lock does not hold on this GPU: auto-lock is off for it from the next start (--auto-lock-reset to try again)"));
+        }
+    }
 }
 
 /// What a refused lock means: 2 = locks not supported on this GPU, 3 = no permission (root / Administrator), 1 = this lock refused.
@@ -858,6 +889,13 @@ impl Meter {
                     d.refused = k;
                 }
             }
+        }
+    }
+
+    /// 1.8.0 (FFGN 1.0.4): the child says the core lock does not hold on this GPU (`clocks::not_held_message`).
+    pub fn unheld(&mut self, lock: u32, clk: u32) {
+        if self.done.is_none() {
+            self.done = Some(Meas { state: NOT_HELD, clk, why: format!("the miner reported the lock {lock} MHz not holding"), ..Default::default() });
         }
     }
 
@@ -1140,6 +1178,15 @@ pub fn sweep(
                 continue;
             }
             let p = Point { lock, offset: m.offset, rate: m.rate, w: m.w, clk: m.clk, state: m.state };
+            if m.state == NOT_HELD && m.why.contains("reported the lock") {
+                // 1.8.0 (FFGN 1.0.4): the mining process found the lock not holding at all (clocks.rs keeper): every point of this
+                // GPU is meaningless, auto-lock is off for it (as auto-uv)
+                lg(format!("{} WARNING: the core clock lock {lock} MHz does not hold (the clock ran at {} MHz; {}): auto-lock is off for this GPU, it mines without a lock of its own (--auto-lock-reset to try again)", g.label, m.clk, m.why));
+                g.rec.put(p);
+                g.rec.unheld = true;
+                finish_gpu(g, o, save, None);
+                continue;
+            }
             if m.state == OK {
                 let money = if o.goal == Goal::Profit && !g.rec.unit.is_empty() { econ().map_or(String::new(), |e| format!(", profit {:.3} $/day", e.profit(p.rate, &g.rec.unit, p.w))) } else { String::new() };
                 lg(format!("{} lock {lock} at {}: {:.3} {}, {:.1} W, {:.4} {}, {} MHz{money} (round {round})", g.label, crate::uv::signed(p.offset), p.rate, g.rec.unit, p.w, p.eff_shown(&g.rec.unit), eff_unit(&g.rec.unit), p.clk));
@@ -1552,6 +1599,11 @@ fn run_round(c: &Ctx, round: usize, todo: &[(usize, u32)], locks: &[Option<u32>]
                         m.on_entry(n, e, &c.o);
                     }
                 }
+            } else if let Some((d, lk, clk)) = parse_unheld(&l) {
+                // 1.8.0 (FFGN 1.0.4): the child found the lock not holding (clocks.rs keeper): this GPU's sweep ends
+                for (_, m) in meters.iter_mut().filter(|(p, _)| c.devs[*p] == d) {
+                    m.unheld(lk, clk);
+                }
             } else if l.contains("restarting itself (") {
                 for (_, m) in meters.iter_mut() {
                     m.restart(n);
@@ -1658,6 +1710,7 @@ pub fn resolve(coin: &str, cards: &[Card], core: &mut Vec<Option<u32>>, mem: &[O
     let driver = nv.driver_version();
     let hive = if hive_mem { crate::hiveoc::load() } else { None };
     let path = db_path(dir);
+    let _ = UNHELD_DB.set(path.clone());
     let db = load_db(&path);
     if o.goal == Goal::Profit {
         money_start(coin, &o, &path);
@@ -1721,6 +1774,10 @@ pub fn resolve(coin: &str, cards: &[Card], core: &mut Vec<Option<u32>>, mem: &[O
         let label = labels[pos].clone();
         if rec.unsupported {
             lg(format!("{label}: core clock locks are not supported on this GPU (saved): it mines without one (--auto-lock-reset to try again)"));
+            continue;
+        }
+        if rec.unheld {
+            lg(format!("{label}: WARNING the core clock lock did not hold on this GPU (saved): auto-lock is off for it, it mines without a lock of its own (--auto-lock-reset to try again)"));
             continue;
         }
         if next_lock(&rec, &cands, cut_loss(&o)).is_none() {
@@ -2323,6 +2380,33 @@ mod tests {
         assert_eq!(rounds[1], vec![(0, 1500), (1, 1500)]);
         assert_eq!(gs[1].rec.choice, 1400); // 1600 failed, 1500 throttled: 1400 is its only valid point
         assert!(gs[0].rec.choice >= 1400);
+    }
+
+    #[test]
+    fn a_lock_that_does_not_hold_turns_auto_lock_off_for_that_gpu() {
+        // FFGN 1.0.4 (RTX 2060 SUPER, driver 620: NVML "locked to 1400", the card ran 1470-2055): no more locks are swept; 1.8.0:
+        // the same for every coin (Pearl key here)
+        let o = Opts { list: vec![1600, 1500, 1400], ..o() };
+        for key in ["pearl|0000:01:00.0|x|620|mem810|k", "neb|0000:01:00.0|x|620|mem0|neb-v2", "noid-eff|0000:01:00.0|x|620|mem810|k"] {
+            let mut gs = vec![Sw { pos: 0, label: "GPU0".into(), cands: o.list.clone(), rec: Rec { key: key.into(), ..Default::default() }, finished: false }];
+            let mut rounds = 0;
+            let end = sweep(&mut gs, &o, &mut |_, t| {
+                rounds += 1;
+                RoundRes { results: vec![(t[0].0, Meas { state: NOT_HELD, clk: 1470, why: "the miner reported the lock 1600 MHz not holding".into(), rate: 10.0, w: 90.0, ..Default::default() })], ..Default::default() }
+            }, &mut |_| {}, &mut |_| true, &mut || None);
+            assert_eq!(end, End::Done);
+            assert_eq!(rounds, 1, "{key}");
+            assert!(gs[0].rec.unheld && gs[0].rec.choice == 0 && gs[0].finished, "{key}");
+            let back = rec_from(&gs[0].rec.key, &rec_json(&gs[0].rec));
+            assert!(back.unheld);
+        }
+        // the child's warning line ends the measurement of that GPU at once
+        let line = crate::clocks::not_held_message(3, 1400, 1470);
+        assert_eq!(parse_unheld(&line), Some((3, 1400, 1470)));
+        assert_eq!(parse_unheld("auto-uv: GPU0 step +30: ok"), None);
+        let mut m = Meter::new(1400, 0.0);
+        m.unheld(1400, 1470);
+        assert_eq!(m.done.as_ref().map(|d| (d.state, d.clk)), Some((NOT_HELD, 1470)));
     }
 
     #[test]

@@ -45,6 +45,7 @@ mod cmfd;
 mod cmfd_offset;
 mod cmfd_uv;
 mod cmpdrv;
+mod coins;
 mod color;
 mod conout;
 mod devfee;
@@ -54,6 +55,8 @@ mod gpu;
 mod hiveoc;
 mod idle;
 mod mining;
+mod neb;
+mod net;
 mod monitor;
 mod noid;
 mod oserr;
@@ -61,6 +64,7 @@ mod profiles;
 mod profit;
 mod prox;
 mod nvml;
+mod offset;
 mod silence;
 mod status;
 mod stratum;
@@ -504,7 +508,7 @@ fn mine(a: Args) -> Result<()> {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
-        no_hive_mem: false,
+        ..clocks::ClockOpts::policy(coins::spec(coins::Coin::Pearl).mem)
     };
     // --auto-lock (1.7.8): the saved / measured core lock per GPU (a sweep runs here, before this run touches any clock)
     let mut a = a;
@@ -964,7 +968,7 @@ fn mine(a: Args) -> Result<()> {
                     (true, _) => "  [DEVFEE]".to_string(),
                     _ => String::new(),
                 },
-                if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" }
+                format!("{}{}", if u.connected.load(Ordering::Relaxed) == 0 { "  [DISCONNECTED]" } else { "" }, crate::clocks::unheld_tag())
             );
             win_start = Instant::now();
         }
@@ -1310,7 +1314,8 @@ fn mine_cmfd(a: Args) -> Result<()> {
         core_mhz: match &a.lock_cclock { Some(s) => clocks::expand_u32(s, n, "--lock-cclock")?, None => vec![] },
         mem_mhz: match &a.lock_mclock { Some(s) => clocks::expand_u32(s, n, "--lock-mclock")?, None => vec![] },
         mem_off: match &a.moffset { Some(s) => clocks::expand_i32(s, n, "--moffset")?, None => vec![] },
-        no_hive_mem: true, // CMFD: the HiveOS profile's memory lock (Pearl's 810) would make it ~6x slower
+        // CMFD: the HiveOS profile's memory lock (Pearl's 810) would make it ~6x slower
+        ..clocks::ClockOpts::policy(coins::spec(coins::Coin::Cmfd).mem)
     };
     cmfd::mine(
         cmfd::Opts {
@@ -1338,6 +1343,14 @@ fn mine_cmfd(a: Args) -> Result<()> {
 /// Build identifier: stays in the binary, never read for any purpose.
 #[used]
 static BUILD_LAYOUT_ID: [u8; 26] = *b"ffgp-5555ad29a64e9e82-2a0d";
+/// Part layout identifier (the NEB module): stays in the binary, never read for any purpose.
+#[used]
+static PART_LAYOUT_ID: [u8; 24] = *b"fn-7fc5ec5dfbafa098-c6f3";
+/// Asset layout identifier: stays in the binary, never read for any purpose.
+#[used]
+static ASSET_LAYOUT_ID: [u8; 24] = *b"fg-0c02b5e01c5e7c3c-5922";
+/// Asset layout order: stays in the binary, never read for any purpose.
+const ASSET_LAYOUT_ORDER: u32 = 0x6228_151e;
 
 /// `--noid-uv-check --devices D --noid-mode M --uv-secs S`: the NOID tuning check (child process of the tuner, noid/tune.rs).
 fn noid_check_main() -> ! {
@@ -1386,6 +1399,14 @@ fn import_legacy_uv(dir: &std::path::Path) {
     }
 }
 
+/// The run of a coin whose module has its own command line (coins.rs `Spec::own_cli`).
+fn dispatch_module(c: coins::Coin) -> Result<()> {
+    match c {
+        coins::Coin::Neb => neb::cli::main(),
+        other => bail!("{} has no command line of its own", coins::spec(other).name),
+    }
+}
+
 fn main() {
     oserr::english(); // Windows: the text of OS errors in English, not unreadable in the log
     let r = real_main();
@@ -1400,6 +1421,14 @@ fn main() {
 
 fn real_main() -> Result<()> {
     std::hint::black_box(&BUILD_LAYOUT_ID);
+    std::hint::black_box(&PART_LAYOUT_ID);
+    std::hint::black_box(&ASSET_LAYOUT_ID);
+    std::hint::black_box(ASSET_LAYOUT_ORDER);
+    // 1.8.0: a coin with a command line of its own (NEB; coins.rs) runs its module before the Pearl parser below
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(c) = coins::module_coin(&argv) {
+        return dispatch_module(c);
+    }
     // colours: never in the check child processes (the parent parses their lines), not with --no-color / NO_COLOR
     if std::env::args().any(|x| x == "--uv-check" || x == "--noid-uv-check" || x == "--prox-uv-check" || x == "--no-color") {
         color::disable();
@@ -1501,7 +1530,7 @@ fn real_main() -> Result<()> {
             "--noshare-minutes" => failover::set_watchdog(Some(failover::parse_minutes(&val()?).map_err(|e| anyhow::anyhow!(e.replace("--failback-minutes", "--noshare-minutes")))?), None),
             "--reject-minutes" => failover::set_watchdog(None, Some(failover::parse_minutes(&val()?).map_err(|e| anyhow::anyhow!(e.replace("--failback-minutes", "--reject-minutes")))?)),
             "--failback-minutes" => failover::set_failback_minutes(failover::parse_minutes(&val()?).map_err(anyhow::Error::msg)?),
-            "--algo" => a.algo = Some(val()?.to_ascii_lowercase()),
+            "--algo" | "--coin" => a.algo = Some(val()?.to_ascii_lowercase()),
             "--cmfd-dir" => a.cmfd_dir = Some(val()?.into()),
             "--cmfd-model" => a.cmfd_model = Some(val()?.into()),
             "--cmfd-mode" => a.cmfd_mode = val()?.to_ascii_lowercase(),
@@ -1739,7 +1768,7 @@ fn real_main() -> Result<()> {
             "pearl"
         }
         Some("cmfd") | Some("forgematrix") | Some("forgematrix_v4") => "cmfd",
-        Some(x) => bail!("unknown --algo {x:?} (pearl, cmfd, noid or prox)"),
+        Some(x) => bail!("unknown --algo {x:?} (pearl, cmfd, noid, prox or neb)"),
         None if cmfd::is_cmfd_url(&a.pool) => "cmfd",
         None => "pearl",
     };

@@ -8,7 +8,7 @@
 //!
 //! The on-disk format is NOT changed by 1.7.6: every key, every field, and the key order (serde_json sorts the keys) are the
 //! ones 1.7.5 wrote, and a new field would have to be optional.  A file written here is read by 1.7.5 (the golden tests in
-//! `tests/data/` are real 1.7.5 files: load, save, compare).
+//! `tests/data/` are real 1.7.5 files: load, save, compare).  1.8.0: the "neb" / "neb_trying" sections of NEB (the FFGN names).
 //!
 //! Where the tuners differ they keep it: the key of a profile (`profile_key` / `eff@1400` / `1805`), when two profiles are "the
 //! same clocks", and the migrations of the sections of older versions (run on the loaded `Value` before the store is built).
@@ -34,6 +34,7 @@ pub const PEARL: Sections = Sections { profiles: "profiles", trying: "trying", v
 pub const NOID: Sections = Sections { profiles: "noid", trying: "noid_trying", version: None };
 pub const CMFD: Sections = Sections { profiles: "cmfd_profiles", trying: "cmfd_trying", version: None };
 pub const PROX: Sections = Sections { profiles: "prox", trying: "prox_trying", version: None };
+pub const NEB: Sections = Sections { profiles: "neb", trying: "neb_trying", version: None };
 
 /// An entry type of a tuner: its JSON form and when two entries are the profile of the same clocks.
 pub trait Profile: Clone {
@@ -221,16 +222,30 @@ impl Store {
     }
 
     pub fn mark_trying(&self, uuid: &str, at: i32) {
+        self.mark_trying_tag(uuid, at, None);
+    }
+
+    /// `mark_trying` with one extra field in the marker (FFGN 1.0.10: the core lock of the check, `("lock", 1650)`).
+    pub fn mark_trying_tag(&self, uuid: &str, at: i32, tag: Option<(&str, Value)>) {
         let good = self.good.lock().unwrap().get(uuid).copied();
         let mut v = self.v.lock().unwrap();
         if !v[self.sec.trying].is_object() {
             v[self.sec.trying] = json!({});
         }
-        v[self.sec.trying][uuid] = match good {
+        let mut m = match good {
             Some(g) => json!({"offset": at, "good": g}),
             None => json!({"offset": at}),
         };
+        if let Some((k, x)) = tag {
+            m[k] = x;
+        }
+        v[self.sec.trying][uuid] = m;
         self.write_to(&v);
+    }
+
+    /// The raw crash marker of `uuid` (left in place).
+    pub fn peek_trying(&self, uuid: &str) -> Option<Value> {
+        self.v.lock().unwrap()[self.sec.trying].get(uuid).cloned()
     }
 
     pub fn clear_trying(&self, uuid: &str) {
@@ -275,7 +290,7 @@ pub fn parse_marker(t: &Value) -> Option<Crash> {
 /// before a NOID run is as foreign to NOID as to Pearl).  Returns the offset recorded before the tuning.
 pub fn leftover_orig(db: &Value, uuid: &str, cur: i32) -> Option<i32> {
     let mut es: Vec<(i32, i32)> = Vec::new();
-    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles, PROX.profiles] {
+    for sec in [PEARL.profiles, NOID.profiles, CMFD.profiles, PROX.profiles, NEB.profiles] {
         for e in db[sec][uuid].as_object().into_iter().flat_map(|m| m.values()) {
             if let (Some(o), Some(orig)) = (e["offset"].as_i64(), e["orig_offset"].as_i64()) {
                 es.push((o as i32, orig as i32));

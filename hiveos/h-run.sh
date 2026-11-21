@@ -6,6 +6,8 @@ cd "$(dirname "$0")"
 mkdir -p "$(dirname "$CUSTOM_LOG_BASENAME")"
 # --auto-uv: results and the crash-recovery file live in /hive-config (survives miner updates and reboots), see HIVEOS.md
 [[ -d /hive-config ]] && export FFGP_STATE_DIR=${FFGP_STATE_DIR:-/hive-config/freeforgem}
+# NEB (1.8.0): the saved NEB undervolt profiles of FFGN (/hive-config/ffgn/uv.json, its "neb" sections) are imported by the miner
+# on the first NEB start (MANUAL "NEB")
 # GPU numbering in PCI bus order, the same as nvidia-smi and the HiveOS dashboard
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 # colours in the miner log (the HiveOS miner screen shows them through tee; h-stats.sh strips them); NO_COLOR=1 turns them off

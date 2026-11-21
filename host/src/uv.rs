@@ -154,12 +154,14 @@ pub struct Opts {
     pub confirm_secs: u32,
     pub locks: Vec<Option<u32>>, // --lock-cclock of this run per mining GPU (filled by main; the profile key of a result)
     pub mlocks: Vec<Option<u32>>, // --lock-mclock of this run per mining GPU
+    pub parallel: Option<usize>,  // NEB (FFGN 1.0.5) --uv-parallel N: GPUs tuned at the same time (None: auto, adaptive)
+    pub parallel_reset: bool,     // NEB (FFGN 1.0.5) --uv-parallel-reset / --uv-unpause: forget the rig's caution (uv-parallel.json)
     pub reset_all: bool,          // --uv-reset-all: forget every profile (--uv-reset: only the profile of the clocks now)
 }
 
 impl Default for Opts {
     fn default() -> Opts {
-        Opts { auto: false, fixed: PerGpu::Unset, dry_run: false, reset: false, max_offset: PerGpu::Unset, min_offset: PerGpu::Unset, step: STEP, coarse: None, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120, locks: Vec::new(), mlocks: Vec::new(), reset_all: false }
+        Opts { auto: false, fixed: PerGpu::Unset, dry_run: false, reset: false, max_offset: PerGpu::Unset, min_offset: PerGpu::Unset, step: STEP, coarse: None, keep_last_good: false, dir: None, reval_hours: 6.0, warmup_secs: 180, step_secs: 30, confirm_secs: 120, locks: Vec::new(), mlocks: Vec::new(), parallel: None, parallel_reset: false, reset_all: false }
     }
 }
 
@@ -1604,12 +1606,12 @@ impl Manager {
             // it crashed while mining at `at` (faults.rs): back to the verified offset of this lock when that is lower, else one
             // step below the crash; a quick check either way, no tuning from scratch
             let mut e = e;
-            if e.offset < at {
-                lg(format!("{} crashed while mining at {}: back to the verified {} of profile {key} after a quick check (no tuning from scratch)", c.label(), signed(at), signed(e.offset)));
+            let want = crash_resume(at, e.offset, self.opts.step);
+            if want == e.offset && e.offset < at {
+                lg(format!("{} crashed while mining at {}: back to the verified {} of profile {key} (not above the last verified; 2 steps below the crash would be {}) after a quick check (no tuning from scratch)", c.label(), signed(at), signed(e.offset), signed(at - crash_back(self.opts.step))));
                 return Plan::Check { want: e.offset, e };
             }
-            let want = at - crash_back(self.opts.step);
-            lg(format!("{} crashed while mining at {} (the offset of profile {key}): {} MHz below it, {}, after a quick check (no tuning from scratch)", c.label(), signed(at), crash_back(self.opts.step), signed(want)));
+            lg(format!("{} crashed while mining at {} (the offset of profile {key}): 2 steps ({} MHz) below it, {}, after a quick check (no tuning from scratch)", c.label(), signed(at), crash_back(self.opts.step), signed(want)));
             e.offset = want;
             e.edge = at;
             e.verified_at = 0;
@@ -2231,6 +2233,11 @@ impl Manager {
         let mut n = 0u64;
         let mut last_reason = String::new();
         let s = climb::climb(good, if good == start { base_w } else { None }, if good == start { base.temp.map(|t| t as i32) } else { None }, cap, step, coarse, |cand, g, mhz, refine| {
+            // 1.8.0 (rule 5, all coins): a core lock that does not hold under load (clocks.rs keeper) ends the tuning of this GPU
+            if let Some((l, m)) = crate::clocks::not_held(&c.bus) {
+                lg(format!("{} WARNING the core clock lock {l} MHz does not hold (runs at {m} MHz under load): auto-uv is off for this GPU, it stays at its last good offset", c.label()));
+                return climb::StepOut { abort: true, ..Default::default() };
+            }
             n += 1;
             crate::status::set(c.dev, format!("tuning {} (step {}/{})", signed(cand), n, nsteps.max(n)), true, Some(est(nsteps.saturating_sub(n) + 1)));
             c.last_good.store(g, Ordering::Relaxed);
@@ -2264,7 +2271,7 @@ impl Manager {
         let plateau = s.plateau;
         let mut failed: Option<(i32, String)> = s.failed.then(|| (s.fail_at, last_reason));
         if plateau {
-            lg(format!("{} power no longer drops above {} (voltage floor: the next two steps up to {} saved < 0.5 W per 15 MHz each): stopping there", c.label(), signed(good), signed(s.flat_top)));
+            lg(format!("{} the power stopped falling above {} (the next steps up to {} did not lower it by more than 0.5 W, or it rose): stopping there", c.label(), signed(good), signed(s.flat_top)));
         }
         // the cap below a crash (30 MHz under it) is the margin already: the last good step there is the result
         let crash_edge = crashed.filter(|k| k.failed()).map(|k| k.at).filter(|_| failed.is_none() && good == cap);
@@ -2343,7 +2350,7 @@ impl Manager {
             signed(fin),
             e.clk_ok,
             fmt_w(conf_w),
-            if plateau { " (the voltage floor: no edge searched above it)" } else { "" }
+            if plateau { " (the power stopped falling: no edge searched above it)" } else { "" }
         ));
         if e.unlocked {
             lg(format!(
@@ -3105,11 +3112,19 @@ fn verified(e: &Entry) -> bool {
     e.verified_at > 0 && !e.migrated
 }
 
-/// How far below a crashed offset the step back goes: 30 MHz (two default steps) at least.  Rig01 soak (8x RTX 3070, 1805/810):
-/// two cards whose +315 (edge minus one 15 MHz step) passed tuning and quick checks crashed with Xid 43 after hours of mining.
+/// How far below a crashed offset the step back goes: two steps (the owner's rule 2 for all our miners, 1.8.0: "crashed - 2
+/// steps", before 1.8.0 one step of at least 30 MHz), 30 MHz at least.  Rig01 soak (8x RTX 3070, 1805/810): two cards whose +315
+/// (edge minus one 15 MHz step) passed tuning and quick checks crashed with Xid 43 after hours of mining.
 const CRASH_BACK_MHZ: i32 = 30;
+pub const CRASH_BACK_STEPS: i32 = 2;
 pub(crate) fn crash_back(step: i32) -> i32 {
-    step.max(CRASH_BACK_MHZ)
+    (CRASH_BACK_STEPS * step.max(1)).max(CRASH_BACK_MHZ)
+}
+
+/// The offset after a crash while mining at `at` (rule 2): `at` - 2 steps, never above the last verified offset `verified` of
+/// these clocks.  A crash again goes another 2 steps down (the caller passes the new crash offset), down to the base.
+pub(crate) fn crash_resume(at: i32, verified: i32, step: i32) -> i32 {
+    (at - crash_back(step)).min(verified)
 }
 
 pub(crate) fn fmt_w(w: Option<f64>) -> String {
@@ -3832,8 +3847,13 @@ mod tests {
     #[test]
     fn crash_steps_back_30() {
         assert_eq!(crash_back(15), 30); // Rig01: +315 crashed -> +285, not +300
-        assert_eq!(crash_back(30), 30);
-        assert_eq!(crash_back(45), 45);
+        assert_eq!(crash_back(30), 60); // 1.8.0: 2 steps whatever the step
+        assert_eq!(crash_back(45), 90);
+        // crashed - 2 steps, never above the last verified (rule 2); again: another 2 steps
+        assert_eq!(crash_resume(315, 345, 15), 285);
+        assert_eq!(crash_resume(315, 300, 15), 285);
+        assert_eq!(crash_resume(315, 270, 15), 270);
+        assert_eq!(crash_resume(285, 285, 15), 255);
     }
 
     #[test]
@@ -3966,6 +3986,7 @@ mod tests {
     fn tuning_below_a_crash_is_30_under_it_whatever_the_step() {
         assert_eq!(crash_back(15), 30);
         assert_eq!(crash_back(10), 30);
-        assert_eq!(crash_back(45), 45);
+        assert_eq!(crash_back(20), 40);
+        assert_eq!(crash_back(45), 90);
     }
 }

@@ -11,6 +11,22 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+/// What the host does with the memory clock while a coin mines (1.8.0, per coin: coins.rs `Spec::mem`).  Set with
+/// `ClockOpts::set_policy`; every lock this run sets is put back on exit / pause (restore marker), so a run of one coin never
+/// leaves its memory clock to the next run of another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MemPolicy {
+    /// Pearl, NOID, PROX: the HiveOS OC profile's memory lock is applied as nvidia-oc sets it (Pearl wants 810 MHz)
+    #[default]
+    HiveProfile,
+    /// CMFD (1.7.6): the profile's memory lock is not applied (full memory clock needed); nothing else is set
+    NoHiveLock,
+    /// NEB (FFGN D-007): memory bound: a profile memory lock below the card's maximum (Pearl's 810) is replaced by a lock at the
+    /// maximum while mining and put back on exit (`--keep-hive-mem` = HiveProfile); `--table-mclock` lowers it only on the pure
+    /// digest-table path (`table_mem`)
+    FullClock,
+}
+
 /// Per mining device (in --devices order); `None` leaves that clock untouched.
 #[derive(Clone, Default)]
 pub struct ClockOpts {
@@ -19,13 +35,44 @@ pub struct ClockOpts {
     pub mem_off: Vec<Option<i32>>,
     /// CMFD (1.7.6): do not take the memory lock from the HiveOS OC profile (an explicit `mem_mhz` still applies).
     pub no_hive_mem: bool,
+    /// NEB (D-007): a HiveOS memory lock below the card's maximum (e.g. Pearl's 810 MHz) is replaced by a lock at the maximum
+    /// while mining (put back on exit); NEB is memory bound and runs ~10x slower at 810 MHz
+    pub hive_mem_to_max: bool,
+    /// NEB 1.0.11 (LOWP111): memory clock lock while the GPU's current slot runs the pure digest-table path (`--table-mclock`).
+    /// The table path is ALU bound (DRAM ~idle): 3070 at 810 MHz -0.5 % rate, -10 W, +8..10 % MA/W. Every other path (plain,
+    /// cheap, the full-path trial, table + L=3 attempts, a model's table build) gets the full memory clock back (`table_mem`).
+    pub table_mhz: Vec<Option<u32>>,
 }
 
 impl ClockOpts {
+    /// Options with only the memory policy of a coin set.
+    pub fn policy(p: MemPolicy) -> ClockOpts {
+        let mut o = ClockOpts::default();
+        o.set_policy(p);
+        o
+    }
+
+    pub fn set_policy(&mut self, p: MemPolicy) {
+        (self.no_hive_mem, self.hive_mem_to_max) = match p {
+            MemPolicy::HiveProfile => (false, false),
+            MemPolicy::NoHiveLock => (true, false),
+            MemPolicy::FullClock => (true, true),
+        };
+    }
+
+    pub fn mem_policy(&self) -> MemPolicy {
+        match (self.no_hive_mem, self.hive_mem_to_max) {
+            (_, true) => MemPolicy::FullClock,
+            (true, false) => MemPolicy::NoHiveLock,
+            _ => MemPolicy::HiveProfile,
+        }
+    }
+
     pub fn any(&self) -> bool {
         self.core_mhz.iter().any(Option::is_some)
             || self.mem_mhz.iter().any(Option::is_some)
             || self.mem_off.iter().any(Option::is_some)
+            || self.table_mhz.iter().any(Option::is_some)
     }
 }
 
@@ -153,6 +200,7 @@ fn put_back(nv: &Nvml, d: Dev, k: Kind, stored: Prev, pos: usize, n: usize) -> S
 
 struct Item {
     dev: Dev,
+    ord: i32, // the device ordinal (GPUn of the log)
     bus: String,
     pos: usize,
     n: usize,
@@ -164,6 +212,21 @@ struct Item {
     mem_off_mhz: i32,
     core_prev: Prev,
     mem_prev: Prev,
+    /// `--table-mclock` of this GPU (0 = off), whether it is applied now, and whether it was ever applied (restore on exit)
+    tab_mhz: u32,
+    tab_low: bool,
+    tab_used: bool,
+}
+
+impl Item {
+    /// The memory lock this run wants now: the table lock while the table path runs, else the --lock-mclock / HiveOS one.
+    fn mem_want(&self) -> Option<u32> {
+        if self.tab_low { Some(self.tab_mhz) } else if self.mem_locked { Some(self.mem_mhz) } else { None }
+    }
+    /// The memory clock was changed by this run (put back on exit / pause).
+    fn mem_touched(&self) -> bool {
+        self.mem_locked || self.tab_used
+    }
 }
 
 struct State {
@@ -233,6 +296,18 @@ fn hive_mem_choice(hive_mem: Option<u32>, no_hive_mem: bool) -> (Option<u32>, Op
     if no_hive_mem { (None, hive_mem) } else { (hive_mem, None) }
 }
 
+/// 1.8.0: the memory lock a GPU gets from its HiveOS profile lock `hive_mem` under the policy `p` (no --lock-mclock given):
+/// (lock applied, profile lock skipped, lock at the maximum instead).  `max`: the card's maximum memory clock.
+pub fn mem_plan(p: MemPolicy, hive_mem: Option<u32>, max: Option<u32>) -> (Option<u32>, Option<u32>, Option<u32>) {
+    let o = ClockOpts::policy(p);
+    let (apply, skipped) = hive_mem_choice(hive_mem, o.no_hive_mem);
+    let to_max = match (skipped, max) {
+        (Some(m), Some(x)) if o.hive_mem_to_max && x > m => Some(x),
+        _ => None,
+    };
+    (apply, skipped, to_max)
+}
+
 /// Applies the requested clock locks / memory offset to `devices`.  Returns a guard that restores them on drop;
 /// `None` if nothing was requested, NVML is missing, or no device could be changed (then mining goes on as is).
 /// The lock each clock had before is noted first (HiveOS OC profile / $FFG_RESTORE_* or $FFGP_RESTORE_*) and put back on exit.
@@ -257,7 +332,8 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     for (i, &dev) in devices.iter().enumerate() {
         let (core_opt, mem_opt) = (o.core_mhz.get(i).copied().flatten(), o.mem_mhz.get(i).copied().flatten());
         let moff = o.mem_off.get(i).copied().flatten();
-        if core_opt.is_none() && mem_opt.is_none() && moff.is_none() && hive.is_none() {
+        let tab = o.table_mhz.get(i).copied().flatten();
+        if core_opt.is_none() && mem_opt.is_none() && moff.is_none() && tab.is_none() && hive.is_none() {
             continue;
         }
         let bus = match bus_id(dev) {
@@ -279,13 +355,23 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
         let core_hive = core_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.core_lock(x))).flatten();
         let hive_mem = mem_opt.is_none().then(|| hive.as_ref().zip(idx).and_then(|(h, x)| h.mem_lock(x))).flatten();
         let (mem_hive, mem_skipped) = hive_mem_choice(hive_mem, o.no_hive_mem);
+        let mut mem_max = None;
         if let Some(m) = mem_skipped {
-            lg(format!(
-                "GPU{dev} (bus {bus}): CMFD: the HiveOS profile's memory lock {m} MHz is not applied (CMFD needs the full memory clock); give --lock-mclock to force one"
-            ));
+            let max = nv.max_mem_clock_mhz(d);
+            if o.hive_mem_to_max && max.is_some_and(|x| x > m) {
+                mem_max = max;
+                lg(format!(
+                    "GPU{dev} (bus {bus}): WARNING the HiveOS OC profile locks the memory to {m} MHz: NEB needs the full memory clock (at {m} MHz it mines about 10x slower). The memory is locked to its maximum {} MHz while mining and {m} MHz is put back on exit; --keep-hive-mem keeps the profile's {m} MHz, --lock-mclock N sets your own",
+                    max.unwrap_or(0)
+                ));
+            } else {
+                lg(format!(
+                    "GPU{dev} (bus {bus}): the HiveOS profile's memory lock {m} MHz is not applied (full memory clock needed); give --lock-mclock to force one"
+                ));
+            }
         }
-        let (core, mem) = (core_opt.or(core_hive), mem_opt.or(mem_hive));
-        if core.is_none() && mem.is_none() && moff.is_none() {
+        let (core, mem) = (core_opt.or(core_hive), mem_opt.or(mem_hive).or(mem_max));
+        if core.is_none() && mem.is_none() && moff.is_none() && tab.is_none() {
             continue;
         }
         if core_hive.is_some() || mem_hive.is_some() {
@@ -295,7 +381,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 mem_hive.map_or(String::new(), |m| format!(" memory {m} MHz"))
             ));
         }
-        let mut it = Item { dev: d, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, mem_off_mhz: 0, core_prev: Prev::Unknown, mem_prev: Prev::Unknown };
+        let mut it = Item { dev: d, ord: dev, bus: bus.clone(), pos: i, n, core_locked: false, core_mhz: 0, mem_locked: false, mem_mhz: 0, mem_off: false, mem_off_mhz: 0, core_prev: Prev::Unknown, mem_prev: Prev::Unknown, tab_mhz: 0, tab_low: false, tab_used: false };
         if let Some(mhz) = core {
             let (prev, src) = prev_lock(&nv, d, Kind::Core, i, n);
             match nv.set_core_locked(d, mhz) {
@@ -325,10 +411,21 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                     it.mem_prev = prev;
                     lg(format!("GPU{dev} (bus {bus}): memory clock locked to {mhz} MHz; {}", fmt_prev(prev, src)));
                 }
-                Err(e) if format!("{e:#}").contains("Not Supported") => lg(format!(
-                    "GPU{dev} (bus {bus}): memory clock lock not supported by this GPU / driver (e.g. CMP cards): left as it is (the HiveOS memory setting stays); harmless"
-                )),
-                Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot lock memory clock ({e:#})")),
+                Err(e) if format!("{e:#}").contains("Not Supported") => {
+                    lg(format!(
+                        "GPU{dev} (bus {bus}): memory clock lock not supported by this GPU / driver (e.g. CMP cards): left as it is (the HiveOS memory setting stays){}",
+                        if mem_max.is_some() { "; the memory clock under load is checked after a minute of mining" } else { "; harmless" }
+                    ));
+                    if let (Some(_), Some(m)) = (mem_max, mem_skipped) {
+                        hive_mem_left().lock().unwrap().insert(bus.to_ascii_lowercase(), m);
+                    }
+                }
+                Err(e) => {
+                    lg(format!("GPU{dev} (bus {bus}): cannot lock memory clock ({e:#})"));
+                    if let (Some(_), Some(m)) = (mem_max, mem_skipped) {
+                        hive_mem_left().lock().unwrap().insert(bus.to_ascii_lowercase(), m);
+                    }
+                }
             }
         }
         if let Some(v) = moff {
@@ -341,7 +438,17 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
                 Err(e) => lg(format!("GPU{dev} (bus {bus}): cannot set memory offset ({e:#}); needs driver 555+ and root/Administrator")),
             }
         }
-        if it.core_locked || it.mem_locked || it.mem_off {
+        if let Some(t) = tab {
+            if !it.mem_locked {
+                it.mem_prev = prev_lock(&nv, d, Kind::Mem, i, n).0;
+            }
+            it.tab_mhz = t;
+            lg(format!(
+                "GPU{dev} (bus {bus}): memory clock {t} MHz while this GPU mines on the pure digest-table path (--table-mclock); the full memory clock{} on every other path and for table builds",
+                if it.mem_locked { format!(" ({} MHz)", it.mem_mhz) } else { String::new() }
+            ));
+        }
+        if it.core_locked || it.mem_locked || it.mem_off || it.tab_mhz > 0 {
             items.push(it);
         }
     }
@@ -352,7 +459,7 @@ pub fn apply(devices: &[i32], o: &ClockOpts, dir: &Path) -> Option<Guard> {
     let marker = marker_path(dir);
     let doc = json!({
         "pid": std::process::id(),
-        "gpus": items.iter().map(|it| json!({"bus": it.bus, "pos": it.pos, "n": it.n, "core_locked": it.core_locked, "mem_locked": it.mem_locked,
+        "gpus": items.iter().map(|it| json!({"bus": it.bus, "pos": it.pos, "n": it.n, "core_locked": it.core_locked, "mem_locked": it.mem_locked || it.tab_mhz > 0,
             "mem_off": it.mem_off, "core_prev": it.core_prev.to_json(), "mem_prev": it.mem_prev.to_json()})).collect::<Vec<_>>(),
     });
     let _ = std::fs::write(&marker, serde_json::to_string_pretty(&doc).unwrap());
@@ -454,7 +561,7 @@ fn spawn_mem_lock_check(cards: Vec<(i32, String, u32)>) {
 /// above it (core) or off it (memory) in `KEEP_NEED` samples in a row has lost it, and the lock of this run is set again (one line in
 /// the log).  Quiet otherwise: a sample every `KEEP_POLL_S`, nothing is written to a card that holds, at most `OC_RESETS_MAX` re-sets
 /// an hour per card (then it stands down and says so).  The offset has its own keeper in each tuner (and PROX `--uv-offset`).
-const KEEP_POLL_S: u64 = 15;
+const KEEP_POLL_S: u64 = 5; // D-016: an OC apply that drops the lock is undone within ~10 s
 const KEEP_BUSY_PCT: u32 = 70;
 const KEEP_NEED: u32 = 2;
 
@@ -462,6 +569,136 @@ const KEEP_NEED: u32 = 2;
 struct Track {
     armed: bool, // the lock was seen holding under load (a lock that never held, e.g. a clock the driver does not honour, is not chased)
     miss: u32,
+    unheld: u32, // 1.0.3: busy core samples in a row above the lock + HOLD_TOL while it was never seen holding
+    resets: u32, // 1.0.3: the lock set again while it was never seen holding
+}
+
+/// 1.0.3 (RTX 2060 SUPER rig, driver 620: NVML said "locked to 1400 MHz", the card ran at 1470-2055 under load): a core lock that is
+/// never seen holding is set again `HOLD_RESETS` times (HiveOS nvidia-oc with an offset-only profile runs `nvtool --setclocks 0`,
+/// which drops a lock set before it); still not held -> the lock does not hold on this card: a loud warning, auto-uv off for it.
+/// A clock above the lock is never a power / thermal limit (those pull the clock down), so above the lock + 45 MHz (3 bins) = not held.
+pub const HOLD_TOL_MIN: u32 = 45; // 3 clock bins
+const HOLD_NEED: u32 = 3;
+const HOLD_RESETS: u32 = 2;
+
+pub fn hold_tol(requested: u32) -> u32 {
+    (requested / 33).max(HOLD_TOL_MIN)
+}
+
+#[derive(Debug, PartialEq)]
+enum Hold {
+    Fine,
+    SetAgain(u32),
+    Broken(u32),
+}
+
+/// One busy core sample of a lock that was never seen holding (`t.armed` false).
+fn hold_judge(t: &mut Track, requested: u32, actual: u32, util: u32) -> Hold {
+    if requested == 0 || util < KEEP_BUSY_PCT || t.armed {
+        return Hold::Fine;
+    }
+    if actual <= requested + hold_tol(requested) {
+        t.unheld = 0;
+        return Hold::Fine;
+    }
+    t.unheld += 1;
+    if t.unheld < HOLD_NEED {
+        return Hold::Fine;
+    }
+    t.unheld = 0;
+    if t.resets < HOLD_RESETS {
+        t.resets += 1;
+        Hold::SetAgain(actual)
+    } else {
+        Hold::Broken(actual)
+    }
+}
+
+/// Cards whose core lock does not hold (bus -> (lock, clock under load)): auto-uv leaves them (neb/tune.rs), the API and the
+/// stats line show it.
+fn broken() -> &'static Mutex<std::collections::HashMap<String, (u32, u32)>> {
+    static B: std::sync::OnceLock<Mutex<std::collections::HashMap<String, (u32, u32)>>> = std::sync::OnceLock::new();
+    B.get_or_init(Default::default)
+}
+
+/// 1.0.4 (RTX 2060 SUPER, driver 620: the HiveOS profile locks the memory to 810 MHz and the driver does not let ffgn lock it to
+/// its maximum, "memory clock lock not supported"): bus -> the profile's memory lock that stayed.  The mining loop compares the
+/// memory clock under load with it (`mark_mem_stuck`).
+fn hive_mem_left() -> &'static Mutex<std::collections::HashMap<String, u32>> {
+    static M: std::sync::OnceLock<Mutex<std::collections::HashMap<String, u32>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// The HiveOS memory lock that could not be replaced on `bus` (its MHz).
+pub fn hive_mem_kept(bus: &str) -> Option<u32> {
+    hive_mem_left().lock().unwrap().get(&bus.to_ascii_lowercase()).copied()
+}
+
+fn mem_stuck_map() -> &'static Mutex<std::collections::HashMap<String, u32>> {
+    static M: std::sync::OnceLock<Mutex<std::collections::HashMap<String, u32>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// 1.0.4: the memory of `bus` runs at the low lock of the OC profile (MHz): a loud warning on every stats line, in the API and
+/// in HiveOS (`mem_stuck_message`).
+pub fn mark_mem_stuck(bus: &str, dev: i32, mhz: u32) {
+    if mem_stuck_map().lock().unwrap().insert(bus.to_ascii_lowercase(), mhz).is_none() {
+        eprintln!("WARNING GPU{dev}: {}", mem_stuck_message(mhz));
+    }
+}
+
+pub fn mem_stuck(bus: &str) -> Option<u32> {
+    mem_stuck_map().lock().unwrap().get(&bus.to_ascii_lowercase()).copied()
+}
+
+/// The owner's text (1.0.4).
+pub fn mem_stuck_message(mhz: u32) -> String {
+    format!("NEB runs ~6x slower: memory locked to {mhz} MHz by the OC profile — remove the memory lock")
+}
+
+/// The memory clock under load `cur` is at the profile's lock `lock` (5 %, at least 30 MHz) and well below the maximum.
+pub fn mem_at_lock(cur: u32, lock: u32, max: u32) -> bool {
+    cur <= lock + (lock / 20).max(30) && (cur as f64) < max as f64 * 0.6
+}
+
+/// The text of the warning (one line per card; h-stats.sh looks for "does not hold").
+pub fn not_held_message(dev: i32, lock: u32, actual: u32) -> String {
+    format!("WARNING GPU{dev}: the core clock lock {lock} MHz does not hold (runs at {actual} MHz): auto-uv and auto-lock are off for this GPU; use the power limit of the OC profile")
+}
+
+fn unheld_devs() -> &'static Mutex<Vec<i32>> {
+    static D: std::sync::OnceLock<Mutex<Vec<i32>>> = std::sync::OnceLock::new();
+    D.get_or_init(Default::default)
+}
+
+/// 1.8.0 (rule 5, every coin): the tag of the stats line for the GPUs whose core lock does not hold ("" when none):
+/// `  [LOCK NOT HELD: GPU1,GPU3]` (h-stats.sh shows it next to the version, as FFGN does).
+pub fn unheld_tag() -> String {
+    let d = unheld_devs().lock().unwrap();
+    if d.is_empty() { String::new() } else { format!("  [LOCK NOT HELD: {}]", d.iter().map(|x| format!("GPU{x}")).collect::<Vec<_>>().join(",")) }
+}
+
+/// Marks the core lock of `bus` as not holding (once; logged loudly).
+pub fn mark_not_held(bus: &str, dev: i32, lock: u32, actual: u32) {
+    let first = broken().lock().unwrap().insert(bus.to_ascii_lowercase(), (lock, actual)).is_none();
+    if first {
+        unheld_devs().lock().unwrap().push(dev);
+        eprintln!("{}", not_held_message(dev, lock, actual));
+        crate::autolock::note_unheld(bus, dev);
+    }
+}
+
+/// Some((lock, clock under load)) when the core lock of `bus` was found not to hold.
+pub fn not_held(bus: &str) -> Option<(u32, u32)> {
+    broken().lock().unwrap().get(&bus.to_ascii_lowercase()).copied()
+}
+
+/// Sets this run's core lock of `bus` again (the tuner saw the clock above it); false = no lock of this run on that card.
+pub fn set_core_again(bus: &str) -> bool {
+    let g = state().lock().unwrap();
+    let Some(st) = g.as_ref().filter(|st| !st.suspended) else { return false };
+    let Some(it) = st.items.iter().find(|it| it.core_locked && it.bus.eq_ignore_ascii_case(bus)) else { return false };
+    st.nv.set_core_locked(it.dev, it.core_mhz).is_ok()
 }
 
 /// Tolerance of a clock sample against its lock: core 3 % (at least 30 MHz: the clock moves in 15 MHz bins), memory 5 % (at least 30).
@@ -512,7 +749,8 @@ fn spawn_lock_keeper() {
                 continue;
             }
             for it in &st.items {
-                for (k, on, mhz) in [(Kind::Core, it.core_locked, it.core_mhz), (Kind::Mem, it.mem_locked, it.mem_mhz)] {
+                let mw = it.mem_want();
+                for (k, on, mhz) in [(Kind::Core, it.core_locked, it.core_mhz), (Kind::Mem, mw.is_some(), mw.unwrap_or(0))] {
                     if !on {
                         continue;
                     }
@@ -525,7 +763,28 @@ fn spawn_lock_keeper() {
                         Kind::Mem => (st.nv.mem_clock_mhz(it.dev), st.nv.util_gpu(it.dev)),
                     };
                     let (Some(actual), Some(util)) = (actual, util) else { continue };
-                    let Some(now) = keep_judge(&mut e.0, k, mhz, actual, util) else { continue };
+                    let judged = keep_judge(&mut e.0, k, mhz, actual, util);
+                    if judged.is_none() && matches!(k, Kind::Core) && !e.0.armed {
+                        match hold_judge(&mut e.0, mhz, actual, util) {
+                            Hold::Fine => {}
+                            Hold::SetAgain(now) => {
+                                let r = st.nv.set_core_locked(it.dev, mhz);
+                                lg(format!(
+                                    "GPU{} (bus {}): the core clock lock {mhz} MHz is not held (the card runs at {now} MHz under load): the core clock lock was reset by something else (HiveOS OC apply?): set again{}",
+                                    it.ord,
+                                    it.bus,
+                                    r.err().map_or(String::new(), |e| format!(" (failed: {e:#})"))
+                                ));
+                                crate::faults::note_foreign_change(&it.bus);
+                            }
+                            Hold::Broken(now) => {
+                                mark_not_held(&it.bus, it.ord, mhz, now);
+                                e.2 = true; // nothing more to do on this card: the tuner leaves it (tune::tick)
+                            }
+                        }
+                        continue;
+                    }
+                    let Some(now) = judged else { continue };
                     let name = if matches!(k, Kind::Core) { "core" } else { "memory" };
                     if !e.1.allow() {
                         e.2 = true;
@@ -552,8 +811,8 @@ fn spawn_lock_keeper() {
 /// 1530 MHz = -1.9% speed, -5.4% power, +3.6% TMAC/J against 1560; 1515 and below is a plateau.  Only a hint: nothing is set.
 pub const AMPERE_PEARL_LOCK: u32 = 1530;
 
-/// PCI bus id of a device ordinal: from the library of the coin that is mining (set by `set_bus_resolver`: proxgpu / noidgpu), else
-/// from the Pearl library.  A PROX or NOID run must not need pearlgpu just to find its cards' NVML handles (1.7.8).
+/// PCI bus id of a device ordinal: from the library of the coin that is mining (set by `set_bus_resolver`: proxgpu / noidgpu /
+/// nebgpu), else from the Pearl library.  A PROX, NOID or NEB run must not need pearlgpu just to find its cards' NVML handles.
 static BUS_RESOLVER: std::sync::OnceLock<fn(i32) -> anyhow::Result<String>> = std::sync::OnceLock::new();
 
 pub fn set_bus_resolver(f: fn(i32) -> anyhow::Result<String>) {
@@ -619,6 +878,50 @@ pub fn mem_locks(n: usize) -> Vec<Option<u32>> {
     v
 }
 
+/// NEB 1.0.11 (LOWP111, `--table-mclock`): GPU `dev` mines on the pure digest-table path now (`low`) or not (any other path,
+/// a model change with its table build). Sets the table memory lock or gives the full memory clock back (the --lock-mclock /
+/// HiveOS lock, else the lock from before / default). Acts only on a change; a no-op without --table-mclock or while paused.
+/// Returns Some(new state) when it changed the clock.
+/// 1.0.11: GPU `dev` (ordinal) runs at the --table-mclock low memory lock right now (set by this run, on the pure table path).
+pub fn table_low(dev: i32) -> bool {
+    let g = state().lock().unwrap();
+    g.as_ref().is_some_and(|st| st.items.iter().any(|it| it.ord == dev && it.tab_mhz > 0 && it.tab_low))
+}
+
+pub fn table_mem(dev: i32, low: bool) -> Option<bool> {
+    let mut g = state().lock().unwrap();
+    let st = g.as_mut().filter(|st| !st.suspended)?;
+    let nv = &st.nv;
+    let it = st.items.iter_mut().find(|it| it.ord == dev && it.tab_mhz > 0)?;
+    if it.tab_low == low {
+        return None;
+    }
+    let r = if low {
+        nv.set_mem_locked(it.dev, it.tab_mhz)
+    } else if it.mem_locked {
+        nv.set_mem_locked(it.dev, it.mem_mhz)
+    } else {
+        put_back(nv, it.dev, Kind::Mem, it.mem_prev, it.pos, it.n);
+        Ok(())
+    };
+    match r {
+        Ok(()) => {
+            it.tab_low = low;
+            it.tab_used |= low;
+            Some(low)
+        }
+        Err(e) => {
+            lg(format!(
+                "GPU{dev} (bus {}): --table-mclock: cannot {} ({e:#}); the table memory lock is off for this GPU",
+                it.bus,
+                if low { format!("lock the memory to {} MHz", it.tab_mhz) } else { "give the full memory clock back".to_string() }
+            ));
+            it.tab_mhz = 0;
+            None
+        }
+    }
+}
+
 /// Puts back every clock setting this run applied (the lock from before, else default), and removes the marker.  Safe to
 /// call more than once.
 pub fn restore_all() {
@@ -629,7 +932,7 @@ pub fn restore_all() {
         if it.core_locked {
             what.push(put_back(&st.nv, it.dev, Kind::Core, it.core_prev, it.pos, it.n));
         }
-        if it.mem_locked {
+        if it.mem_touched() {
             what.push(put_back(&st.nv, it.dev, Kind::Mem, it.mem_prev, it.pos, it.n));
         }
         if it.mem_off {
@@ -658,7 +961,7 @@ pub fn suspend() {
         if it.core_locked {
             put_back(&st.nv, it.dev, Kind::Core, it.core_prev, it.pos, it.n);
         }
-        if it.mem_locked {
+        if it.mem_touched() {
             put_back(&st.nv, it.dev, Kind::Mem, it.mem_prev, it.pos, it.n);
         }
         if it.mem_off {
@@ -677,7 +980,7 @@ pub fn resume() {
     for it in &st.items {
         let r = [
             it.core_locked.then(|| st.nv.set_core_locked(it.dev, it.core_mhz)),
-            it.mem_locked.then(|| st.nv.set_mem_locked(it.dev, it.mem_mhz)),
+            it.mem_want().map(|m| st.nv.set_mem_locked(it.dev, m)),
             it.mem_off.then(|| st.nv.set_mem_offset(it.dev, it.mem_off_mhz)),
         ];
         for e in r.into_iter().flatten().filter_map(|r| r.err()) {
@@ -696,14 +999,14 @@ pub fn reassert(bus: &str) -> bool {
     for it in st.items.iter().filter(|it| it.bus.eq_ignore_ascii_case(bus)) {
         let r = [
             it.core_locked.then(|| st.nv.set_core_locked(it.dev, it.core_mhz)),
-            it.mem_locked.then(|| st.nv.set_mem_locked(it.dev, it.mem_mhz)),
+            it.mem_want().map(|m| st.nv.set_mem_locked(it.dev, m)),
             it.mem_off.then(|| st.nv.set_mem_offset(it.dev, it.mem_off_mhz)),
         ];
         any |= r.iter().any(Option::is_some);
         for e in r.into_iter().flatten().filter_map(|r| r.err()) {
             lg(format!("GPU bus {}: cannot set the clocks again ({e:#})", it.bus));
         }
-        if it.core_locked || it.mem_locked {
+        if it.core_locked || it.mem_want().is_some() {
             lg(format!("GPU bus {}: the clock locks of this run are set again first (an OC apply was seen), before the offset", it.bus));
         }
     }
@@ -845,6 +1148,32 @@ mod tests {
     }
 
     #[test]
+    fn memory_policy_per_coin_never_leaks() {
+        // a HiveOS profile with Pearl's 810 MHz memory lock on a 3070 (max 7001)
+        let (h, max) = (Some(810), Some(7001));
+        // Pearl / NOID / PROX: the profile's 810 is applied (Pearl's lock, as before 1.8.0)
+        assert_eq!(mem_plan(MemPolicy::HiveProfile, h, max), (Some(810), None, None));
+        // NEB: never at 810: the maximum while mining, the 810 put back on exit
+        assert_eq!(mem_plan(MemPolicy::FullClock, h, max), (None, Some(810), Some(7001)));
+        // CMFD: the 810 skipped, nothing set
+        assert_eq!(mem_plan(MemPolicy::NoHiveLock, h, max), (None, Some(810), None));
+        // a profile already at the maximum / no profile lock: NEB sets nothing
+        assert_eq!(mem_plan(MemPolicy::FullClock, Some(7001), max), (None, Some(7001), None));
+        assert_eq!(mem_plan(MemPolicy::FullClock, None, max), (None, None, None));
+        assert_eq!(mem_plan(MemPolicy::HiveProfile, None, max), (None, None, None));
+        for p in [MemPolicy::HiveProfile, MemPolicy::NoHiveLock, MemPolicy::FullClock] {
+            assert_eq!(ClockOpts::policy(p).mem_policy(), p);
+            assert!(!ClockOpts::policy(p).any(), "a policy alone changes no clock");
+        }
+        // the coins' policies (coins.rs): Pearl never gets NEB's settings and NEB never Pearl's 810
+        let pearl = ClockOpts::policy(crate::coins::spec(crate::coins::Coin::Pearl).mem);
+        assert!(!pearl.hive_mem_to_max && !pearl.no_hive_mem && pearl.table_mhz.is_empty());
+        let neb = ClockOpts::policy(crate::coins::spec(crate::coins::Coin::Neb).mem);
+        assert!(neb.hive_mem_to_max && neb.no_hive_mem);
+        assert_eq!(mem_plan(neb.mem_policy(), h, max).0, None);
+    }
+
+    #[test]
     fn ampere_hint_only_for_rtx30_without_or_above_1530() {
         let n = "NVIDIA GeForce RTX 3070";
         assert!(ampere_hint_needed(n, Some((8, 6)), None));
@@ -854,5 +1183,54 @@ mod tests {
         assert!(!ampere_hint_needed("NVIDIA GeForce RTX 4070", Some((8, 9)), None));
         assert!(!ampere_hint_needed("NVIDIA CMP 90HX", Some((8, 6)), None));
         assert!(!ampere_hint_needed(n, Some((8, 9)), None));
+    }
+
+    #[test]
+    fn a_core_lock_that_never_holds_is_set_again_then_reported() {
+        let mut t = Track::default();
+        // 1400 locked, the card runs at 1470..2055 under load: 3 samples -> set again, twice; then broken
+        let mut seen = Vec::new();
+        for _ in 0..9 {
+            let h = hold_judge(&mut t, 1400, 1650, 100);
+            if h != Hold::Fine {
+                seen.push(h);
+            }
+        }
+        assert_eq!(seen, vec![Hold::SetAgain(1650), Hold::SetAgain(1650), Hold::Broken(1650)]);
+        // idle samples and samples within 3 bins count nothing
+        let mut t = Track::default();
+        for _ in 0..10 {
+            assert_eq!(hold_judge(&mut t, 1400, 2055, 10), Hold::Fine);
+            assert_eq!(hold_judge(&mut t, 1400, 1440, 100), Hold::Fine);
+        }
+        // a lock seen holding is the keeper's (keep_judge), not this
+        let mut t = Track { armed: true, ..Default::default() };
+        for _ in 0..10 {
+            assert_eq!(hold_judge(&mut t, 1400, 1650, 100), Hold::Fine);
+        }
+        assert_eq!(hold_tol(1400), 45);
+        assert_eq!(hold_tol(2100), 63);
+    }
+
+    #[test]
+    fn a_memory_lock_left_by_the_oc_profile_is_reported() {
+        // RTX 2060 SUPER (max 7001): 810 MHz under load with the profile's 810 lock = stuck; full clock = fine
+        assert!(mem_at_lock(810, 810, 7001));
+        assert!(mem_at_lock(840, 810, 7001));
+        assert!(!mem_at_lock(7001, 810, 7001));
+        assert!(!mem_at_lock(6800, 810, 7001));
+        assert_eq!(mem_stuck("0000:BB:00.0"), None);
+        mark_mem_stuck("0000:BB:00.0", 2, 810);
+        assert_eq!(mem_stuck("0000:bb:00.0"), Some(810));
+        assert_eq!(mem_stuck_message(810), "NEB runs ~6x slower: memory locked to 810 MHz by the OC profile — remove the memory lock");
+    }
+
+    #[test]
+    fn a_lock_not_held_is_remembered_per_bus() {
+        assert_eq!(not_held("0000:AA:00.0"), None);
+        mark_not_held("0000:AA:00.0", 5, 1400, 1470);
+        assert_eq!(not_held("0000:aa:00.0"), Some((1400, 1470)));
+        assert!(unheld_tag().contains("[LOCK NOT HELD: ") && unheld_tag().contains("GPU5"), "{}", unheld_tag());
+        assert!(not_held_message(5, 1400, 1470).contains("WARNING GPU5: the core clock lock 1400 MHz does not hold (runs at 1470 MHz): auto-uv and auto-lock are off for this GPU"));
     }
 }

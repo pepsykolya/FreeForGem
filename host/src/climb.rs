@@ -8,11 +8,16 @@
 //! fine steps inside its own interval only (`good + fine .. cand - fine`): the same fine-step edge as a fine-step climb with about
 //! half the steps.  Past the last coarse step under `cap`: fine steps up to the cap.
 //!
-//! The voltage floor (FreeForGem 1.7.2): two passed steps in a row that save less than 0.5 W per 15 MHz each (the threshold is
-//! scaled by the step: < 1 W for a 30 MHz step) stop the climb at the offset before them: no edge searched above, no refining.
-//! Since 1.7.7 only at a comparable card temperature: a step counts as flat only when the temperature of its measurement is
-//! within 2 C of the one before the first flat step of the run (a card warming up raises its power while the voltage falls:
-//! the savings hide, a false floor on Rig02 after a driver change, 116 W instead of 107 W). Temperature unknown: as before.
+//! The power judge (1.8.0, the owner's rule 3 for all our miners: "climb while every step lowers the power"; replaces the
+//! voltage floor of 1.7.2, which stopped after two steps saving < 0.5 W per 15 MHz each, i.e. < 1 W per 30 MHz coarse step:
+//! a threshold that stopped real savings of 0.6-0.9 W per step).  Every passed step is compared with the BEST (lowest-power)
+//! step so far: lower by more than `NOISE_W` (0.5 W, the noise of a measurement, whatever the step size) -> the new best;
+//! higher by more than `RISE_W` -> stop; otherwise "held", and the climb goes on (power falls in noisy stairs: +90 142.1 W,
+//! +120 142.6 W, +150 141.8 W, +270 ~129 W on a 3070).  `PATIENCE` held steps in a row = the power stopped falling: the climb
+//! stops and the result is the best step (the highest offset that still lowered the power).  No percent and no per-MHz
+//! threshold anywhere.  Held / risen steps count only at a comparable card temperature (within `FLOOR_TEMP_WINDOW` C of the
+//! best step's; 1.7.7: a card warming up raises its power while the voltage falls); temperature unknown: they count.
+//! Stability is never judged here: the tuner's checks (clock under load, bit-exact results) and the failed - 2 steps resume do it.
 //!
 //! A driver fault (Xid, hung check) on a coarse step is NOT refined (owner's rule, 1.7.6): the GPU is not asked again inside the
 //! interval, the result is one fine step below the last good offset (up to one fine step lower than a refined edge, but no second
@@ -60,25 +65,60 @@ pub fn coarse_step(fine: i32, coarse: Option<i32>) -> i32 {
     }
 }
 
-/// Smallest power drop (W) a passed step of `mhz` must show not to count as "flat" (voltage floor): 0.5 W per 15 MHz.
-pub fn flat_w(mhz: i32) -> f64 {
-    0.5 * mhz as f64 / 15.0
-}
+/// Power drop (W) a passed step must show against the best step to be the new best: the noise of a measurement (rule 3: ~0.3-0.5
+/// W), the same for every step size.
+pub const NOISE_W: f64 = 0.5;
+/// A passed step this much above the best step (W): the power rises, the climb stops at the best step.
+pub const RISE_W: f64 = 3.0;
+/// Passed steps in a row that did not lower the power by more than the noise: the power stopped falling.
+pub const PATIENCE: u32 = 3;
 
-/// `check(cand, good, mhz, refine)`: set `cand`, check it, report.  `start_w`: power at `start`.
-/// Largest temperature difference (C) at which power measurements are comparable for the voltage-floor verdict.
+/// Largest temperature difference (C) at which power measurements are comparable for the judge.
 pub const FLOOR_TEMP_WINDOW: i32 = 2;
 
-pub fn climb(start: i32, start_w: Option<f64>, start_t: Option<i32>, cap: i32, fine: i32, coarse: i32, mut check: impl FnMut(i32, i32, i32, bool) -> StepOut) -> Climb {
+/// What the power judge says about a passed step (pure, for the tests and the log).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Judged {
+    /// lower than the best by more than the noise (or the power is unknown): the new best
+    Lower,
+    /// not lower beyond the noise, at a comparable temperature: held (counts towards PATIENCE)
+    Held,
+    /// higher than the best by more than RISE_W, at a comparable temperature: stop
+    Rose,
+    /// temperature not comparable with the best's (the card warms up): not taken, not counted
+    Warming,
+}
+
+pub fn judge(best_w: Option<f64>, best_t: Option<i32>, w: Option<f64>, t: Option<i32>) -> Judged {
+    let (Some(b), Some(n)) = (best_w.filter(|x| *x > 0.0), w.filter(|x| *x > 0.0)) else { return Judged::Lower };
+    if b - n > NOISE_W {
+        return Judged::Lower;
+    }
+    if let (Some(a), Some(c)) = (best_t, t)
+        && (a - c).abs() > FLOOR_TEMP_WINDOW
+    {
+        return Judged::Warming;
+    }
+    if n - b > RISE_W { Judged::Rose } else { Judged::Held }
+}
+
+/// `check(cand, good, mhz, refine)`: set `cand`, check it, report.  `start_w`: power at `start`.  The power judge is on.
+pub fn climb(start: i32, start_w: Option<f64>, start_t: Option<i32>, cap: i32, fine: i32, coarse: i32, check: impl FnMut(i32, i32, i32, bool) -> StepOut) -> Climb {
+    climb_ex(start, start_w, start_t, cap, fine, coarse, true, check)
+}
+
+/// `climb` with the power judge (`judge_power`) on or off.  Off: the climb never stops on power (FFGN / NEB: its tuner judges
+/// every step by the power itself inside `check`, neb/tune.rs `step_verdict`), only at a failure, an abort or the cap.
+#[allow(clippy::too_many_arguments)]
+pub fn climb_ex(start: i32, start_w: Option<f64>, start_t: Option<i32>, cap: i32, fine: i32, coarse: i32, judge_power: bool, mut check: impl FnMut(i32, i32, i32, bool) -> StepOut) -> Climb {
     let fine = fine.max(1);
     let mut s = Climb { good: start, good_w: start_w, ..Default::default() };
     let mut step = coarse.max(fine);
     let mut top = cap;
-    let mut flat = 0u32;
-    let mut good_t = start_t; // temperature at s.good
-    let mut run_t0: Option<i32> = None; // temperature before the first flat step of the current run
     let mut refine = false;
-    let mut hist: Vec<(i32, Option<f64>)> = Vec::new(); // (good, its power) before each passed step
+    // the best (lowest-power) passed step so far: (offset, power, temperature)
+    let (mut best, mut best_w, mut best_t) = (start, start_w, start_t);
+    let mut held = 0u32;
     loop {
         if s.good + step > top {
             if step == fine {
@@ -106,40 +146,31 @@ pub fn climb(start: i32, start_w: Option<f64>, start_t: Option<i32>, cap: i32, f
             s.fault = r.fault;
             break;
         }
-        if refine {
-            // inside the failing interval: no floor test
-            s.good = cand;
-            if r.w.is_some() {
-                s.good_w = r.w;
-            }
-            good_t = r.t;
-            continue;
-        }
-        let saved = match (s.good_w, r.w) {
-            (Some(a), Some(b)) if a > 0.0 && b > 0.0 => a - b,
-            _ => f64::MAX,
-        };
-        let t0 = if flat == 0 { good_t } else { run_t0 };
-        let comparable = match (t0, r.t) {
-            (Some(a), Some(b)) => (a - b).abs() <= FLOOR_TEMP_WINDOW,
-            _ => true,
-        };
-        let was = flat;
-        flat = if saved < flat_w(step) && comparable { flat + 1 } else { 0 };
-        if was == 0 && flat == 1 {
-            run_t0 = good_t;
-        }
-        hist.push((s.good, s.good_w));
         s.good = cand;
-        good_t = r.t;
         if r.w.is_some() {
             s.good_w = r.w;
         }
-        if flat >= 2 && hist.len() >= 2 {
+        if refine || !judge_power {
+            // inside the failing interval: no power verdict
+            continue;
+        }
+        let stop = match judge(best_w, best_t, r.w, r.t) {
+            Judged::Lower => {
+                (best, best_w, best_t) = (cand, r.w.or(best_w), r.t);
+                held = 0;
+                false
+            }
+            Judged::Warming => false,
+            Judged::Rose => true,
+            Judged::Held => {
+                held += 1;
+                held >= PATIENCE
+            }
+        };
+        if stop {
             s.flat_top = cand;
-            let (g, w) = hist[hist.len() - 2];
-            s.good = g;
-            s.good_w = w;
+            s.good = best;
+            s.good_w = best_w;
             s.plateau = true;
             break;
         }
@@ -381,7 +412,7 @@ mod tests {
         // stable from the start: the floor at the start, as before
         let mut g = Sim::default();
         let s = g.run_t(120, 495, &|o| 156.0 + if (o / 30) % 2 == 1 { 0.3 } else { -0.2 }, &|_| 60);
-        assert!(s.plateau && s.good == 120 && s.steps == 2);
+        assert!(s.plateau && s.good == 120 && s.steps == PATIENCE);
     }
 
     fn steep(o: i32) -> f64 {
@@ -392,7 +423,16 @@ mod tests {
     fn steps_and_thresholds() {
         assert_eq!((coarse_step(15, None), coarse_step(15, Some(0)), coarse_step(15, Some(60)), coarse_step(20, None)), (30, 15, 60, 40));
         assert_eq!(coarse_step(15, Some(10)), 15); // never below the fine step
-        assert_eq!((flat_w(15), flat_w(30)), (0.5, 1.0));
+        // the judge: the noise is 0.5 W whatever the step; a rise of more than 3 W stops; unknown power is taken
+        assert_eq!(judge(Some(100.0), None, Some(99.4), None), Judged::Lower);
+        assert_eq!(judge(Some(100.0), None, Some(99.6), None), Judged::Held);
+        assert_eq!(judge(Some(100.0), None, Some(102.9), None), Judged::Held);
+        assert_eq!(judge(Some(100.0), None, Some(103.1), None), Judged::Rose);
+        assert_eq!(judge(Some(100.0), Some(50), Some(99.9), Some(55)), Judged::Warming);
+        assert_eq!(judge(Some(100.0), Some(50), Some(98.0), Some(55)), Judged::Lower, "a saving counts at any temperature");
+        assert_eq!(judge(None, None, Some(99.0), None), Judged::Lower);
+        assert_eq!(judge(Some(100.0), None, None, None), Judged::Lower);
+        assert_eq!((NOISE_W, PATIENCE), (0.5, 3));
     }
 
     #[test]
@@ -444,24 +484,38 @@ mod tests {
     }
 
     #[test]
-    fn voltage_floor_scales_with_the_step() {
-        // RTX 3080 Ti at 1400: 155-157 W at every step -> the floor after two coarse steps, at the start
+    fn power_judge_has_no_thresholds() {
+        // RTX 3080 Ti at 1400: 155-157 W at every step -> held PATIENCE times: stops at the start
         let w = |o: i32| 156.0 + if (o / 30) % 2 == 1 { 0.3 } else { -0.2 };
         let mut g = Sim::default();
         let s = g.run(120, 495, 15, 30, &w);
-        assert!(s.plateau && !s.failed && s.good == 120 && s.steps == 2 && s.flat_top == 180);
-        // RTX 3070 at 1400: -1.5 W per 15 MHz up to +250, flat above
+        assert!(s.plateau && !s.failed && s.good == 120 && s.steps == 3 && s.flat_top == 210, "{s:?}");
+        // RTX 3070 at 1400: -1.5 W per 15 MHz up to +250, flat above (0.1 W noise)
         let w = |o: i32| if o < 250 { 120.0 - 0.1 * o as f64 } else { 95.0 + 0.1 * ((o / 30) % 2) as f64 };
         let mut g = Sim { edge: 405, ..Default::default() };
         let s = g.run(120, 495, 15, 30, &w);
-        assert!(s.plateau && !s.failed && (240..=270).contains(&s.good) && s.steps <= 7);
-        let f = g.run(120, 495, 15, 15, &w); // the old climb: same floor, about twice the steps
-        assert!(f.plateau && (f.good - s.good).abs() <= 30 && f.steps >= s.steps + 4);
-        // CMP 50HX: 0.2 W per 15 MHz = 0.4 W per 30 MHz < 1 W: the floor at the start
+        assert!(s.plateau && !s.failed && (240..=270).contains(&s.good) && s.steps <= 8, "{s:?}");
+        let f = g.run(120, 495, 15, 15, &w); // one step size: the same edge of the power curve, more steps
+        assert!(f.plateau && (f.good - s.good).abs() <= 30 && f.steps >= s.steps + 4, "{f:?} {s:?}");
+        // CMP 50HX: 0.2 W per 15 MHz = 0.4 W per 30 MHz: below the noise per step, but every second step is 0.8 W below the
+        // best: the power still falls, the climb goes on (1.7.2's floor stopped at the start here)
         let mut g = Sim::default();
         let s = g.run(325, 495, 15, 30, &|o| 140.0 - 0.2 * o as f64 / 15.0);
-        assert!(s.plateau && s.good == 325 && s.steps == 2);
-        // 0.8 W per 15 MHz = 1.6 W per 30 MHz: a real slope, not the floor
+        assert!(!s.plateau && s.good >= 475, "{s:?}");
+        // FFGN 1.0.3 on an RTX 2060 SUPER: steps of -0.6 and -0.9 W (< 1 W per 30 MHz: 1.7.2's floor) are savings: no stop
+        let mut g = Sim { edge: 300, ..Default::default() };
+        let s = g.run(105, 495, 15, 30, &|o| { let k = (o - 105) / 30; 160.0 - (k / 2) as f64 * 1.5 - (k % 2) as f64 * 0.6 });
+        assert!(!s.plateau && s.failed && s.good == 285, "{s:?}");
+        // noisy stairs (3070 @1650, Shahtyor 18.11: +90 142.1, +120 142.6, +150 141.8, ... +270 ~129 W): no stop on the stairs
+        let stairs = |o: i32| match o { 90 => 142.1, 120 => 142.6, 150 => 141.8, 180 => 140.9, 210 => 136.0, 240 => 132.0, 270 => 129.0, _ => 128.9 };
+        let mut g = Sim { edge: 330, ..Default::default() };
+        let s = g.run(90, 495, 15, 30, &stairs);
+        assert!(!s.plateau && s.failed && s.good == 315, "{s:?}");
+        // a clear rise (more than 3 W above the best): stop at the best at once
+        let mut g = Sim::default();
+        let s = g.run(120, 495, 15, 30, &|o| if o < 240 { 120.0 - 0.1 * o as f64 } else { 104.0 });
+        assert!(s.plateau && s.good == 210 && s.flat_top == 240 && s.steps == 4, "{s:?}");
+        // 0.8 W per 15 MHz = 1.6 W per 30 MHz: a real slope, up to the failure
         let mut g = Sim { edge: 405, ..Default::default() };
         let s = g.run(120, 495, 15, 30, &|o| 140.0 - 0.8 * o as f64 / 15.0);
         assert!(!s.plateau && s.failed && s.good == 390);
@@ -469,8 +523,11 @@ mod tests {
         let mut g = Sim { edge: 405, ..Default::default() };
         let s = g.run(120, 495, 15, 30, &|o| if o == 210 || o == 270 { 120.0 - 0.1 * (o - 30) as f64 } else { 120.0 - 0.1 * o as f64 });
         assert!(!s.plateau && s.good == 390);
-        // no power reading: never the floor
+        // no power reading: never a power stop
         let s = climb(120, None, None, 495, 15, 30, |c, _, _, _| StepOut { ok: c < 300, ..Default::default() });
+        assert!(!s.plateau && s.good == 285 && s.failed);
+        // the judge off (NEB: its own judge inside the check): only the failure ends it
+        let s = climb_ex(120, Some(156.0), None, 495, 15, 30, false, |c, _, _, _| StepOut { ok: c < 300, w: Some(156.0), ..Default::default() });
         assert!(!s.plateau && s.good == 285 && s.failed);
     }
 

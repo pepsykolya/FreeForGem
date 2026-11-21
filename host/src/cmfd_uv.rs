@@ -1231,6 +1231,11 @@ impl Tuner<'_> {
             // coarse steps, the failing interval in fine steps, the voltage floor (climb.rs, shared with Pearl and NOID)
             let mut aborted = false;
             let s = climb::climb(good, good_w, None, cap, step, coarse, |o, g, mhz, refine| {
+                // 1.8.0 (rule 5, all coins): a core lock that does not hold under load (clocks.rs keeper) ends the tuning of this GPU
+                if let Some((l, m)) = crate::clocks::not_held(&c.bus) {
+                    lg(format!("{} WARNING the core clock lock {l} MHz does not hold (runs at {m} MHz under load): auto-uv is off for this GPU, it stays at its last good offset", c.label()));
+                    return climb::StepOut { abort: true, ..Default::default() };
+                }
                 if let Err(e) = self.set(c, o) {
                     lg(format!("{} cannot set {} ({e:#}); stopping the search", c.label(), signed(o)));
                     aborted = true;
@@ -1270,7 +1275,7 @@ impl Tuner<'_> {
                 failed = Some(good + step); // the offset could not be set: stop here, one step of margin
             }
             if s.plateau {
-                lg(format!("{} power no longer drops above {} (voltage floor: the next two steps up to {} saved < 0.5 W per 15 MHz each): stopping there", c.label(), signed(good), signed(s.flat_top)));
+                lg(format!("{} the power stopped falling above {} (the next steps up to {} did not lower it by more than 0.5 W, or it rose): stopping there", c.label(), signed(good), signed(s.flat_top)));
             }
         }
         // the cap below a crash (30 MHz under it) is the margin already
@@ -1339,7 +1344,7 @@ impl Tuner<'_> {
             eff(e.fws_before, e.w_before),
             eff(e.fws_after, e.w_after),
             if eff(e.fws_before, e.w_before) > 0.0 { (eff(e.fws_after, e.w_after) / eff(e.fws_before, e.w_before) - 1.0) * 100.0 } else { 0.0 },
-            if plateau { " (the voltage floor: no edge searched above it)" } else { "" }
+            if plateau { " (the power stopped falling: no edge searched above it)" } else { "" }
         ));
         self.go_live(c);
         Ok(())

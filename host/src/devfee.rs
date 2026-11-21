@@ -57,9 +57,11 @@ pub struct Params {
 }
 
 impl Params {
-    /// FFGP_DEVFEE_TEST=1 (testing only): 4 minute cycle, 20 s slot.
+    /// FFGP_DEVFEE_TEST=1 (testing only): 4 minute cycle, 20 s slot.  F-10: honoured only by a test build (a debug build, or
+    /// one built with FFG_DEVFEE_TEST_BUILD / FFGN_DEVFEE_TEST_BUILD set); a release build ignores it and always runs 60 s per 100 minutes.
     pub fn from_env() -> Params {
-        let t = std::env::var("FFGP_DEVFEE_TEST").unwrap_or_default();
+        const TEST_BUILD: bool = cfg!(debug_assertions) || option_env!("FFG_DEVFEE_TEST_BUILD").is_some() || option_env!("FFGN_DEVFEE_TEST_BUILD").is_some();
+        let t = if TEST_BUILD { std::env::var("FFGP_DEVFEE_TEST").unwrap_or_default() } else { String::new() };
         if t == "2" {
             // testing only (1.7.8, PROX fee routing tests): 70 s cycle, 15 s slot - one slot within the first minute
             Params { cycle: Duration::from_secs(70), slot: Duration::from_secs(15) }
@@ -95,11 +97,17 @@ pub struct DevFee {
     slot_at: Instant,
     phase: Phase,
     bad_since: Option<Instant>,
+    /// F-11: a slot whose fee connection was not ready is tried again later in the same cycle (at most RETRIES times), so a
+    /// fee pool that needs a failover (Aria -> Suprnova) does not lose the slot
+    retries: u32,
 }
+
+const RETRIES: u32 = 3;
+const RETRY_AFTER: Duration = Duration::from_secs(300);
 
 impl DevFee {
     pub fn new(p: Params, now: Instant) -> DevFee {
-        let mut d = DevFee { p, cycle_start: now, slot_at: now, phase: Phase::Idle, bad_since: None };
+        let mut d = DevFee { p, cycle_start: now, slot_at: now, phase: Phase::Idle, bad_since: None, retries: 0 };
         d.slot_at = d.pick();
         d
     }
@@ -111,10 +119,10 @@ impl DevFee {
         self.cycle_start + Duration::from_millis(rand::rng().random_range(lo..hi))
     }
 
-    /// Should the fee stratum connection be up?
+    /// Should the fee stratum connection be up?  (Between the retries of a slot it stays up: F-11.)
     pub fn conn_wanted(&self, now: Instant) -> bool {
         match self.phase {
-            Phase::Idle => now + CONNECT_LEAD >= self.slot_at,
+            Phase::Idle => now + CONNECT_LEAD >= self.slot_at || self.retries > 0,
             Phase::Waiting(_) | Phase::Active(_) => true,
             Phase::Tail(until) => now < until,
         }
@@ -146,6 +154,14 @@ impl DevFee {
                     self.bad_since = None;
                     Change::Started
                 } else if now.duration_since(since) > READY_WINDOW {
+                    let retry = now + RETRY_AFTER;
+                    if self.retries < RETRIES && retry + self.p.slot + TAIL < self.cycle_start + self.p.cycle {
+                        // the fee connection keeps trying meanwhile (conn_wanted), the slot comes again
+                        self.retries += 1;
+                        self.phase = Phase::Idle;
+                        self.slot_at = retry;
+                        return Change::Skipped;
+                    }
                     self.end_slot(now, Duration::ZERO);
                     Change::Skipped
                 } else {
@@ -182,6 +198,7 @@ impl DevFee {
 
     /// The next slot goes into the next cycle (cycles are anchored at the start, not at the slot).
     fn new_cycle(&mut self, now: Instant) {
+        self.retries = 0;
         self.cycle_start += self.p.cycle;
         while self.cycle_start + self.p.cycle <= now {
             self.cycle_start += self.p.cycle; // long stall: skip whole cycles
@@ -196,6 +213,36 @@ impl DevFee {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slot_without_a_ready_fee_connection_is_tried_again_in_the_cycle() {
+        let t0 = Instant::now();
+        let p = Params { cycle: Duration::from_secs(6000), slot: Duration::from_secs(60) };
+        let mut d = DevFee::new(p, t0);
+        d.slot_at = t0 + Duration::from_secs(100);
+        let mut t = t0 + Duration::from_secs(101);
+        assert_eq!(d.tick(t, false), Change::None); // waiting
+        t += READY_WINDOW + Duration::from_secs(1);
+        assert_eq!(d.tick(t, false), Change::Skipped);
+        assert!(d.conn_wanted(t), "the fee connection stays up between retries");
+        // the slot comes again 5 min later and starts once the connection is ready
+        t += RETRY_AFTER + Duration::from_secs(1);
+        assert_eq!(d.tick(t, true), Change::Started);
+        assert!(d.active());
+    }
+
+    #[test]
+    fn the_test_cycle_is_ignored_by_a_release_build() {
+        // SAFETY: test-only, single-threaded use of the variable
+        unsafe { std::env::set_var("FFGP_DEVFEE_TEST", "2") };
+        let p = Params::from_env();
+        unsafe { std::env::remove_var("FFGP_DEVFEE_TEST") };
+        if cfg!(debug_assertions) || option_env!("FFG_DEVFEE_TEST_BUILD").is_some() || option_env!("FFGN_DEVFEE_TEST_BUILD").is_some() {
+            assert_eq!(p.slot, Duration::from_secs(15));
+        } else {
+            assert_eq!((p.cycle, p.slot), (Duration::from_secs(CYCLE_SECS), Duration::from_secs(SLOT_SECS)));
+        }
+    }
 
     #[test]
     fn fee_wallet_merges_nock_on_luckypool_only() {

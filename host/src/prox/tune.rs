@@ -548,7 +548,8 @@ impl Live {
         let mut from = base;
         if let Some(cr) = crash {
             if cr.failed() {
-                cap = cap.min(cr.at - step);
+                // rule 2 (1.8.0): never above the crashed offset - 2 steps
+                cap = cap.min(cr.at - crate::uv::crash_back(step));
             }
             if let Some(g) = cr.good.filter(|&g| g > base && g <= cap) {
                 from = g;
@@ -572,6 +573,11 @@ impl Live {
         }
         lg(format!("{} tuning {}..{} (+{step} MHz steps, coarse +{}, {} s each, {} s confirmation); this GPU mines after it", c.label(), signed(from), signed(cap), self.p.coarse, self.p.step_secs, self.p.confirm));
         let s = climb::climb(from, br.w, br.t, cap, step, self.p.coarse, |cand, _good, _mhz, _refine| {
+            // 1.8.0 (rule 5, all coins): a core lock that does not hold under load (clocks.rs keeper) ends the tuning of this GPU
+            if let Some((l, m)) = crate::clocks::not_held(&c.r.bus) {
+                lg(format!("{} WARNING the core clock lock {l} MHz does not hold (runs at {m} MHz under load): auto-uv is off for this GPU, it stays at its last good offset", c.label()));
+                return climb::StepOut { abort: true, ..Default::default() };
+            }
             self.db.set_good(&c.uuid, Some(_good));
             let r = self.check(c, cand, self.p.step_secs, &refs);
             if r.infra {
@@ -588,7 +594,7 @@ impl Live {
         }
         let mut fin = if s.failed && !self.p.keep_last { (s.good - step).max(base) } else { s.good };
         if s.plateau {
-            lg(format!("{} power stops falling above {} (voltage floor): not climbing further", c.label(), signed(s.good)));
+            lg(format!("{} the power stopped falling above {} (no step lowered it by more than 0.5 W): not climbing further", c.label(), signed(s.good)));
         }
         let mut conf_w = s.good_w;
         while fin > base {
