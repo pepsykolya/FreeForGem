@@ -23,7 +23,11 @@ pub const PROTOCOL: &str = "parano1d-stratum-v1";
 /// the limit until the pool answered a hashrate report on this connection; after that a silence of crate::silence::FAST (60 s) ends it
 const SILENCE_LIMIT: Duration = Duration::from_secs(300);
 // the session loop sends the queued shares once per read timeout: short, so a share waits at most this long (stale risk)
-const READ_TICK_MS: u64 = 20;
+// (FFG 1.8.0, FFGN 1.0.13 stale-share fix: 5 ms, was 20; PROX uses this connection too)
+const READ_TICK_MS: u64 = 5;
+/// FFG 1.8.0 (FFGN 1.0.13 stale-share fix, NOID / PROX / Ting): the pool said "job not found" for its newest job and sent no new
+/// one this long: a new connection
+pub const GONE_RECONNECT: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 20 });
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoolUrl {
@@ -388,12 +392,18 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut last_hr = Instant::now();
     let mut seen = 0;
     let mut drain = crate::failover::Drain::new();
+    // FFG 1.8.0 (FFGN 1.0.13): since when the pool's "job not found" voided the newest job (no new job since); late answers
+    let mut gone_since: Option<Instant> = None;
+    let mut late = crate::neb::pool::LateAnswers::default();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
         if let Some(idle) = sil.expired() {
             return Err(crate::silence::Silence::error(idle));
+        }
+        if gone_since.is_some_and(|t| t.elapsed() > GONE_RECONNECT) {
+            return Err(std::io::Error::other(format!("the pool dropped its newest job (\"job not found\") and sent no new one in {} s: reconnecting", GONE_RECONNECT.as_secs())));
         }
         // replies the pool never sent: they stop counting as unanswered after REPLY_GIVEUP (kept for the log of a late reply)
         if pending.len() > 64 {
@@ -488,6 +498,7 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                                 voided.insert(o, Instant::now());
                             }
                             voided.remove(&j.job_id);
+                            gone_since = None;
                             if voided.len() > 64 {
                                 voided.retain(|_, t| t.elapsed() < Duration::from_secs(600));
                             }
@@ -509,6 +520,9 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                     let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
                     let ok = v.get("result").map(|r| r.as_bool().unwrap_or(!r.is_null())).unwrap_or(false) && v.get("error").map_or(true, Value::is_null);
                     if let Some((job_id, sent)) = pending.remove(&id) {
+                        if let Some(w) = late.note(Instant::now(), sent.elapsed(), stats.stale_rej.load(Ordering::Relaxed), stats.submitted.load(Ordering::Relaxed)) {
+                            log(l, &w);
+                        }
                         if ok {
                             stats.accepted.fetch_add(1, Ordering::Relaxed);
                             log(l, &format!("share ACCEPTED (id {id}, job {job_id})"));
@@ -527,6 +541,17 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                                 (true, None) => format!(" [the job was still current here when sent; reply after {} ms]", sent.elapsed().as_millis()),
                             };
                             log(l, &format!("share REJECTED (id {id}, job {job_id}): {line}{when}"));
+                            // FFG 1.8.0 (FFGN 1.0.13 stale-share fix): the pool no longer has this job: its next shares are
+                            // dropped here (not sent, not rejected); its newest job gone and no new one within GONE_RECONNECT:
+                            // a new connection
+                            let newest = valid.last() == Some(&job_id);
+                            if stale && valid.contains(&job_id) {
+                                valid.retain(|x| x != &job_id);
+                                voided.entry(job_id.clone()).or_insert_with(Instant::now);
+                                if newest {
+                                    gone_since.get_or_insert_with(Instant::now);
+                                }
+                            }
                         }
                     } else if id == 1 {
                         let r = &v["result"];
@@ -654,5 +679,89 @@ mod tests {
         n[8..].copy_from_slice(&j.prefix);
         let l = submit_line(3, &j, &n);
         assert!(l.contains(r#""params":["46f6","748c80040000000024e67d0000000200","e929"]"#), "{l}");
+    }
+
+    /// FFG 1.8.0 (FFGN 1.0.13 stale-share fix, Rig01 bursts): the first "job not found" voids the job: its next shares are
+    /// dropped here (not sent, not rejected); the newest job gone and no new one within GONE_RECONNECT: a new connection.
+    #[test]
+    fn job_not_found_voids_the_job_and_no_new_job_reconnects() {
+        use std::io::{BufRead, BufReader};
+        let lst = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = lst.local_addr().unwrap().port();
+        let submits = Arc::new(AtomicU64::new(0));
+        let sub2 = submits.clone();
+        let fields = "00".repeat(256);
+        let notify = format!(
+            r#"{{"id":null,"method":"mining.notify","params":[{{"job_id":"46f6","pow_fields_hex":"{fields}","nonce_field_index":10,"nonce_prefix_hex":"24e67d0000000200","nonce_bits":64,"share_target_hex":"{}","block_target_hex":"{}","work_domain_id":"e929","expires_in_seconds":262,"clean":true,"height":239348}}]}}"#,
+            "ff".repeat(32),
+            "00".repeat(32)
+        );
+        let pool = std::thread::spawn(move || {
+            let (s, _) = lst.accept().unwrap();
+            let mut w = s.try_clone().unwrap();
+            for line in BufReader::new(s).lines() {
+                let Ok(line) = line else { break };
+                let v: Value = serde_json::from_str(line.trim()).unwrap();
+                let id = v["id"].as_u64().unwrap_or(0);
+                let out = match v["method"].as_str().unwrap_or("") {
+                    "mining.subscribe" => format!("{}\n", json!({"id":id,"result":{"protocol":PROTOCOL,"nonce_bits":64},"error":null})),
+                    "mining.authorize" => format!("{}\n{notify}\n", json!({"id":id,"result":true,"error":null})),
+                    "mining.submit" => {
+                        sub2.fetch_add(1, Ordering::SeqCst);
+                        format!("{}\n", json!({"id":id,"result":null,"error":[21,"stale share (job not found)"]}))
+                    }
+                    _ => String::new(),
+                };
+                if w.write_all(out.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        });
+        let url = parse_url(&format!("stratum+tcp://127.0.0.1:{port}")).unwrap();
+        let l = Login {
+            name: "test",
+            url: url.clone(),
+            urls: vec![url],
+            link: crate::failover::Link::new(1),
+            follow: None,
+            login: "addr.rig01".into(),
+            password: "x".into(),
+            enabled: Arc::new(AtomicBool::new(true)),
+            stop: Arc::new(AtomicBool::new(false)),
+            hashrate: Arc::new(AtomicU64::new(0)),
+        };
+        let stats = Arc::new(Stats::default());
+        let (ev_tx, ev_rx) = std::sync::mpsc::channel::<(Src, Event)>();
+        let (sub_tx, sub_rx) = std::sync::mpsc::channel::<Submit>();
+        let st2 = stats.clone();
+        let t0 = Instant::now();
+        let sess = std::thread::spawn(move || session(&l, Src::User, &ev_tx, &sub_rx, &st2));
+        loop {
+            match ev_rx.recv_timeout(Duration::from_secs(10)).expect("job 46f6") {
+                (_, Event::Job(j)) => {
+                    assert_eq!(j.job_id, "46f6");
+                    break;
+                }
+                _ => continue,
+            }
+        }
+        let share = |id: u64| Submit { id, job_id: "46f6".into(), line: json!({"id": id, "method": "mining.submit", "params": ["46f6", "00".repeat(16), "e929"]}).to_string(), digest: [0xff; 32], block: false };
+        stats.submitted.fetch_add(1, Ordering::Relaxed);
+        sub_tx.send(share(200)).unwrap();
+        let t = Instant::now();
+        while stats.stale_rej.load(Ordering::Relaxed) == 0 && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for id in 201..204 {
+            stats.submitted.fetch_add(1, Ordering::Relaxed);
+            sub_tx.send(share(id)).unwrap();
+        }
+        let r = sess.join().unwrap();
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("sent no new one")), "{r:?}");
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        pool.join().unwrap();
+        assert_eq!(submits.load(Ordering::SeqCst), 1, "only the first share of the dropped job went out");
+        assert_eq!(stats.rejected.load(Ordering::Relaxed), 1);
+        assert_eq!(stats.stale_drop.load(Ordering::Relaxed), 3, "the next 3 were dropped (dropped stale), not rejected");
     }
 }

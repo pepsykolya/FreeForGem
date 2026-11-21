@@ -182,7 +182,8 @@ impl Conn {
         let addr = (u.host.as_str(), u.port).to_socket_addrs().map_err(|e| format!("resolve: {e}"))?.next().ok_or("no address")?;
         let s = TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("connect: {e}"))?;
         let _ = s.set_nodelay(true);
-        s.set_read_timeout(Some(Duration::from_millis(200))).map_err(|e| e.to_string())?;
+        // FFG 1.8.0 (FFGN 1.0.13 stale-share fix): the session sends the queued shares once per read timeout: 5 ms, was 200
+        s.set_read_timeout(Some(Duration::from_millis(5))).map_err(|e| e.to_string())?;
         let r = BufReader::new(s.try_clone().map_err(|e| e.to_string())?);
         Ok(Conn { w: s, r, buf: String::new() })
     }
@@ -221,7 +222,12 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
     let mut authorized = false;
     let mut last_rx = Instant::now();
     let mut height = 0u64;
-    let mut pending: HashMap<u64, (Instant, String)> = HashMap::new();
+    let mut pending: HashMap<u64, (Instant, String, String)> = HashMap::new();
+    // FFG 1.8.0 (FFGN 1.0.13 stale-share fix): jobs the pool answered "job not found" for (their next shares are dropped, not
+    // sent); since when the newest one is gone with no new job (a new connection after GONE_RECONNECT); late answers
+    let mut gone_jobs: std::collections::HashSet<String> = Default::default();
+    let mut gone_since: Option<Instant> = None;
+    let mut late = crate::neb::pool::LateAnswers::default();
     let mut next_id = 10u64;
     let mut cur_job: Option<String> = None;
     // 0.2.2: the jobs of this height that share the last block (same header bytes 244..277, targets, extranonce1) are
@@ -239,9 +245,12 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
                 return End::Failback;
             }
         }
+        if gone_since.is_some_and(|t| t.elapsed() > crate::noid::pool::GONE_RECONNECT) {
+            return End::Failed(format!("the pool dropped its newest job (\"job not found\") and sent no new one in {} s: reconnecting", crate::noid::pool::GONE_RECONNECT.as_secs()));
+        }
         // shares
         while let Ok(s) = rx.try_recv() {
-            let fresh = s.job.tgen == l.jgen.load(Ordering::SeqCst) && authorized;
+            let fresh = s.job.tgen == l.jgen.load(Ordering::SeqCst) && authorized && !gone_jobs.contains(&s.job.tpl.job_id);
             if !fresh {
                 stats.stale_drop.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -258,7 +267,7 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
             if block {
                 log(l.name, &format!("share is a BLOCK candidate: {} (height {}, GPU{})", pow::hex(&s.id), s.job.tpl.height, s.gpu));
             }
-            pending.insert(id, (Instant::now(), format!("GPU{} job {jid}", s.gpu)));
+            pending.insert(id, (Instant::now(), format!("GPU{} job {jid}", s.gpu), jid));
         }
         let v = match c.line() {
             Ok(Some(v)) => v,
@@ -331,6 +340,10 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
                 };
                 if cur_job.as_deref() != Some(jid) {
                     cur_job = Some(jid.to_string());
+                    gone_since = None;
+                }
+                if clean {
+                    gone_jobs.clear();
                 }
                 if clean {
                     ring.clear();
@@ -340,7 +353,10 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
                 }
             }
             ("", Some(i)) if pending.contains_key(&i) => {
-                let (t, what) = pending.remove(&i).unwrap();
+                let (t, what, jid) = pending.remove(&i).unwrap();
+                if let Some(w) = late.note(Instant::now(), t.elapsed(), stats.stale_rej.load(Ordering::Relaxed), stats.submitted.load(Ordering::Relaxed)) {
+                    log(l.name, &w);
+                }
                 if v["result"] == true {
                     stats.accepted.fetch_add(1, Ordering::Relaxed);
                     log(l.name, &format!("share ACCEPTED ({what}, d={diff}, {} ms)", t.elapsed().as_millis()));
@@ -349,6 +365,12 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
                     let err = v["error"].to_string();
                     if err.contains("stale") || err.contains("21") || err.contains("job not found") {
                         stats.stale_rej.fetch_add(1, Ordering::Relaxed);
+                        if cur_job.as_deref() == Some(jid.as_str()) {
+                            gone_since.get_or_insert_with(Instant::now);
+                        }
+                        if gone_jobs.len() < 64 {
+                            gone_jobs.insert(jid);
+                        }
                     }
                     log(l.name, &format!("share REJECTED ({what}): {err}"));
                 }

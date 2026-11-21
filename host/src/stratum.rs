@@ -293,7 +293,8 @@ fn connect(addr: &str) -> std::io::Result<TcpStream> {
 fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>, stats: &Stats) -> std::io::Result<()> {
     log(l, &format!("connecting to {} as {}", l.addr, l.worker));
     let mut sock = connect(&l.addr)?;
-    sock.set_read_timeout(Some(Duration::from_millis(100)))?;
+    // FFG 1.8.0 (FFGN 1.0.13 stale-share fix): the session sends the queued shares once per read timeout: 5 ms, was 100
+    sock.set_read_timeout(Some(Duration::from_millis(5)))?;
     sock.set_write_timeout(Some(Duration::from_secs(20)))?;
     sock.set_nodelay(true)?;
     let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(30)).with_interval(Duration::from_secs(10));
@@ -321,12 +322,23 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let started = Instant::now();
     let mut sil = crate::silence::Silence::new(SILENCE_LIMIT);
     let mut drain = crate::failover::Drain::new();
+    // FFG 1.8.0 (FFGN 1.0.13 stale-share fix, the pool client only: the Pearl mining loop is unchanged): the jobs the pool
+    // answered "job not found" / stale for (their next shares are dropped here, not sent), the newest job of this connection,
+    // since when that one is gone with no new job (a new connection after GONE_RECONNECT), the late-answer WARNING
+    let mut gone_jobs: std::collections::HashSet<String> = Default::default();
+    let mut newest: Option<String> = None;
+    let mut gone_since: Option<Instant> = None;
+    let mut late = crate::neb::pool::LateAnswers::default();
+    let mut sent_at: HashMap<u64, Instant> = HashMap::new();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
         if let Some(idle) = sil.expired() {
             return Err(crate::silence::Silence::error(idle));
+        }
+        if gone_since.is_some_and(|t| t.elapsed() > crate::noid::pool::GONE_RECONNECT) {
+            return Err(std::io::Error::other(format!("the pool dropped its newest job (\"job not found\") and sent no new one in {} s: reconnecting", crate::noid::pool::GONE_RECONNECT.as_secs())));
         }
         // a pool that never answers authorize: go on after 5 s, uncompressed
         if !authorized && started.elapsed() > Duration::from_secs(5) {
@@ -343,6 +355,16 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
             if drain.frozen() {
                 continue; // a switch to another pool is under way: this share belongs to a job of the old pool
             }
+            if gone_jobs.contains(&s.job_id) {
+                stats.submitted.fetch_sub(1, Ordering::Relaxed);
+                stats.stale_drop.fetch_add(1, Ordering::Relaxed);
+                log(l, &format!("share for job {} dropped, not sent: the pool no longer has that job (\"job not found\")", s.job_id));
+                continue;
+            }
+            if sent_at.len() > 256 {
+                sent_at.retain(|_, t| t.elapsed() < Duration::from_secs(120));
+            }
+            sent_at.insert(s.id, Instant::now());
             pending.insert(s.id, s.job_id);
             sock.write_all(s.line.as_bytes())?;
             sock.write_all(b"\n")?;
@@ -392,6 +414,10 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                 }
                 match parse_job(&v, v2) {
                     Some(j) => {
+                        if newest.as_deref() != Some(j.job_id.as_str()) {
+                            newest = Some(j.job_id.clone());
+                            gone_since = None;
+                        }
                         let _ = tx.send((src, Event::Job(j)));
                     }
                     None => log(l, &format!("job not understood: {line}")),
@@ -411,6 +437,9 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                 if id == crate::silence::PROBE_ID {
                     sil.answered(); // any answer, an error too
                 } else if let Some(job_id) = pending.remove(&id) {
+                    if let Some(w) = sent_at.remove(&id).and_then(|t| late.note(Instant::now(), t.elapsed(), stats.stale_rej.load(Ordering::Relaxed), stats.submitted.load(Ordering::Relaxed))) {
+                        log(l, &w);
+                    }
                     if ok {
                         stats.accepted.fetch_add(1, Ordering::Relaxed);
                         log(l, &format!("share ACCEPTED (id {id}, job {job_id}): {line}"));
@@ -419,6 +448,16 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                         let low = line.to_lowercase();
                         if low.contains("low") || low.contains("difficulty") {
                             stats.low_diff.fetch_add(1, Ordering::Relaxed);
+                        }
+                        // FFG 1.8.0 (FFGN 1.0.13): the pool no longer has this job: its next shares are dropped here
+                        if low.contains("job not found") || low.contains("stale") {
+                            stats.stale_rej.fetch_add(1, Ordering::Relaxed);
+                            if newest.as_deref() == Some(job_id.as_str()) {
+                                gone_since.get_or_insert_with(Instant::now);
+                            }
+                            if gone_jobs.len() < 64 {
+                                gone_jobs.insert(job_id.clone());
+                            }
                         }
                         log(l, &format!("share REJECTED (id {id}, job {job_id}): {line}"));
                         if (low.contains("gzip") || low.contains("encod") || low.contains("decompress") || low.contains("decode"))
@@ -583,7 +622,7 @@ mod failover_tests {
         conns: Arc<Mutex<Vec<TcpStream>>>,
         logins: Arc<Mutex<Vec<String>>>,
         submits: Arc<AtomicU64>,
-        /// what a submit gets: 0 accepted, 1 rejected, 2 no answer at all
+        /// what a submit gets: 0 accepted, 1 rejected, 2 no answer at all, 3 "job not found"
         mode: Arc<std::sync::atomic::AtomicU8>,
     }
 
@@ -635,7 +674,7 @@ mod failover_tests {
                                             let (w2, id) = (w.clone(), v["id"].clone());
                                             std::thread::spawn(move || {
                                                 std::thread::sleep(Duration::from_millis(150));
-                                                let r = if m == 1 { json!({"jsonrpc":"2.0","id":id,"result":null,"error":{"code":20,"message":"rejected"}}) } else { json!({"jsonrpc":"2.0","id":id,"result":true}) };
+                                                let r = if m == 1 { json!({"jsonrpc":"2.0","id":id,"result":null,"error":{"code":20,"message":"rejected"}}) } else if m == 3 { json!({"jsonrpc":"2.0","id":id,"result":null,"error":{"code":21,"message":"job not found"}}) } else { json!({"jsonrpc":"2.0","id":id,"result":true}) };
                                                 let _ = w2.lock().unwrap().write_all(format!("{r}
 ").as_bytes());
                                             });
@@ -691,6 +730,41 @@ mod failover_tests {
     }
 
     static GLOBAL: Mutex<()> = Mutex::new(());
+
+    /// FFG 1.8.0 (FFGN 1.0.13 stale-share fix, the Pearl pool client): the first "job not found" voids the job: its next shares
+    /// are dropped here (not sent, not rejected); its newest job gone and no new one within GONE_RECONNECT: a new connection.
+    #[test]
+    fn job_not_found_voids_the_job_and_no_new_job_reconnects() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        let port = free_port();
+        let m = Mock::new(port);
+        m.mode.store(3, Ordering::SeqCst);
+        m.start();
+        let pools = vec![format!("127.0.0.1:{port}")];
+        let l = login("user", &pools, "UW", Link::new(1), None, Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)));
+        let (ev_tx, ev_rx) = mpsc::channel::<(Src, Event)>();
+        let (sub_tx, sub_rx) = mpsc::channel::<Submit>();
+        let stats = Arc::new(Stats::default());
+        let st2 = stats.clone();
+        let t0 = Instant::now();
+        let sess = std::thread::spawn(move || session(&l, Src::User, &ev_tx, &sub_rx, &st2));
+        wait_for("job j1", 10, || matches!(ev_rx.try_recv(), Ok((_, Event::Job(j))) if j.job_id == "j1"));
+        let share = |id: u64| Submit { id, job_id: "j1".into(), line: json!({"jsonrpc":"2.0","id":id,"method":"mining.submit","params":{"job_id":"j1"}}).to_string() };
+        stats.submitted.fetch_add(1, Ordering::Relaxed);
+        sub_tx.send(share(100)).unwrap();
+        wait_for("the stale reject", 5, || stats.stale_rej.load(Ordering::Relaxed) == 1);
+        for id in 101..104 {
+            stats.submitted.fetch_add(1, Ordering::Relaxed);
+            sub_tx.send(share(id)).unwrap();
+        }
+        let r = sess.join().unwrap();
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("sent no new one")), "{r:?}");
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        m.stop();
+        assert_eq!(m.submits.load(Ordering::SeqCst), 1, "only the first share of the dropped job went out");
+        assert_eq!(stats.stale_drop.load(Ordering::Relaxed), 3);
+        assert_eq!(stats.submitted.load(Ordering::Relaxed), 1);
+    }
 
     /// the user's session against pool A (mode `mode`) and a good pool B, with the accepted-shares watchdog ticking like the status loop
     /// does; `expect` = shares expected per second at the measured hash rate

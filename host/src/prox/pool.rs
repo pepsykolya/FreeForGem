@@ -183,12 +183,18 @@ pub fn session_stratum(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Rece
     let mut sil = crate::silence::Silence::new(SILENCE_LIMIT);
     let mut seen = 0;
     let mut drain = crate::failover::Drain::new();
+    // FFG 1.8.0 (FFGN 1.0.13): since when the pool's "job not found" voided the newest job (no new job since); late answers
+    let mut gone_since: Option<Instant> = None;
+    let mut late = crate::neb::pool::LateAnswers::default();
     loop {
         if l.stop.load(Ordering::Relaxed) || !l.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
         if let Some(idle) = sil.expired() {
             return Err(crate::silence::Silence::error(idle));
+        }
+        if gone_since.is_some_and(|t| t.elapsed() > crate::noid::pool::GONE_RECONNECT) {
+            return Err(std::io::Error::other(format!("the pool dropped its newest job (\"job not found\") and sent no new one in {} s: reconnecting", crate::noid::pool::GONE_RECONNECT.as_secs())));
         }
         if pending.len() > 256 {
             pending.retain(|_, (_, t, _)| t.elapsed() < Duration::from_secs(120));
@@ -282,6 +288,7 @@ pub fn session_stratum(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Rece
                     if valid.len() > 8 {
                         valid.remove(0);
                     }
+                    gone_since = None;
                     let j = PJob {
                         job_id,
                         prefix,
@@ -329,14 +336,23 @@ pub fn session_stratum(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Rece
                         log(l, "authorized");
                     } else if let Some((job_id, sent, gpu)) = pending.remove(&id) {
                         let ms = sent.elapsed().as_millis();
+                        if let Some(w) = late.note(Instant::now(), sent.elapsed(), stats.stale_rej.load(Ordering::Relaxed), stats.submitted.load(Ordering::Relaxed)) {
+                            log(l, &w);
+                        }
                         if ok {
                             stats.accepted.fetch_add(1, Ordering::Relaxed);
                             log(l, &format!("share ACCEPTED (id {id}, job {job_id}, GPU{gpu}, {ms} ms)"));
                         } else {
                             stats.rejected.fetch_add(1, Ordering::Relaxed);
                             let code = err.get(0).and_then(Value::as_i64).unwrap_or(0);
-                            if code == 21 {
+                            if code == 21 || line.contains("job not found") {
                                 stats.stale_rej.fetch_add(1, Ordering::Relaxed);
+                                // FFG 1.8.0 (FFGN 1.0.13 stale-share fix): the pool no longer has this job: its next shares are
+                                // dropped (not sent, not rejected); its newest job gone and no new one in 20 s: a new connection
+                                if valid.last() == Some(&job_id) {
+                                    gone_since.get_or_insert_with(Instant::now);
+                                }
+                                valid.retain(|x| x != &job_id);
                             } else if code == 23 {
                                 stats.low_diff.fetch_add(1, Ordering::Relaxed);
                             }
