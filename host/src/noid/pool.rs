@@ -385,6 +385,9 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
     let mut valid: Vec<String> = Vec::new();
     let mut held: Vec<Submit> = Vec::new();
     let mut voided: std::collections::HashMap<String, Instant> = Default::default();
+    // FFG 1.8.0 (FFGN 1.0.14 15852d7): the height of every valid job: a job of a higher height voids the lower ones even
+    // without the clean flag (a pool that sends a new block with clean=false); the same height keeps them
+    let mut heights: std::collections::HashMap<String, u64> = Default::default();
     let mut next_id = 100u64;
     let mut namespace: Option<Vec<u8>> = None;
     let mut nonce_bits = 64u32;
@@ -490,8 +493,14 @@ fn session(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Receiver<Submit>
                                 for o in valid.drain(..) {
                                     voided.insert(o, Instant::now());
                                 }
+                            } else if j.height > 0 {
+                                for o in void_below(&mut valid, &heights, j.height) {
+                                    voided.insert(o, Instant::now());
+                                }
                             }
                             valid.retain(|x| x != &j.job_id);
+                            heights.insert(j.job_id.clone(), j.height);
+                            heights.retain(|k, _| valid.contains(k) || k == &j.job_id);
                             valid.push(j.job_id.clone());
                             if valid.len() > 8 {
                                 let o = valid.remove(0);
@@ -763,5 +772,25 @@ mod tests {
         assert_eq!(submits.load(Ordering::SeqCst), 1, "only the first share of the dropped job went out");
         assert_eq!(stats.rejected.load(Ordering::Relaxed), 1);
         assert_eq!(stats.stale_drop.load(Ordering::Relaxed), 3, "the next 3 were dropped (dropped stale), not rejected");
+    }
+}
+
+/// FFG 1.8.0 (FFGN 1.0.14 15852d7): takes out of `valid` the jobs of a height below `h` (known heights only) and returns them.
+pub(crate) fn void_below(valid: &mut Vec<String>, heights: &std::collections::HashMap<String, u64>, h: u64) -> Vec<String> {
+    let (old, keep): (Vec<String>, Vec<String>) = valid.drain(..).partition(|x| heights.get(x).is_some_and(|&hh| hh > 0 && hh < h));
+    *valid = keep;
+    old
+}
+
+#[cfg(test)]
+mod void_below_tests {
+    #[test]
+    fn a_new_block_without_the_clean_flag_voids_older_heights_only() {
+        let mut valid: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        let heights = [("a", 100u64), ("b", 101), ("c", 101)].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        assert_eq!(super::void_below(&mut valid, &heights, 101), vec!["a"]);
+        assert_eq!(valid, vec!["b", "c"], "the same height stays");
+        assert!(super::void_below(&mut valid, &heights, 101).is_empty());
+        assert_eq!(super::void_below(&mut valid, &heights, 102), vec!["b", "c"]);
     }
 }

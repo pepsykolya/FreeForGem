@@ -179,6 +179,9 @@ pub fn session_stratum(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Rece
     let mut chunk = [0u8; 16384];
     let mut pending: std::collections::HashMap<u64, (String, Instant, i32)> = Default::default();
     let mut valid: Vec<String> = Vec::new(); // jobs the pool still takes shares for (a clean job / pause voids the older ones)
+    // FFG 1.8.0 (FFGN 1.0.14 15852d7): the slot of every valid job: a job of a later slot voids the earlier ones even without
+    // the clean flag; the same slot keeps them
+    let mut slots: std::collections::HashMap<String, u64> = Default::default();
     let (mut en1, mut authed, mut diff_k): (Option<u16>, bool, Option<u32>) = (None, false, None);
     let mut sil = crate::silence::Silence::new(SILENCE_LIMIT);
     let mut seen = 0;
@@ -280,10 +283,15 @@ pub fn session_stratum(l: &Login, src: Src, tx: &Sender<(Src, Event)>, rx: &Rece
                     };
                     let ttl = p.get(5).and_then(Value::as_i64).unwrap_or(0);
                     let clean = p.get(6).and_then(Value::as_bool).unwrap_or(true);
+                    let slot_now = p.get(4).and_then(Value::as_i64).unwrap_or(0).max(0) as u64;
                     if clean {
                         valid.clear();
+                    } else if slot_now > 0 {
+                        crate::noid::pool::void_below(&mut valid, &slots, slot_now);
                     }
                     valid.retain(|x| x != &job_id);
+                    slots.insert(job_id.clone(), slot_now);
+                    slots.retain(|k, _| valid.contains(k) || k == &job_id);
                     valid.push(job_id.clone());
                     if valid.len() > 8 {
                         valid.remove(0);
