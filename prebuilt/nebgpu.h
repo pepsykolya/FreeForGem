@@ -184,6 +184,9 @@ NEBGPU_API int nebgpu_selftest(nebgpu_ctx *ctx, char *report, size_t report_len)
                                        P(L <= 2) < 1.3 %, a short trial decides), 0 off, 1 on. */
 #define NEBGPU_OPT_L3_THR 15        /* L3IE cost threshold (ops estimate; < 0: every L = 3 attempt). INT64_MIN = env
                                        NEBGPU_L3_THR (default 30000). */
+#define NEBGPU_OPT_TBIG_SCAN 16     /* TBIG (0.8.0, experimental, env NEBGPU_TBIG=1): -1 default; 0 = scans of a slot with a
+                                       partial L=3 table use it as an L <= 2 table only (A/B tests on the same resident
+                                       table); 1 = the triples too. */
 NEBGPU_API int nebgpu_set_option(nebgpu_ctx *ctx, int option, int64_t value);
 /* Z-dtable / V-cheap honest accounting: screened = nonces scanned (as nebgpu_stats attempts); evaluated = attempts whose
  * exact ticket was computed (full attempts + table attempts; each has the same win probability, this is the rate to

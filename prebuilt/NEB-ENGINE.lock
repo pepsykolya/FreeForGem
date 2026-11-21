@@ -1,10 +1,10 @@
 # FreeForGem — see LICENSE
 # The NEB engine and dataset shipped in the FreeForGem packages (1.8.0). build.sh / build-windows.ps1 refuse to pack files
 # whose SHA-256 differs from these. The engine is the same binary as in FFGN (one kernel commit for both products).
-NEBGPU_VERSION=0.7.0
-NEBGPU_FROM="ffgn 1.0.11 release (kernel f40d141, nebgpu 324d4dd; ffgn c445e00)"
-NEBGPU_SO_SHA256=f9d4fe6591e0a7d43df48e651b5da2615096d7cfb97ffee54267802ec67a6157
-NEBGPU_DLL_SHA256=b91058b11a44af2991356b4e1c7407d830ef9d28dad196cdaf839983a9f8518f
+NEBGPU_VERSION=0.8.1
+NEBGPU_FROM="ffgn 1.0.12 release (kernel k-0.8.1 4499ca1; ffgn 5f081cb)"
+NEBGPU_SO_SHA256=b0403019c2a1d835ce6639180bd271d40a64170c75458896562c1ba3c26fe895
+NEBGPU_DLL_SHA256=88df92224ccadae31c01f3c96a1fc774db7e31282c0280a52932521fb2bf1a87
 # neb-datasets.bin of NEB 1.0.1 (main network), not in git: prebuilt/neb-datasets.bin or $FFG_NEB_DATASET
 NEB_DATASET_SIZE=16087037
 NEB_DATASET_SHA256=57e22a4b8aacecb2ebae62f76307ddccb04198ed5c4ba15c1dee90ca7a7c2174
