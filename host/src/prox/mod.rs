@@ -473,6 +473,9 @@ pub fn mine(o: Opts) -> Result<()> {
     };
     println!("{} {} | PROX ({ALGO_NAME}, txid-blake2b) | {target} | worker {} | {} GPU(s) {:?}", crate::PRODUCT, env!("CARGO_PKG_VERSION"), o.worker, devices.len(), devices);
     clocks::set_bus_resolver(gpu::device_pci_bus_id); // the clock code must not load pearlgpu for this coin
+    // FFG 1.8.0 (recover.rs, FFGN 1.0.13): after a fault-restart of the whole process (faults::restart_self) the faulted GPU gets
+    // its safe state (the driver's reset, a probe process, not above its crash - 2 steps) before this run sets clocks or opens it
+    crate::recover::at_restart(&buses, &dir, o.uv.step, &stop, "recover");
     clocks::recover(&dir);
     let clock_opts = clocks::ClockOpts {
         core_mhz: match &o.lock_cclock { Some(s) => clocks::expand_u32(s, devices.len(), "--lock-cclock")?, None => vec![] },
