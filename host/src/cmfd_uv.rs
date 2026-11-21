@@ -1507,7 +1507,9 @@ fn starting() -> &'static Mutex<Vec<i32>> {
 }
 
 /// The engine of `dev` reported wrong results (`INTEGRITY | ERROR`) or a CUDA fault: when that card runs a tuned CMFD offset,
-/// one step back (never below the base), saved; at the base the tuning is paused for 24 h. Returns true when stepped back.
+/// 2 steps back (owner's rule 2: "crashed - 2 steps", uv::crash_back; never below the base), saved; at the base the tuning is
+/// paused for 24 h. Returns true when stepped back. (1.8.0: was one step; the resume cap below the crash uses the same 2 steps,
+/// so the two never stack.)
 pub fn on_fault(dev: i32, why: &str) -> bool {
     let Some(sh) = shared().lock().unwrap().clone() else { return false };
     let mut live = sh.live.lock().unwrap();
@@ -1520,7 +1522,7 @@ pub fn on_fault(dev: i32, why: &str) -> bool {
         return false;
     }
     l.last = Some(Instant::now());
-    let new = (cur - l.step).max(l.base);
+    let new = (cur - crate::uv::crash_back(l.step)).max(l.base);
     match cmfd_offset::set(&l.bus, new) {
         Ok(()) => {
             let mut e = sh.db.entry(&l.uuid).unwrap_or_default();
