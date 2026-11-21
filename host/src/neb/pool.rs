@@ -473,6 +473,26 @@ mod stale_tests {
         drop(is);
         assert!(b.voided() && c.voided(), "the connection's end voids its jobs");
     }
+
+    /// 1.0.14 (Shahtyor 21.11 22:25: 13 shares of an older block's job sent 2 s after the new block, all "job not found"):
+    /// Suprnova sends a new block as clean=false; a job of a higher height voids the lower heights, the same height stays.
+    #[test]
+    fn a_new_block_without_the_clean_flag_voids_older_heights_only() {
+        let mk = |id: &str, h: u32| {
+            let mut j = Arc::try_unwrap(super::super::tests::njob(4, None)).ok().unwrap();
+            j.origin = Origin::Pool { job_id: id.into() };
+            j.job.height = h;
+            Arc::new(j)
+        };
+        let (a, b, c) = (mk("a", 4779), mk("b", 4780), mk("c", 4780));
+        let mut is = Issued(vec![a.clone(), b.clone(), c.clone()]);
+        assert_eq!(is.void_below(4780), 1);
+        assert!(a.voided() && !b.voided() && !c.voided(), "same height stays valid");
+        assert_eq!(is.void_below(4780), 0, "voided once");
+        assert_eq!(is.void_below(4779), 0, "an older job arriving late voids nothing");
+        assert_eq!(is.void_below(4781), 2);
+        std::mem::forget(is);
+    }
 }
 
 #[cfg(test)]
@@ -627,6 +647,21 @@ impl Issued {
         for j in &self.0 {
             let same = matches!(&j.origin, Origin::Pool { job_id: x } if x == job_id);
             if !same && !j.obsolete.swap(true, Ordering::SeqCst) {
+                n += 1;
+            }
+        }
+        n
+    }
+}
+
+impl Issued {
+    /// 1.0.14: a job of a NEWER block height voids the jobs of older heights even when the pool marks it `clean=false`
+    /// (Suprnova sends every new block that way): their shares only come back as "job not found". Jobs of the same height
+    /// stay valid. How many were voided now.
+    fn void_below(&mut self, height: u32) -> usize {
+        let mut n = 0;
+        for j in &self.0 {
+            if j.job.height < height && !j.obsolete.swap(true, Ordering::SeqCst) {
                 n += 1;
             }
         }
@@ -841,6 +876,9 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                                 if issued.void_except(&job_id) > 0 {
                                     super::jobs_voided();
                                 }
+                            } else if issued.void_below(job.height) > 0 {
+                                // 1.0.14: a new block without the clean flag (Suprnova): the older heights are void now
+                                super::jobs_voided();
                             }
                             valid.retain(|x| x != &job_id);
                             valid.push(job_id.clone());
