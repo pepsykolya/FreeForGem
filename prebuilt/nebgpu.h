@@ -178,6 +178,12 @@ NEBGPU_API int nebgpu_selftest(nebgpu_ctx *ctx, char *report, size_t report_len)
 #define NEBGPU_OPT_DTV 13           /* Z-dtable screener variant (tuning/tests; every variant gives the same integers):
                                        0..3 k_dt_scan, >= 4 the S2 screener k_dt_scan2 (see NEBGPU_DTV in nebgpu.cu).
                                        -1 = env NEBGPU_DTV / build default. */
+#define NEBGPU_OPT_L3 14            /* L3IE (k-l3ie, experimental): with the digest table at L <= 2, also the attempts with
+                                       3 live rows whose inclusion-exclusion correction is cheap (cost <= NEBGPU_OPT_L3_THR),
+                                       exact. -1 = env NEBGPU_L3 (not set: since 0.7.0 automatic per model on CC >= 7.5 when
+                                       P(L <= 2) < 1.3 %, a short trial decides), 0 off, 1 on. */
+#define NEBGPU_OPT_L3_THR 15        /* L3IE cost threshold (ops estimate; < 0: every L = 3 attempt). INT64_MIN = env
+                                       NEBGPU_L3_THR (default 30000). */
 NEBGPU_API int nebgpu_set_option(nebgpu_ctx *ctx, int option, int64_t value);
 /* Z-dtable / V-cheap honest accounting: screened = nonces scanned (as nebgpu_stats attempts); evaluated = attempts whose
  * exact ticket was computed (full attempts + table attempts; each has the same win probability, this is the rate to
