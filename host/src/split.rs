@@ -97,16 +97,35 @@ pub fn split_arg(argv: &[String]) -> Option<String> {
 }
 
 fn split_value(argv: &[String]) -> Option<String> {
-    let mut it = argv.iter();
-    while let Some(a) = it.next() {
-        if a == SPLIT_FLAG {
-            return it.next().cloned();
-        }
-        if let Some(v) = a.strip_prefix("--split=") {
-            return Some(v.to_string());
-        }
+    (0..argv.len()).find_map(|i| split_span(argv, i).map(|(v, _)| v))
+}
+
+/// A word that goes on a split spec written without quotes (`--split neb:0,1 pearl:rest`): `coin:...`, GPU numbers / ranges,
+/// `rest`, `*`.
+fn spec_word(a: &str) -> bool {
+    if a.starts_with("--") || a.is_empty() {
+        return false;
     }
-    None
+    if let Some((c, _)) = a.split_once(':') {
+        return coins::by_name(c.trim()).is_some();
+    }
+    a == "rest" || a == "*" || a.chars().all(|c| c.is_ascii_digit() || matches!(c, ',' | ';' | '-'))
+}
+
+/// `--split` at argument `i`: its value (the words of an unquoted spec joined by a space) and the number of arguments taken.
+fn split_span(argv: &[String], i: usize) -> Option<(String, usize)> {
+    let a = argv.get(i)?;
+    let (mut v, mut n) = if a == SPLIT_FLAG {
+        (argv.get(i + 1)?.clone(), 2)
+    } else {
+        (a.strip_prefix("--split=")?.to_string(), 1)
+    };
+    while let Some(w) = argv.get(i + n).filter(|w| spec_word(w)) {
+        v.push(' ');
+        v.push_str(w);
+        n += 1;
+    }
+    Some((v, n))
 }
 
 fn parse_devs(s: &str) -> Result<Vec<u32>> {
@@ -131,8 +150,24 @@ pub fn parse_spec(spec: &str, count: Option<u32>) -> Result<Vec<Group>> {
     let mut rest: Option<Coin> = None;
     let mut rest_at = 0usize;
     let mut used = BTreeSet::new();
-    for ent in spec.split(';').map(str::trim).filter(|e| !e.is_empty()) {
-        let (c, d) = ent.split_once(':').ok_or_else(|| anyhow!("--split entry {ent:?}: COIN:GPUS (e.g. neb:0,1)"))?;
+    // owner 21.11.2026: ';', ',' and white space are all separators ("neb:0,1;pearl:rest" = "neb:0 1, pearl:rest"); a word
+    // with "coin:" starts a group, the words after it are its cards
+    let mut ents: Vec<(String, Vec<String>)> = Vec::new();
+    for w in spec.split(|c: char| c == ';' || c == ',' || c.is_whitespace()).filter(|w| !w.is_empty()) {
+        if let Some((c, d)) = w.split_once(':') {
+            ents.push((c.to_string(), if d.is_empty() { Vec::new() } else { vec![d.to_string()] }));
+        } else if let Some(e) = ents.last_mut() {
+            e.1.push(w.to_string());
+        } else {
+            bail!("--split {spec:?}: begins with {w:?}, not with COIN:GPUS (e.g. neb:0,1 pearl:rest)");
+        }
+    }
+    for (c, dw) in &ents {
+        let ent = format!("{c}:{}", dw.join(","));
+        ensure!(!dw.is_empty(), "--split entry {ent:?}: COIN:GPUS (e.g. neb:0,1)");
+        let d = dw.join(",");
+        let c = c.as_str();
+        ensure!(!(dw.len() > 1 && dw.iter().any(|x| x == "rest" || x == "*")), "--split entry {ent:?}: 'rest' takes the cards no other group names, without numbers");
         let coin = coins::by_name(c.trim()).ok_or_else(|| anyhow!("--split: unknown coin {:?}", c.trim()))?;
         let n = out.iter().filter(|g| g.coin == coin).count() + usize::from(rest == Some(coin));
         let name = if n == 0 { coins::spec(coin).name.to_string() } else { format!("{}{}", coins::spec(coin).name, n + 1) };
@@ -210,12 +245,8 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
         let a = &argv[i];
         let next = argv.get(i + 1);
         // the split itself
-        if a == SPLIT_FLAG {
-            i += 2;
-            continue;
-        }
-        if a.starts_with("--split=") {
-            i += 1;
+        if let Some((_, n)) = split_span(argv, i) {
+            i += n;
             continue;
         }
         // set per group below
@@ -611,6 +642,23 @@ mod tests {
         assert_eq!(g.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["ting", "neb", "ting2"]);
         assert_eq!(g[0].devs, vec![0, 1, 2]);
         assert_eq!(parse_spec("nebhash:0;PRL:1", Some(2)).unwrap()[1].coin, Coin::Pearl);
+    }
+
+    #[test]
+    fn spec_separators_are_equal() {
+        let want = parse_spec("neb:0,1;pearl:rest", Some(4)).unwrap();
+        for s in ["neb:0,1 pearl:rest", "neb:0 1 pearl:rest", "neb:0;1;pearl:rest", "neb:0,1,pearl:rest", " neb: 0 , 1 ;  pearl: rest ", "neb:0-1 pearl:*"] {
+            assert_eq!(parse_spec(s, Some(4)).unwrap(), want, "{s:?}");
+        }
+        // unquoted on the command line (HiveOS extra config): the words after --split are the spec
+        let a = v("--split neb:0,1 pearl:rest --pool neb=x:1");
+        assert_eq!(split_value(&a).as_deref(), Some("neb:0,1 pearl:rest"));
+        assert_eq!(split_value(&v("--split=neb:0 1 ting:2 --auto-uv")).as_deref(), Some("neb:0 1 ting:2"));
+        let g = parse_spec("neb:0,1 pearl:rest", Some(3)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--pool x:1 --algo neb --devices 0,1"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--algo pearl --devices 2"));
+        assert!(parse_spec("0,1 neb:2", Some(3)).is_err(), "cards before a coin");
+        assert!(parse_spec("neb:0 rest", Some(3)).is_err(), "rest with numbers");
     }
 
     #[test]

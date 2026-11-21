@@ -1017,7 +1017,8 @@ USAGE:
     freeforgem --pool crypto-connection.net:4073 --wallet ACCOUNT.RIG [OPTIONS]  Ting (DLR): see freeforgem --algo ting --help
     freeforgem --self-test [--algo cmfd|noid|neb|ting] [--devices N]
     --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb, ting (HiveOS: the flight sheet)
-    --split \"COIN:GPUS;...\"  different coins on different cards of one rig, e.g. --split \"neb:0,1;pearl:rest\": one miner
+    --split COIN:GPUS ...  different coins on different cards of one rig, e.g. --split neb:0,1 pearl:rest
+                         (';', ',' and spaces are all separators; quotes not needed): one miner
                          process per group; a value tagged with a coin goes to that group only (--pool neb=URL --wallet
                          neb=ADDR --lock-cclock pearl=1410), --split-args neb=\"--table-mclock 810\" adds options of one group;
                          untagged options go to every group; log lines carry the group: [neb] ...
