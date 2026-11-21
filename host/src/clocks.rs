@@ -925,6 +925,9 @@ pub fn table_mem(dev: i32, low: bool) -> Option<bool> {
 /// Puts back every clock setting this run applied (the lock from before, else default), and removes the marker.  Safe to
 /// call more than once.
 pub fn restore_all() {
+    crate::nvml::quiet::set_exiting(); // 1.0.12: a GPU's quiet period after a fault: its time part only now
+    // 1.0.12: the --power-limit of this run too (every exit path calls this one)
+    crate::powerlimit::restore_all();
     let Some(st) = state().lock().unwrap().take() else { return };
     let mut lines = Vec::new();
     for it in &st.items {
@@ -951,6 +954,7 @@ pub fn restore_all() {
 /// Idle mode (1.7.5): the PC is in use, the clocks go back to what they were before the miner (a lock would cap a game); the
 /// marker stays, `restore_all` still works.  `resume` sets this run's locks / offset again.
 pub fn suspend() {
+    crate::powerlimit::suspend();
     let mut g = state().lock().unwrap();
     let Some(st) = g.as_mut() else { return };
     if st.suspended {
@@ -971,6 +975,7 @@ pub fn suspend() {
 }
 
 pub fn resume() {
+    crate::powerlimit::resume();
     let mut g = state().lock().unwrap();
     let Some(st) = g.as_mut() else { return };
     if !st.suspended {
@@ -993,9 +998,20 @@ pub fn resume() {
 /// check runs at it (1.7.8; the live test on an RTX 3070: a verified +240 re-checked at the unlocked 2055 MHz gave Xid 43 and was
 /// stepped back).  Sets the locks of the card unconditionally; false = nothing of this run on that card / paused by idle mode.
 pub fn reassert(bus: &str) -> bool {
+    reassert_as(bus, "an OC apply was seen")
+}
+
+/// 1.0.12 (nvml.rs resume hook): the GPU's NVML calls resume after its fault (a driver reset may have dropped this run's locks).
+pub fn reassert_after_fault(bus: &str) -> bool {
+    reassert_as(bus, "after the GPU's fault")
+}
+
+fn reassert_as(bus: &str, why: &str) -> bool {
+    // 1.0.12: this run's --power-limit is set again too when the OC apply changed it
+    let pl = crate::powerlimit::reassert(bus);
     let g = state().lock().unwrap();
-    let Some(st) = g.as_ref().filter(|st| !st.suspended) else { return false };
-    let mut any = false;
+    let Some(st) = g.as_ref().filter(|st| !st.suspended) else { return pl };
+    let mut any = pl;
     for it in st.items.iter().filter(|it| it.bus.eq_ignore_ascii_case(bus)) {
         let r = [
             it.core_locked.then(|| st.nv.set_core_locked(it.dev, it.core_mhz)),
@@ -1007,7 +1023,7 @@ pub fn reassert(bus: &str) -> bool {
             lg(format!("GPU bus {}: cannot set the clocks again ({e:#})", it.bus));
         }
         if it.core_locked || it.mem_want().is_some() {
-            lg(format!("GPU bus {}: the clock locks of this run are set again first (an OC apply was seen), before the offset", it.bus));
+            lg(format!("GPU bus {}: the clock locks of this run are set again first ({why}), before the offset", it.bus));
         }
     }
     any
@@ -1048,8 +1064,25 @@ fn expand<T: Copy>(raw: &str, n: usize, flag: &str, parse: impl Fn(&str) -> Opti
         .collect()
 }
 
+/// 1.0.12: the L=3 gain the engine needs with --table-mclock (R111.md section 10: the 810 lock gives the pure table ~+10 % MA/W;
+/// the L=3 path runs at the full memory clock): NEBGPU_L3_AUTO_GAIN
+pub const TABLE_MCLOCK_L3_GAIN: &str = "0.10";
+
+/// 1.0.12: a --table-mclock value that locks the memory of at least one GPU (a list may leave GPUs out with '-' or 0)
+pub fn l3_gain_wanted(v: &str) -> bool {
+    v.split(',').any(|x| x.trim().parse::<u32>().is_ok_and(|m| m > 0))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn table_mclock_asks_for_the_l3_gain() {
+        assert!(l3_gain_wanted("810"));
+        assert!(l3_gain_wanted("-,810,-"));
+        assert!(!l3_gain_wanted("-,-"));
+        assert!(!l3_gain_wanted("0"));
+    }
+
     use super::*;
 
     #[test]

@@ -54,6 +54,7 @@ mod faults;
 mod gpu;
 mod hiveoc;
 mod idle;
+mod lostgpu;
 mod mining;
 mod neb;
 mod net;
@@ -65,6 +66,7 @@ mod profit;
 mod prox;
 mod nvml;
 mod offset;
+mod powerlimit;
 mod silence;
 mod split;
 mod status;
@@ -1427,8 +1429,9 @@ fn main() {
         eprintln!("Error: {e:?}");
     }
     conout::flush();
-    if r.is_err() {
-        std::process::exit(1);
+    if let Err(e) = &r {
+        // FFGN 1.0.12 (lostgpu.rs): every GPU down for 5 min exits with a code of its own (3), anything else with 1
+        std::process::exit(lostgpu::exit_code(e));
     }
 }
 

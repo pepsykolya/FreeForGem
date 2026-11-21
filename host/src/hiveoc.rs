@@ -108,6 +108,15 @@ impl HiveOc {
         v.and_then(|m| u32::try_from(m).ok()).filter(|&m| m > 0)
     }
 
+    /// FFGN 1.0.12 (`--power-limit`): the power limit in W nvidia-oc sets on NVIDIA GPU `i` (`PLIMIT`); `None` = not set
+    /// (empty / 0) or the GPU disabled (`PLIMIT` 1).
+    pub fn power_limit(&self, i: usize) -> Option<u32> {
+        if self.disabled(i) {
+            return None;
+        }
+        self.item("PLIMIT", i).and_then(|w| u32::try_from(w).ok()).filter(|&w| w > 1)
+    }
+
     /// Core clock offset nvidia-oc sets on NVIDIA GPU `i` (0 when the Core Clock field is empty).
     pub fn core_offset(&self, i: usize) -> i32 {
         let clock = self.item("CLOCK", i).unwrap_or(0);
@@ -178,6 +187,10 @@ mod tests {
         assert_eq!((h.core_lock(1), h.core_offset(1), h.mem_lock(1)), (Some(1410), 225, Some(810)));
         assert_eq!((h.core_lock(2), h.core_offset(2), h.mem_lock(2)), (Some(1500), 0, Some(810))); // MEM padded: -3000
         assert_eq!((h.core_lock(3), h.mem_lock(3)), (None, Some(810)));
+        assert_eq!((h.power_limit(0), h.power_limit(3)), (None, None)); // 0 = not set, 1 = disabled
+        let h = HiveOc::from_str("PLIMIT=\"140 115\"
+");
+        assert_eq!((h.power_limit(0), h.power_limit(1), h.power_limit(5)), (Some(140), Some(115), Some(115)));
         // nothing set: no locks, offset 0
         let h = HiveOc::from_str("CLOCK=\nLCLOCK=\nMEM=\nPLIMIT=\n");
         assert_eq!((h.core_lock(0), h.mem_lock(0), h.core_offset(0)), (None, None, 0));

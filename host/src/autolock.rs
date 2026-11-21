@@ -1842,6 +1842,7 @@ pub fn resolve(coin: &str, cards: &[Card], core: &mut Vec<Option<u32>>, mem: &[O
         if profit_loop && !managed.is_empty() {
             let r = profit_mine(&ctx, core, &mut managed, &path, true);
             crate::clocks::recover(clock_dir);
+            crate::powerlimit::recover(clock_dir, &cards.iter().map(|c| c.bus.clone()).collect::<Vec<_>>()); // 1.0.12: --power-limit of a killed child
             return r;
         }
         return Outcome::Mine { swept: false };
@@ -1881,6 +1882,7 @@ pub fn resolve(coin: &str, cards: &[Card], core: &mut Vec<Option<u32>>, mem: &[O
     };
     // a child that had to be killed left its clocks: put back as after a crash (the offsets: by the coin's own recovery next)
     crate::clocks::recover(clock_dir);
+    crate::powerlimit::recover(clock_dir, &cards.iter().map(|c| c.bus.clone()).collect::<Vec<_>>()); // 1.0.12: --power-limit of a killed child
     if end == End::Stopped {
         lg("stopped during the sweep (the points measured so far are kept; the next start goes on)");
         return Outcome::Stop;
@@ -1900,6 +1902,7 @@ pub fn resolve(coin: &str, cards: &[Card], core: &mut Vec<Option<u32>>, mem: &[O
     if profit_loop && !managed.is_empty() {
         let r = profit_mine(&ctx, core, &mut managed, &path, false);
         crate::clocks::recover(clock_dir);
+        crate::powerlimit::recover(clock_dir, &cards.iter().map(|c| c.bus.clone()).collect::<Vec<_>>()); // 1.0.12: --power-limit of a killed child
         return r;
     }
     Outcome::Mine { swept: true }

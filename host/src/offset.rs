@@ -115,7 +115,55 @@ pub fn info(bus: &str) -> Option<(i32, i32, i32)> {
     state().lock().unwrap().as_ref()?.cards.iter().find(|c| c.bus == bus).map(|c| (c.orig, c.lo, c.hi))
 }
 
+/// 1.0.12 (nvml.rs): the last offset this run set on a card (`set`), and one deferred in the card's quiet period after a fault;
+/// `after_fault` sets it when the card's NVML calls resume (a driver reset may have dropped it).
+fn wanted() -> &'static Mutex<Vec<(String, i32, bool)>> {
+    static W: Mutex<Vec<(String, i32, bool)>> = Mutex::new(Vec::new());
+    &W
+}
+
+fn note_wanted(bus: &str, v: i32, deferred: bool) {
+    let mut w = wanted().lock().unwrap_or_else(|e| e.into_inner());
+    w.retain(|x| !crate::nvml::quiet::same_bus(&x.0, bus));
+    w.push((bus.to_string(), v, deferred));
+}
+
+/// 1.0.12: the card's NVML calls resume after its quiet period (nvml.rs resume hook, after this run's clock locks): the offset this
+/// run wants there (deferred in the quiet period, or the last one set) is set again when the card reads another.
+pub fn after_fault(bus: &str) {
+    let want = wanted().lock().unwrap_or_else(|e| e.into_inner()).iter().find(|x| crate::nvml::quiet::same_bus(&x.0, bus)).map(|x| (x.0.clone(), x.1, x.2));
+    let Some((mbus, v, deferred)) = want else { return };
+    let now = {
+        let g = state().lock().unwrap_or_else(|e| e.into_inner());
+        let Some(c) = g.as_ref().and_then(|s| s.cards.iter().find(|c| c.bus == mbus)) else { return };
+        if sim().is_some() {
+            None
+        } else {
+            nvml().and_then(|n| n.get_offset(c.dev, c.mode).ok())
+        }
+    };
+    if now == Some(v) && !deferred {
+        return;
+    }
+    match set(&mbus, v) {
+        Ok(()) => lg(format!(
+            "GPU bus {mbus}: offset {v:+} MHz set again after the GPU's fault ({})",
+            match now {
+                Some(n) if n != v => format!("it read {n:+} after the driver's reset"),
+                _ if deferred => "deferred while no NVML call was made for this GPU".to_string(),
+                _ => "checked".to_string(),
+            }
+        )),
+        Err(e) => lg(format!("GPU bus {mbus}: cannot set offset {v:+} again after the GPU's fault ({e:#})")),
+    }
+}
+
 pub fn current(bus: &str) -> Option<i32> {
+    // 1.0.12: no reading in the card's quiet period after a fault, nor while its offset is being set again after it (a reading of a
+    // reset card is not a change by someone else)
+    if crate::nvml::quiet::settling(bus) {
+        return None;
+    }
     let g = state().lock().unwrap();
     let c = g.as_ref()?.cards.iter().find(|c| c.bus == bus)?;
     if let Some(s) = sim() {
@@ -134,17 +182,28 @@ pub fn set(bus: &str, v: i32) -> Result<()> {
         s.lock().unwrap().insert(bus.to_string(), v);
         return Ok(());
     }
-    nv.set_offset(c.dev, c.mode, v)?;
+    if let Err(e) = nv.set_offset(c.dev, c.mode, v) {
+        // 1.0.12 (nvml.rs): no NVML call in the card's quiet period after a fault: the offset is set when its calls resume
+        // (`after_fault`), before the card is judged again (auto-uv waits for the end of the quiet period)
+        if crate::nvml::is_busy(&e) {
+            note_wanted(bus, v, true);
+            lg(format!("GPU bus {bus}: offset {v:+} MHz deferred: no NVML call for this GPU right after its fault (set when they resume)"));
+            return Ok(());
+        }
+        return Err(e);
+    }
     let r = nv.get_offset(c.dev, c.mode)?;
     if r != v {
         let _ = nv.set_offset(c.dev, c.mode, c.orig);
         bail!("GPU bus {bus}: offset read back {r:+}, expected {v:+}; owner's {:+} put back", c.orig);
     }
+    note_wanted(bus, v, false);
     Ok(())
 }
 
 /// Puts the owner's offsets back and removes the marker.  Safe to call more than once.
 pub fn restore_all() {
+    crate::nvml::quiet::set_exiting();
     let Some(st) = state().lock().ok().and_then(|mut g| g.take()) else { return };
     if sim().is_some() {
         let _ = std::fs::remove_file(&st.marker);

@@ -195,7 +195,12 @@ pub fn sticky(err: &str) -> bool {
      "an exception occurred on the device", "launch timed out", "ecc error", "uncorrectable", "gpu has fallen off", "cuda_error_illegal",
      "invalid program counter", "context is destroyed", "injected fault",
      // 1.0.11 (iso.rs): the engine process of the GPU ended or hung
-     "the engine process ended", "the engine process did not answer"]
+     "the engine process ended", "the engine process did not answer",
+     // 1.0.12 (PC_AORUS RTX 3080 Ti, an auto-uv step: Xid records, then "cudaEventSynchronize(ctx->ev1[pe]): unknown error"):
+     // cudaErrorUnknown (999) / CUDA_ERROR_UNKNOWN and the driver-name forms of the device faults above are faults of the
+     // device too: the context is gone, only a new engine process (a new context) mines again
+     "unknown error", "cuda_error_unknown", "cudaerrorunknown", "device-side assert", "gpu is lost", "cuda_error_launch_failed",
+     "launch_timeout", "hardware_stack_error", "misaligned_address", "invalid_pc", "cudaerrorlaunchfailure", "cudaerrorillegaladdress"]
         .iter()
         .any(|k| e.contains(k))
 }
@@ -294,9 +299,24 @@ pub fn iso_line(label: &str, xid: Option<u64>, err: &str, others: usize, rec: Op
         Some(r) => format!("; crash {} in a row at offset {} remembered", r.n, signed(r.offset)),
         None => "; not counted as a failure of this GPU's offset".to_string(),
     };
+    let reboot = if xid == Some(79) {
+        format!("; {}", xid79_line(label))
+    } else {
+        String::new()
+    };
     format!(
-        "{label} FAILED in its own engine process ({what}: {err}): only this GPU restarts (a new engine process); {others} other GPU worker(s) keep mining{tail}"
+        "{label} FAILED in its own engine process ({what}: {err}): only this GPU restarts (a new engine process); {others} other GPU worker(s) keep mining{tail}{reboot}"
     )
+}
+
+/// 1.0.12 (the 12x 2060S rig, 21.11.2026, FIELD111.md anomaly 3): after an Xid 79 the driver flags a reboot (Xid 154); the lost GPU
+/// does not come back without one, and the other GPUs mined at ~1/4 of their rate until the rig was rebooted
+pub const XID79_ADVICE: &str = "Xid 79: a GPU fell off the PCIe bus (riser / power / the card); the NVIDIA driver needs a REBOOT of the rig to get it back, and until then the other GPUs may mine slower than usual: reboot the rig, then check that GPU's riser and power";
+
+/// 1.0.12 (LAS-rig5.md): the Xid 79 line names the GPU and its bus first (the 12x 2060S rig: always GPU1, bus 02, at +135 and at
+/// +315 alike: its riser / power, not its offset), then XID79_ADVICE; auto-uv goes cautious on the rig (neb/tune.rs note_xid79)
+pub fn xid79_line(label: &str) -> String {
+    format!("{label} fell off the bus (Xid 79) - check its riser / power cable; the rig needs a reboot. {XID79_ADVICE}")
 }
 
 /// Test hook (tests only): FFG_TEST_FAULT=<dev>:<secs> makes the worker of CUDA device `dev` fail with a sticky-looking error
@@ -384,6 +404,11 @@ pub fn attribute(w: Option<&Watch>, dead: &[(i32, String)], alive: usize, inject
         }
     } else {
         lines.push("no NVML: the failing GPU cannot be told from the driver's Xid events".into());
+    }
+    // 1.0.12: Xid 79 -> the reboot advice (XID79_ADVICE)
+    if let Some(&(i, _)) = culprits.iter().find(|&&(_, x)| x == 79) {
+        let label = w.map_or("a GPU".to_string(), |w| w.cards[i].label());
+        lines.push(xid79_line(&label));
     }
     if fatal && alive == 0 && dead.len() > 1 {
         lines.push("the CUDA state of this process is lost (a fault on one GPU stops every GPU of the process): the miner restarts, the failing GPU is handled at that start".into());
@@ -520,6 +545,11 @@ mod tests {
         assert!(l.contains("GPU11 (bus 0f, 2060S) FAILED in its own engine process (Xid 31") && l.contains("only this GPU restarts") && l.contains("11 other GPU worker(s) keep mining") && l.contains("crash 2 in a row at offset +165"), "{l}");
         let l = iso_line("GPU3", None, "x", 0, None);
         assert!(l.contains("no Xid") && l.contains("not counted"), "{l}");
+        assert!(!l.contains("REBOOT"), "{l}");
+        // 1.0.12: Xid 79 (fallen off the bus) asks for a reboot of the rig
+        let l = iso_line("GPU1 (bus 02, 2060S)", Some(79), "GPU1: cudaGetDeviceProperties: unknown error", 10, None);
+        assert!(l.contains("Xid 79 reported") && l.contains("REBOOT of the rig"), "{l}");
+        assert!(l.contains("GPU1 (bus 02, 2060S) fell off the bus (Xid 79) - check its riser / power cable; the rig needs a reboot"), "{l}");
         assert!(sticky("GPU0: the engine process did not answer a scan within 30 s (a hung GPU?): it was stopped"));
     }
 
@@ -539,6 +569,12 @@ mod tests {
         assert!(sticky("pg_wait: cudaEventSynchronize(sl.done): an illegal memory access was encountered"));
         assert!(sticky("CUDA_ERROR_ILLEGAL_ADDRESS"));
         assert!(!sticky("proof worker died"));
+        // 1.0.12 (PC_AORUS RTX 3080 Ti): cudaErrorUnknown after an auto-uv step faulted the card is a GPU fault (sticky)
+        assert!(sticky("GPU0 scan: cudaEventSynchronize(ctx->ev1[pe]): unknown error (C:/b/nebgpu.cu:6911) (code -2)"));
+        assert!(sticky("CUDA_ERROR_UNKNOWN"));
+        assert!(sticky("cudaGetDeviceProperties: unknown error"));
+        assert!(sticky("CUDA_ERROR_LAUNCH_TIMEOUT"));
+        assert!(!sticky("the device disagrees with the C reference on a new model (KEP1 slot 0): unstable clocks / undervolt?"));
     }
 
     #[test]
