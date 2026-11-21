@@ -1011,7 +1011,7 @@ fn mine(a: Args) -> Result<()> {
 }
 
 const HELP: &str = "\
-FreeForGem - Pearl (PRL), Common Foundry (CMFD), NOID (Parano1d), Proxima (PROX) and NEB GPU miner (formerly FreeForGemPear)
+FreeForGem - Pearl (PRL), Common Foundry (CMFD), NOID (Parano1d), Proxima (PROX), NEB and Ting (DLR) GPU miner (formerly FreeForGemPear)
 
 USAGE:
     freeforgem --pool HOST:PORT --wallet ADDRESS [OPTIONS]                         Pearl (PRL)
@@ -1188,8 +1188,8 @@ PROX (Proxima, transaction-hash PoW txid-blake2b since slot 196000; NVIDIA GTX 1
                          the mainnet layout is ~369)
     --self-test --algo prox   CPU vectors of the node and the pool + every GPU's candidate set vs the CPU, then exit
     Every candidate is re-hashed on the CPU (BLAKE2b) before it is sent; --lock-cclock/--lock-mclock/--moffset/--temp-limit
-    as for Pearl; --auto-uv is not available for PROX (RTX 30: --lock-cclock 1400-1500 = ~74 % of the hash rate at ~43 %
-    of the power). The pool user agent is FreeForGem/<version>. Dev fee: 1% (60 s per 100 min) always on proximamine,
+    as for Pearl; --auto-uv tunes the offset per card as for Pearl (RTX 30: --lock-cclock 1400-1500 = ~74 % of the hash rate
+    at ~43 % of the power). The pool user agent is FreeForGem/<version>. Dev fee: 1% (60 s per 100 min) always on proximamine,
     also when mining solo or on another pool.
 
 POOL LISTS (failover and failback; Pearl, NOID, PROX pools, CMFD; not --solo):
@@ -1210,7 +1210,8 @@ POOL LISTS (failover and failback; Pearl, NOID, PROX pools, CMFD; not --solo):
                   entry, and again for the failback (each restart reloads the model, about a minute without mining).
 
 Mining runs until SIGINT/SIGTERM (Ctrl-C), reconnecting to the pool automatically.
-A 1% developer fee (Pearl, NOID and PROX: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool; PROX: on proximamine) is part of the license terms.
+A 1% developer fee (Pearl, NOID, PROX, NEB and Ting: 60 s in every 100 min; CMFD: 36 s per hour, on the same pool; PROX: on proximamine;
+NEB and Ting: on a connection of their own, see --algo neb --help / --algo ting --help) is part of the license terms.
 ";
 
 /// `--pool-check`: the failback check of every `--pool` entry, without a GPU: connect + login (+ the certificate pin for CMFD) + a job.

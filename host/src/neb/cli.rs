@@ -200,7 +200,7 @@ OPTIONS:
     --power-limit N      (alias --pl N) optional, off by default (the lock + offset are the working limiters): set the GPU
                          power limit to N W (NVML, like nvidia-smi -pl; needs root/Administrator): one value for all, or one
                          per device in --devices order, e.g. --pl 140,115,140 ('-' = leave that GPU's limit as it is, e.g.
-                         the HiveOS one; a list must have one value per GPU). Clamped to the card's range (logged). The limit
+                         the HiveOS one; any list length: a shorter list repeats its last value). Clamped to the card's range (logged). The limit
                          before is put back on exit, on Ctrl-C and at the next start after a crash
                          (power-limit-restore-<bus>.json per GPU; on HiveOS the OC profile's power limit); an OC apply that
                          changes it while mining is undone (logged; at most 4 times an hour per GPU). auto-uv measures with
