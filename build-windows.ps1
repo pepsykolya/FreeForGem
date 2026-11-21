@@ -54,7 +54,7 @@ $name = "freeforgem-$version-windows-x64"
 $stage = "dist\$name\freeforgem"
 Remove-Item -Recurse -Force "dist\$name" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", "$lib\nebgpu.dll", windows\start*.bat, windows\start.ps1, `
+Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", "$lib\nebgpu.dll", "$lib\tinggpu.dll", "$lib\tinggpu_cl.dll", windows\start*.bat, windows\start.ps1, `
     windows\README-WINDOWS.txt, LICENSE, NOTICE, README.md, HIVEOS.md, MANUAL.md $stage
 Copy-Item -LiteralPath $nebset "$stage\neb-datasets.bin"
 # CMFD engine (FreeForgeMiner release pinned in cmfd\ENGINE.lock, MIT) as cmfd\; $env:FFGP_NO_CMFD = '1' builds Pearl only
