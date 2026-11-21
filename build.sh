@@ -1,16 +1,24 @@
 #!/bin/bash
 # FreeForGem — see LICENSE
 # Builds the freeforgem host binary and packs it with the prebuilt GPU libraries (prebuilt/linux-x86_64/libpearlgpu.so for Pearl,
-# libnoidgpu.so for NOID; the kernels are closed source) into dist/.  No nvcc needed; the linker must resolve the library's libcuda.so.1 (NVIDIA driver or CUDA stubs).
+# libnoidgpu.so for NOID, libproxgpu.so for PROX, libnebgpu.so + neb-datasets.bin for NEB; the kernels are closed source) into dist/.  No nvcc needed; the linker must resolve the library's libcuda.so.1 (NVIDIA driver or CUDA stubs).
 # Needs: a C compiler/linker (gcc), Rust (cargo, edition 2024), git.
 set -euo pipefail
 cd "$(dirname "$0")"
 LIB=prebuilt/linux-x86_64/libpearlgpu.so
 NLIB=prebuilt/linux-x86_64/libnoidgpu.so
 PLIB=prebuilt/linux-x86_64/libproxgpu.so   # PROX (Proxima): ffgprox kernel A, cudart static
+EBLIB=prebuilt/linux-x86_64/libnebgpu.so   # NEB (1.8.0): the FFGN engine nebgpu, cudart static
+EBSET=${FFG_NEB_DATASET:-prebuilt/neb-datasets.bin}   # NEB main-network dataset (NEB 1.0.1), not in git
 [ -f "$LIB" ] || { echo "missing $LIB (prebuilt GPU library)"; exit 1; }
 [ -f "$NLIB" ] || { echo "missing $NLIB (prebuilt NOID GPU library)"; exit 1; }
 [ -f "$PLIB" ] || { echo "missing $PLIB (prebuilt PROX GPU library)"; exit 1; }
+# NEB engine + dataset: pinned in prebuilt/NEB-ENGINE.lock (a different file is never packed)
+. prebuilt/NEB-ENGINE.lock
+[ -f "$EBLIB" ] || { echo "missing $EBLIB (prebuilt NEB engine)"; exit 1; }
+[ -f "$EBSET" ] || { echo "missing $EBSET (NEB dataset: $NEB_DATASET_URL; or set FFG_NEB_DATASET)"; exit 1; }
+echo "$NEBGPU_SO_SHA256  $EBLIB" | sha256sum -c --quiet || { echo "ERROR: $EBLIB is not the pinned NEB engine $NEBGPU_VERSION"; exit 1; }
+echo "$NEB_DATASET_SHA256  $EBSET" | sha256sum -c --quiet || { echo "ERROR: $EBSET is not the pinned NEB dataset"; exit 1; }
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' host/Cargo.toml)
 
 # PROX dev fee: the dev account's pool secret is NOT in the source, it is compiled in from FFG_FEE_PASS_PROX (devfee.rs, option_env!).
@@ -55,7 +63,8 @@ fi
 
 D=dist/freeforgem-$VERSION
 rm -rf "$D"; mkdir -p "$D"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md "$D/"
+cp "$EBSET" "$D/neb-datasets.bin"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$D/cmfd"
 tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 # HiveOS custom miner package: freeforgem-<version>_hiveos.tar.gz with a top-level freeforgem/ folder ("_hiveos" has no -,
@@ -65,8 +74,9 @@ tar -C dist -czf "$D-linux-x86_64.tar.gz" "freeforgem-$VERSION"
 HV=${VERSION//-/}
 H=dist/hive/freeforgem
 rm -rf dist/hive; mkdir -p "$H"
-cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
+cp host/target/release/freeforgem "$LIB" "$NLIB" "$PLIB" "$EBLIB" LICENSE NOTICE README.md HIVEOS.md MANUAL.md hiveos/h-*.sh "$H/"
 sed "s/@VERSION@/$HV/" hiveos/h-manifest.conf > "$H/h-manifest.conf"
+cp "$EBSET" "$H/neb-datasets.bin"
 [ "${FFGP_NO_CMFD:-0}" = 1 ] || cp -a "$E" "$H/cmfd"
 chmod +x "$H"/h-*.sh "$H/freeforgem"
 tar -C dist/hive -czf "dist/freeforgem-${HV}_hiveos.tar.gz" freeforgem

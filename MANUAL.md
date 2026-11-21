@@ -1334,6 +1334,50 @@ about 1.52 $/day. `--auto-lock-goal profit` chooses by money:
 
 ---
 
+### 24. NEB (Neural Engine Byte), new in 1.8.0
+NEB (nebhash v2) is mined by the NEB module of FreeForGem, the miner of FFGN (FreeForGem NEB) moved into FreeForGem. A FFGN
+command line works unchanged with `--algo neb` (or `--coin neb`); the NEB options are listed by `freeforgem --algo neb --help`.
+
+- **Coin choice.** One coin per run (HiveOS: the flight sheet). NEB is chosen by `--algo neb` / `--coin neb`, or by itself
+  from the pool URL (`neb.suprnova.cc`, `neb.ariabrain.com`, `work://`), `--node` (solo through your NEB node) or `--gate`.
+  `--algo pearl` (or any other coin) given explicitly always wins.
+- **Pool.** `stratum+tcp://neb.suprnova.cc:7804` (backup `:7805`), wallet `neb1...`, worker after a dot. HiveOS: Pool URL
+  `stratum+tcp://neb.suprnova.cc:7804`, Wallet template `%WAL%.%WORKER_NAME%`, Pass `x`.
+- **Files.** `nebgpu.dll` / `libnebgpu.so` (the NEB GPU engine, closed source, the same binary as in FFGN) and
+  `neb-datasets.bin` (the dataset of the NEB main network, 16,087,037 bytes, checked by its BLAKE3 at every start) are in
+  the packages. `--dataset FILE` gives another copy. A Pearl-only rig never reads them.
+- **Units.** MA/s = 10^6 attempts per second; efficiency in MA/W. HiveOS shows khs = MA/s x 1000, algo `nebhash`, and the
+  rate over the last 5 minutes (each block brings a new model, so the rate changes from block to block).
+- **Memory clock.** NEB is memory bound. A HiveOS OC profile that locks the memory low (Pearl's 810 MHz) is replaced by the
+  card's maximum while NEB mines and put back on exit (`--keep-hive-mem` keeps the profile's lock). `--table-mclock N`
+  locks the memory to N only while a GPU mines on the pure digest-table path. A Pearl run keeps its 810 MHz lock as before:
+  the memory policy belongs to the coin, and every lock a run sets is put back when it ends.
+- **One engine process per GPU.** A CUDA fault on one GPU (Xid 31/43) restarts only that GPU in a few seconds; the others
+  keep mining. `--single-process` runs all GPUs in the miner process (as FFGN before 1.0.11). Pearl, NOID, CMFD and PROX stay
+  single-process in 1.8.0.
+- **Every nonce is checked** again with the NEB C reference before it is sent; `--self-test` checks the engine against the
+  reference (90 checks).
+- **auto-uv / auto-lock** work for NEB as in FFGN (tuning while mining, about 17 s per step). Saved NEB profiles of FFGN
+  (`/hive-config/ffgn/uv.json`, or an `ffgn*` folder next to this one) are taken over on the first NEB start; nothing is tuned
+  again.
+- **Dev fee** 1 %: one 60 s slot in every 100 minutes, always on a connection of its own (never a second login in your
+  session).
+- Profit switching between Pearl and NEB is not in 1.8.0.
+
+### 25. What 1.8.0 changed for every coin
+- **auto-uv climbs while the power falls.** A step is kept when it lowers the power by more than 0.5 W (the noise of a
+  measurement) against the best step so far; the climb stops after 3 steps that do not, or when the power rises by more than
+  3 W. The 1.7.2 "voltage floor" (two steps saving less than 0.5 W per 15 MHz) is gone: it stopped real savings of 0.6-0.9 W
+  per step. Stability is still judged by the checks (bit-exact results, the clock under load), not by the saving.
+- **After a crash: the crashed offset minus 2 steps**, never above the last verified offset, after a quick check; another
+  crash goes 2 steps lower (Pearl, NOID, CMFD, PROX, NEB).
+- **The core lock is checked under load.** A lock that another tool resets (a HiveOS OC apply) is set again; one that never
+  holds is reported loudly (`WARNING GPUn: the core clock lock ... does not hold`), `[LOCK NOT HELD: GPUn]` on the stats line
+  and in HiveOS, and auto-uv / auto-lock leave that GPU.
+- **Colours:** auto-uv / auto-lock lines are yellow, their failures and roll-backs orange (bold yellow on a terminal without
+  256 colours); `--no-color` / NO_COLOR=1 turns colours off.
+- **Dev fee:** a slot whose fee connection was not ready is tried again up to 3 times, 5 minutes apart, in the same cycle.
+
 ## Русский
 
 ### 1. Что это

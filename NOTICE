@@ -1,4 +1,4 @@
-FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID)
+FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID, PROX, NEB)
 Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE), which applies to FreeForGem.
 
 The GPU kernels, the CUDA library and the host program are original work. The GPU library is
@@ -50,3 +50,19 @@ their own licenses:
 * NVIDIA CUDA runtime (cudart) -- statically linked into libpearlgpu.so / pearlgpu.dll
   and redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The
   CUDA driver (libcuda) is not distributed; it comes with the NVIDIA driver.
+
+* NEB (1.8.0): the NEB module of the host (host/src/neb/, from FFGN, original work) and the NEB GPU engine (nebgpu:
+  libnebgpu.so / nebgpu.dll, original work, distributed in binary form only, closed source).
+  - NEB reference implementation (C, host/nebref/) -- from https://github.com/SilasEigen/neb release 1.0.0, commit
+    feb0adac37af7e442f507c1853fc4b870137da06, folder pow/ref (blake3_min, chacha8, nebhash2, shares). Copyright the NEB
+    authors. Apache License, Version 2.0. Unmodified; compiled in to compute again every nonce the GPU reports before it is
+    sent, and as the reference of the self-test and of the undervolt checks. Parts of the GPU engine are derived from
+    pow/gpu/nebhash2_cuda.cu of the same release (Apache-2.0); the work-service frames and the neb-pool/1 client follow
+    spec/node.md and spec/pool.md of the same release.
+  - Dataset file neb-datasets.bin (shipped in the packages) -- the dataset file of the NEB main network, unchanged from the
+    NEB 1.0.1 release (16,087,037 bytes, SHA-256 57e22a4b8aacecb2ebae62f76307ddccb04198ed5c4ba15c1dee90ca7a7c2174). It is
+    derived from the Kepler DR24 transit signals of the NASA Exoplanet Archive (NASA, https://exoplanetarchive.ipac.caltech.edu)
+    and from OCTMNIST of MedMNIST v2 (Yang et al.), CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ ; the underlying
+    images are from Kermany et al., Cell 172(5), 2018. See docs/mainnet.md of the NEB release.
+  - NVIDIA CUDA runtime (cudart) -- linked statically into libnebgpu.so / nebgpu.dll (NVIDIA CUDA Toolkit EULA).
+  - cc (build only, MIT / Apache-2.0) compiles the C reference.

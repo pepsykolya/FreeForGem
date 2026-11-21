@@ -202,6 +202,17 @@ clock by default (`--no-mem-lock` leaves it). The HiveOS OC of the web UI is app
 resets the lock and the offset: since 1.7.8 the miner sets them again (log: `... was reset by an OC apply ... set again`, at most 4 times per
 GPU per hour). The dashboard shows GH/s and GH/W. Pools, options and the dev fee (1%): MANUAL.md, section 21.
 
+### NEB (Neural Engine Byte), since 1.8.0
+- Custom miner `freeforgem` (the same package), Hash algorithm `nebhash`.
+- Pool URL `stratum+tcp://neb.suprnova.cc:7804` (backup: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`),
+  Wallet template `%WAL%.%WORKER_NAME%` with your `neb1...` wallet, Pass `x`. The URL selects NEB; `--algo neb` in Extra config
+  forces it for another NEB pool.
+- The OC profile may keep Pearl's memory lock (810 MHz): while NEB mines the memory runs at its maximum and the profile's lock is
+  put back when the miner stops. Do not lower the memory for NEB.
+- HiveOS shows khs (MA/s x 1000), the 5-minute rate, MA/W next to the version, `LOCK NOT HELD` and NEB memory warnings.
+- A rig that mined NEB with `ffgn-hive` keeps its tuned offsets (`/hive-config/ffgn/uv.json` is imported on the first start).
+- Switching a rig between Pearl and NEB = another flight sheet (one coin per run in 1.8.0).
+
 ## Русский
 
 FreeForGem запускается в HiveOS как **Custom miner**: SSH и ручная установка не нужны.

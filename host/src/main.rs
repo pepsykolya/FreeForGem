@@ -1002,14 +1002,18 @@ fn mine(a: Args) -> Result<()> {
 }
 
 const HELP: &str = "\
-FreeForGem - Pearl (PRL), Common Foundry (CMFD) and NOID (Parano1d) GPU miner (formerly FreeForGemPear)
+FreeForGem - Pearl (PRL), Common Foundry (CMFD), NOID (Parano1d), Proxima (PROX) and NEB GPU miner (formerly FreeForGemPear)
 
 USAGE:
     freeforgem --pool HOST:PORT --wallet ADDRESS [OPTIONS]                         Pearl (PRL)
     freeforgem --pool cmfd+tls://IP:PORT?pin=HEX --wallet cmfd1... [OPTIONS]       Common Foundry (CMFD)
     freeforgem --algo noid --pool stratum+ssl://HOST:PORT --wallet o1... [OPTIONS] NOID (Parano1d)
     freeforgem --algo prox --pool stratum+ssl://HOST:PORT --wallet ADDR --password SECRET   Proxima (PROX); --solo http://NODE:PORT --token T
-    freeforgem --self-test [--algo cmfd|noid] [--devices N]
+    freeforgem --algo neb --pool stratum+tcp://neb.suprnova.cc:7804 --wallet neb1... [OPTIONS]   NEB (nebhash v2, MA/s); a NEB pool
+                         URL (neb.suprnova.cc, work://, neb.ariabrain.com), --node (solo) or --gate selects NEB by itself;
+                         the NEB options: freeforgem --algo neb --help
+    freeforgem --self-test [--algo cmfd|noid|neb] [--devices N]
+    --algo / --coin NAME  the coin: pearl (default), cmfd, noid, prox, neb (one coin per run; HiveOS: the flight sheet)
 
 OPTIONS:
     --pool HOST:PORT     stratum pool (default pearl-eu2.luckypool.io:3360); several entries of one coin = pool list:

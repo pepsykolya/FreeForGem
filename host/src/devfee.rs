@@ -26,6 +26,11 @@ pub const FEE_WORKER_PROX: &str = "ffg";
 /// FFG_FEE_PASS_PROX (build.sh / build-windows.ps1 read it from ~/.secrets/prox-devfee/pool-secret); build.rs refuses a release
 /// build without it unless FFG_ALLOW_NO_PROX_FEE=1 (dev build: empty, the PROX fee login then fails and prox/mod.rs warns).
 pub const FEE_PASS_PROX: &str = match option_env!("FFG_FEE_PASS_PROX") { Some(s) => s, None => "" };
+/// NEB (1.8.0, the NEB module from FFGN; neb/fee.rs): the same 1% schedule, ALWAYS on a connection of its own (rule 5): the
+/// user's pool list, or the public NEB fee pools (solo / through a gate).  The address is FFGN's DEVFEE address (public
+/// address only) until the owner names one for FreeForGem; the worker tells the two products apart in the pool's stats.
+pub const FEE_WALLET_NEB: &str = "neb1fh4c7f95phnphxsh6tqv26cy2wzrf0ga4ljrs9uhc04mlyetr2xqw4nhfp";
+pub const FEE_WORKER_NEB: &str = "ffg";
 /// Nockchain address merge-mined with the fee slot on LuckyPool (`PRL+NOCK` wallet syntax); other pools get FEE_WALLET only.
 pub const FEE_NOCK: &str = "DZgTtG2fuAYQSBbbV1GZ1ab4UfTpKtkmDyheEacKBd3Y6JsfrUat4ih";
 

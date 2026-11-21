@@ -9,6 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 S="${FFG_PROX_SECRET_FILE:-$HOME/.secrets/prox-devfee/pool-secret}"
 ARGS=(--rm -e FFG_ALLOW_NO_PROX_FEE -e FFGP_NO_CMFD -e FFGP_CMFD_COMPAT -e FFGP_CMFD_TARBALL -v "$PWD":/src)
+# NEB dataset (1.8.0): prebuilt/neb-datasets.bin inside the tree, or a file elsewhere mounted read-only
+if [ -n "${FFG_NEB_DATASET:-}" ]; then ARGS+=(-v "$(readlink -f "$FFG_NEB_DATASET"):/run/neb-datasets.bin:ro" -e FFG_NEB_DATASET=/run/neb-datasets.bin); fi
 if [ -r "$S" ]; then ARGS+=(-v "$S:/run/secrets/prox-pool-secret:ro")
 elif [ "${FFG_ALLOW_NO_PROX_FEE:-0}" != 1 ]; then echo "ERROR: PROX dev-fee secret $S not found (FFG_ALLOW_NO_PROX_FEE=1 = dev build without the PROX fee)" >&2; exit 1; fi
 if [ -n "${FFG_CARGO_CACHE:-}" ]; then ARGS+=(-v "$FFG_CARGO_CACHE/registry:/root/.cargo/registry" -v "$FFG_CARGO_CACHE/git:/root/.cargo/git"); fi

@@ -2,3 +2,4 @@
 /host/target/
 *.so.prev
 *.exp
+/prebuilt/neb-datasets.bin

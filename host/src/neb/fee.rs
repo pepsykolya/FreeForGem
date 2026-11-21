@@ -1,7 +1,8 @@
-// FFGN — see LICENSE
-//! Developer fee of FFGN: 1 % of the mining time (crate::devfee schedule: one 60 s slot in every 100 minutes at a random moment).
+// FreeForGem — see LICENSE
+//! Developer fee of the NEB module (from FFGN; FreeForGem 1.8.0: the address / worker are in devfee.rs with the other coins'):
+//! 1 % of the mining time (crate::devfee schedule: one 60 s slot in every 100 minutes at a random moment).
 //!
-//! ALL NEB FEE CONSTANTS LIVE IN THIS FILE (and devfee.rs for the schedule).  The LICENSE forbids removing, disabling,
+//! ALL NEB FEE CONSTANTS LIVE IN THIS FILE AND devfee.rs (address, worker, schedule).  The LICENSE forbids removing, disabling,
 //! reducing or otherwise altering the developer fee, its address, its schedule or its accounting.
 //!
 //! * Pool mode (neb-pool/1): the fee login `FEE_ADDRESS.FEE_WORKER` is authorized in the SAME session as the user's
@@ -17,9 +18,9 @@
 //! A build without FFGN_FEE_POOLS has no solo fee path (solo slots skipped, pool fee unaffected); build.sh /
 //! build-windows.ps1 refuse to package a release without it.
 
-pub const FEE_WORKER: &str = "ffgn";
-/// The FFGN dev-fee address (DEVFEE wallet, created by neb-sec 2026-11-16; public address only, its wallet is not on the miner).
-pub const FEE_ADDRESS: &str = "neb1fh4c7f95phnphxsh6tqv26cy2wzrf0ga4ljrs9uhc04mlyetr2xqw4nhfp";
+pub const FEE_WORKER: &str = crate::devfee::FEE_WORKER_NEB;
+/// The NEB dev-fee address (public address only, its wallet is not on the miner).
+pub const FEE_ADDRESS: &str = crate::devfee::FEE_WALLET_NEB;
 /// Pools for the solo fee slots (a list, failover as for the user's pools): Aria (NEB work protocol) and Suprnova (stratum).
 /// FFGN_FEE_POOLS at build time replaces the list.
 pub const FEE_POOLS: &str = match option_env!("FFGN_FEE_POOLS") {

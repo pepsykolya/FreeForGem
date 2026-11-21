@@ -1,6 +1,7 @@
 # FreeForGem — see LICENSE
 # Builds freeforgem.exe on Windows x64 and packs dist\freeforgem-<version>-windows-x64.zip with the prebuilt GPU libraries
-# (prebuilt\windows-x64\pearlgpu.dll for Pearl, noidgpu.dll for NOID; the kernels are closed source).
+# (prebuilt\windows-x64\pearlgpu.dll for Pearl, noidgpu.dll for NOID, proxgpu.dll for PROX, nebgpu.dll + neb-datasets.bin for NEB;
+# the kernels are closed source).
 # Needs: Visual Studio 2022 (or Build Tools) with the C++ workload, Rust (rustup, MSVC toolchain), git. No CUDA toolkit.
 # usage: .\build-windows.ps1
 $ErrorActionPreference = 'Stop'
@@ -9,6 +10,13 @@ $lib = "$PSScriptRoot\prebuilt\windows-x64"
 if (-not (Test-Path "$lib\pearlgpu.lib") -or -not (Test-Path "$lib\pearlgpu.dll")) { throw "missing $lib\pearlgpu.dll / pearlgpu.lib (prebuilt GPU library)" }
 if (-not (Test-Path "$lib\noidgpu.dll")) { throw "missing $lib\noidgpu.dll (prebuilt NOID GPU library)" }
 if (-not (Test-Path "$lib\proxgpu.dll")) { throw "missing $lib\proxgpu.dll (prebuilt PROX GPU library)" }
+# NEB (1.8.0): the FFGN engine nebgpu.dll and the main-network dataset, pinned in prebuilt\NEB-ENGINE.lock
+$pin = @{}; Get-Content "$PSScriptRoot\prebuilt\NEB-ENGINE.lock" | Where-Object { $_ -match '^([A-Z0-9_]+)=(.*)$' } | ForEach-Object { $pin[$Matches[1]] = $Matches[2].Trim('"') }
+$nebset = if ($env:FFG_NEB_DATASET) { $env:FFG_NEB_DATASET } else { "$PSScriptRoot\prebuilt\neb-datasets.bin" }
+if (-not (Test-Path "$lib\nebgpu.dll")) { throw "missing $lib\nebgpu.dll (prebuilt NEB engine)" }
+if (-not (Test-Path -LiteralPath $nebset)) { throw "missing $nebset (NEB dataset $($pin['NEB_DATASET_URL']); or set FFG_NEB_DATASET)" }
+if ((Get-FileHash "$lib\nebgpu.dll" -Algorithm SHA256).Hash.ToLower() -ne $pin['NEBGPU_DLL_SHA256']) { throw "$lib\nebgpu.dll is not the pinned NEB engine $($pin['NEBGPU_VERSION'])" }
+if ((Get-FileHash -LiteralPath $nebset -Algorithm SHA256).Hash.ToLower() -ne $pin['NEB_DATASET_SHA256']) { throw "$nebset is not the pinned NEB dataset" }
 
 $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -products * -latest -property installationPath
@@ -39,8 +47,9 @@ $name = "freeforgem-$version-windows-x64"
 $stage = "dist\$name\freeforgem"
 Remove-Item -Recurse -Force "dist\$name" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", windows\start*.bat, windows\start.ps1, `
+Copy-Item host\target\release\freeforgem.exe, "$lib\pearlgpu.dll", "$lib\noidgpu.dll", "$lib\proxgpu.dll", "$lib\nebgpu.dll", windows\start*.bat, windows\start.ps1, `
     windows\README-WINDOWS.txt, LICENSE, NOTICE, README.md, HIVEOS.md, MANUAL.md $stage
+Copy-Item -LiteralPath $nebset "$stage\neb-datasets.bin"
 # CMFD engine (FreeForgeMiner release pinned in cmfd\ENGINE.lock, MIT) as cmfd\; $env:FFGP_NO_CMFD = '1' builds Pearl only
 # $env:FFGP_CMFD_ZIP = a local copy of the pinned release zip (its SHA-256 is still checked), for an engine release not published yet
 if ($env:FFGP_NO_CMFD -ne '1') { & "$PSScriptRoot\cmfd\fetch-engine.ps1" -Dest "$stage\cmfd" -Zip "$env:FFGP_CMFD_ZIP" }
