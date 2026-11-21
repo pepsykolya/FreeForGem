@@ -37,6 +37,14 @@ const CHECK_K: u32 = 12;
 const CHECK_COUNT: u64 = 1 << 22;
 const DEF_MAX: i32 = 495;
 const DISABLE_SECS: u64 = 24 * 3600;
+/// 1.8.0 (FFGN 1.0.12, owner's rule: host improvements in every algorithm): `Entry::pause_why` of a pause after a real verdict
+/// (every offset down to 0 failed on this GPU's own checks)
+const PAUSE_VERDICT: &str = "verdict";
+
+/// a saved 24 h pause counts only when it was written after a verdict (see `Entry::pause_why`)
+fn pause_honored(e: &Entry) -> bool {
+    e.pause_why == PAUSE_VERDICT
+}
 /// PROX check lengths (the defaults of uv::Opts are Pearl's 180 / 30 / 120 s; ffgprox: 30 / 15 / 60, quick 15)
 const WARMUP: u32 = 30;
 const STEP_SECS: u32 = 15;
@@ -194,6 +202,10 @@ struct Entry {
     verified_at: u64,
     disabled_until: u64,
     stepped_back: u32,
+    /// 1.8.0 (FFGN 1.0.12): why the profile is paused ("verdict": every offset from the start down to 0 failed on this GPU's own
+    /// checks). A pause without it (written before) is not honored: a base check without a verdict (the check interrupted, its
+    /// worker stopped after another GPU's fault) also paused a GPU for 24 h at +0 (FFGN Rig01 21.11.2026, FIELD111.md anomaly 1)
+    pause_why: String,
 }
 
 impl Profile for Entry {
@@ -222,13 +234,15 @@ impl Profile for Entry {
             verified_at: u("verified_at"),
             disabled_until: u("disabled_until"),
             stepped_back: u("stepped_back_in_mining") as u32,
+            pause_why: s("pause_why"),
         })
     }
     fn to_json(&self) -> Value {
         json!({"name": self.name, "bus": self.bus, "driver": self.driver, "kernel": self.kernel, "core_lock": self.core_lock, "clk_mhz": self.clk,
                "orig_offset": self.orig, "base_offset": self.base, "offset": self.offset, "step": self.step, "edge": self.edge,
                "watts_base": self.w_base, "watts": self.w, "ghs": self.ghs, "refs": self.refs, "tested_at": self.tested_at,
-               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "stepped_back_in_mining": self.stepped_back})
+               "verified_at": self.verified_at, "disabled_until": self.disabled_until, "stepped_back_in_mining": self.stepped_back,
+               "pause_why": self.pause_why})
     }
     fn same_clocks(&self, o: &Entry) -> bool {
         self.driver == o.driver
@@ -275,6 +289,8 @@ struct Card {
     next_reval: AtomicU64,
     next_readback: AtomicU64,
     resets: crate::hiveoc::ResetLimit, // OC applies (HiveOS nvidia-oc) answered with a re-apply, per hour
+    /// 1.8.0 (FFGN 1.0.12): the last base check ended without a verdict (`infra`): give_up then pauses nothing
+    no_verdict: AtomicBool,
 }
 
 impl Card {
@@ -509,12 +525,14 @@ impl Live {
 
     /// Base check at `base` (falling 30 MHz at a time to 0 like Pearl when it fails); Some((base, result)) or None (nothing passes).
     fn base_check(&self, c: &Card, base: i32) -> Option<(i32, Res)> {
+        c.no_verdict.store(false, Ordering::Relaxed);
         let r = self.check(c, base, self.p.warmup, "");
         lg(self.line(c, "base", base, &r));
         if r.ok {
             return Some((base, r));
         }
         if r.infra {
+            c.no_verdict.store(true, Ordering::Relaxed);
             return None;
         }
         // 1.7.8 (1.7.7 plan, point 4): a failing start is checked once more before the search goes lower (one failure can be a
@@ -527,6 +545,7 @@ impl Live {
                 return Some((base, r));
             }
             if r.infra {
+                c.no_verdict.store(true, Ordering::Relaxed);
                 return None;
             }
         }
@@ -537,6 +556,7 @@ impl Live {
                 return Some((b, r));
             }
             if r.infra {
+                c.no_verdict.store(true, Ordering::Relaxed);
                 return None;
             }
         }
@@ -668,7 +688,7 @@ impl Live {
         let profs: Vec<(String, Entry)> = self.db.list::<Entry>(&c.uuid, "").into_iter().filter(|(_, e)| e.driver == self.driver).collect();
         // the profile of this lock; without a lock the base check measures the clock under load first
         let mut base_res: Option<(i32, Res)> = None;
-        let sel = match lock {
+        let mut sel = match lock {
             Some(l) => profs.iter().find(|(_, e)| e.core_lock == l).cloned(),
             None => {
                 let Some(b) = self.base_check(c, start) else { return self.give_up(c, start) };
@@ -677,6 +697,17 @@ impl Live {
                 profs.iter().filter(|(_, e)| e.core_lock == 0 && (e.clk as i64 - clk as i64).abs() <= 45).max_by_key(|(_, e)| e.verified_at).cloned()
             }
         };
+        if crash.is_none() {
+            if let Some((k, e)) = sel.as_ref().filter(|(_, e)| e.disabled_until > uv::now() && !pause_honored(e)) {
+                lg(format!(
+                    "{} profile {k}: the 24 h pause at {} written by {} is not honored (before 1.8.0 a base check without a verdict also paused it): the base is checked again",
+                    c.label(),
+                    signed(e.base),
+                    if e.kernel.is_empty() { "an earlier version" } else { e.kernel.as_str() }
+                ));
+                sel = None; // the pause entry holds no tuning (offset = base = the fallback): a new tuning from the start offset
+            }
+        }
         if crash.is_none() {
             if let Some((k, e)) = &sel {
                 if e.disabled_until > uv::now() {
@@ -727,6 +758,14 @@ impl Live {
         if self.stopped() {
             return;
         }
+        if c.no_verdict.load(Ordering::Relaxed) {
+            // 1.8.0 (FFGN 1.0.12, Rig01 21.11.2026): a base check without a verdict is no failure of this GPU: nothing is paused or
+            // saved, it mines at its start offset (the OC profile's), the tuning runs again at the next start
+            lg(format!("{} the base check of {} ended without a verdict (see above): nothing paused, nothing saved; mining at {}, tuned at the next start", c.label(), signed(start), signed(start)));
+            let _ = offset::set(&c.r.bus, start);
+            c.cur.store(start, Ordering::Relaxed);
+            return;
+        }
         let at = c.orig.min(0);
         lg(format!("{} no offset from {} down to 0 passes the check: auto-uv paused for 24 h, mining at {}", c.label(), signed(start), signed(at)));
         let _ = offset::set(&c.r.bus, at);
@@ -735,6 +774,7 @@ impl Live {
         e.base = at;
         e.offset = at;
         e.disabled_until = uv::now() + DISABLE_SECS;
+        e.pause_why = PAUSE_VERDICT.into();
         if let Some(l) = c.r.core_lock {
             e.core_lock = l;
             self.db.save(&c.uuid, "", &pkey(&e), &e);
@@ -786,6 +826,7 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
             next_reval: AtomicU64::new(0),
             next_readback: AtomicU64::new(0),
             resets: Default::default(),
+            no_verdict: AtomicBool::new(false),
             r,
         }));
     }
@@ -1035,6 +1076,23 @@ pub fn fixed_tick(nv: &Nvml, f: &Fixed) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// 1.8.0 (FFGN 1.0.12, Rig01 21.11.2026): a 24 h pause written without `pause_why` (a base check without a verdict could pause
+    /// a GPU at +0) is not honored; a pause written after a real verdict is, and survives the JSON round trip.
+    #[test]
+    fn a_pause_without_a_verdict_is_not_honored() {
+        let old = serde_json::json!({"base_offset": 0, "bus": "0000:05:00.0", "clk_mhz": 0, "core_lock": 1800,
+            "disabled_until": 1795335196u64, "driver": "580.82.07", "edge": 0, "ghs": 0.0, "kernel": "ffg1.7.9/prox",
+            "name": "NVIDIA GeForce RTX 3070", "offset": 0, "orig_offset": 275, "refs": "", "step": 15,
+            "stepped_back_in_mining": 0, "tested_at": 0, "verified_at": 0, "watts": 0.0, "watts_base": 0.0});
+        let e = Entry::from_json(&old).unwrap();
+        assert!(e.disabled_until > 0 && e.pause_why.is_empty());
+        assert!(!pause_honored(&e));
+        let v = Entry { pause_why: PAUSE_VERDICT.into(), ..e.clone() };
+        assert!(pause_honored(&v));
+        let back = Entry::from_json(&v.to_json()).unwrap();
+        assert!(pause_honored(&back));
+        assert_eq!(back.disabled_until, 1795335196);
+    }
     #[test]
     fn keys_and_json() {
         let mut e = Entry { kernel: kernel_id(), driver: "580".into(), core_lock: 1500, offset: 210, base: 0, refs: "a:b:c".into(), ..Default::default() };
