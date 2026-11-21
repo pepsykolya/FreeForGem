@@ -69,8 +69,8 @@ fn ram_rule(serialized: bool) -> String {
 /// A per-GPU option (`--uv-max`, `--uv-min`, `--uv-offset`): not given, one value for every GPU, or a comma list with one
 /// value per mining GPU, in `--devices` order (without `--devices`: GPU0, GPU1, ... as the miner numbers them; on HiveOS
 /// that is the PCI bus order of the dashboard).  In a list `-` (or an empty field) means "the default for this GPU".
-/// A list must have exactly one value per mining GPU (like --lock-cclock): a shorter list is an error, never extended,
-/// because extending the last value could give a weak card the limit of a strong one.
+/// 1.0.14 (owner's rule for all our miners, like HiveOS OC lists): a shorter list gives its LAST value to the GPUs it does not
+/// name (a '-' at the end leaves them at their default); values past the last mining GPU are ignored.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum PerGpu {
     #[default]
@@ -102,7 +102,7 @@ impl PerGpu {
         match self {
             PerGpu::Unset => None,
             PerGpu::All(v) => Some(*v),
-            PerGpu::List(l) => l.get(i).copied().flatten(),
+            PerGpu::List(l) => l.get(i).or(l.last()).copied().flatten(),
         }
     }
 
@@ -123,17 +123,12 @@ impl PerGpu {
         }
     }
 
-    /// A list must name every mining GPU (n = number of mining GPUs).
-    pub fn check_count(&self, n: usize, flag: &str) -> Result<()> {
-        if let PerGpu::List(l) = self {
-            ensure!(
-                l.len() == n,
-                "{flag}: {} values for {n} mining GPU(s); give one value for all, or exactly one per GPU in --devices order ('-' = the default for that GPU)",
-                l.len()
-            );
-        }
+    /// Kept for the callers: since 1.0.14 every list length is accepted.
+    pub fn check_count(&self, _n: usize, _flag: &str) -> Result<()> {
+        // 1.0.14: any list length is valid (shorter: the last value repeats; longer: the extra values are ignored)
         Ok(())
     }
+
 }
 
 #[derive(Clone, Debug)]
@@ -3502,8 +3497,13 @@ mod tests {
         assert_eq!(PerGpu::parse("-100;-50", "--uv-offset").unwrap(), PerGpu::List(vec![Some(-100), Some(-50)]));
         assert_eq!(PerGpu::parse("225 - 150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
         assert_eq!(PerGpu::parse("225;;150", "--uv-max").unwrap(), PerGpu::List(vec![Some(225), None, Some(150)]));
-        assert!(PerGpu::parse("150 225 330", "--uv-max").unwrap().check_count(2, "--uv-max").is_err(), "a wrong count is an error, never extended");
-        assert!(crate::clocks::expand_u32("1500 1650 1800", 2, "--lock-cclock").is_err());
+        // 1.0.14: any count; a shorter list repeats its last value, a longer one is cut
+        assert!(PerGpu::parse("150 225 330", "--uv-max").unwrap().check_count(2, "--uv-max").is_ok());
+        assert_eq!(crate::clocks::expand_u32("1500 1650 1800", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
+        assert_eq!(crate::clocks::expand_u32("1500,1650", 4, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650), Some(1650), Some(1650)]);
+        assert_eq!(crate::clocks::expand_u32("810,810,-,-", 8, "--table-mclock").unwrap(), vec![Some(810), Some(810), None, None, None, None, None, None]);
+        assert_eq!(crate::clocks::expand_u32("810,810,0,0", 4, "--table-mclock").unwrap(), vec![Some(810), Some(810), None, None]);
+        assert_eq!(crate::clocks::expand_u32("0", 3, "--table-mclock").unwrap(), vec![None, None, None]);
         assert_eq!(crate::clocks::expand_u32("1500;1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
         assert_eq!(crate::clocks::expand_u32("1500 1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
         assert_eq!(crate::clocks::expand_u32("1500, 1650", 2, "--lock-cclock").unwrap(), vec![Some(1500), Some(1650)]);
@@ -3524,14 +3524,13 @@ mod tests {
     #[test]
     fn per_gpu_get_and_count() {
         let l = PerGpu::parse("225,-,150", "--uv-max").unwrap();
-        assert_eq!((l.get(0), l.get(1), l.get(2), l.get(3)), (Some(225), None, Some(150), None));
+        assert_eq!((l.get(0), l.get(1), l.get(2), l.get(3)), (Some(225), None, Some(150), Some(150))); // 1.0.14: past the list = its last value
         assert!(l.is_set());
         assert_eq!(l.values(), vec![225, 150]);
         assert!(l.check_count(3, "--uv-max").is_ok());
-        // a list must name every mining GPU: shorter or longer is an error, never extended
-        let short = l.check_count(6, "--uv-max").unwrap_err();
-        assert!(format!("{short:#}").contains("3 values for 6 mining GPU(s)"), "{short:#}");
-        assert!(l.check_count(2, "--uv-max").is_err());
+        // 1.0.14: any count (shorter: last value repeats, longer: cut)
+        assert!(l.check_count(6, "--uv-max").is_ok() && l.check_count(2, "--uv-max").is_ok());
+        assert_eq!(PerGpu::parse("225,-", "--uv-max").unwrap().get(5), None); // a '-' at the end leaves the rest at default
         // one value: every GPU, any count
         let one = PerGpu::All(300);
         assert!(one.check_count(1, "x").is_ok() && one.check_count(8, "x").is_ok());
@@ -3577,7 +3576,7 @@ mod tests {
         assert!(!o.enabled());
         let o = opts("150,225,495", "");
         assert!(o.check_counts(3).is_ok());
-        assert!(o.check_counts(4).is_err());
+        assert!(o.check_counts(4).is_ok()); // 1.0.14: GPU3 takes the last value (495)
     }
 
     #[test]

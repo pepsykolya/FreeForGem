@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(default_stop(89), 92); // at least C + 3
         assert!(Opts { limit: PerGpu::parse("30", "--temp-limit").unwrap(), stop: PerGpu::Unset }.validate(1).is_err());
         assert!(Opts { limit: PerGpu::parse("75", "--temp-limit").unwrap(), stop: PerGpu::parse("77", "--temp-stop").unwrap() }.validate(1).is_err());
-        assert!(o.validate(2).is_err()); // a list must name every GPU
+        assert!(o.validate(2).is_ok()); // 1.0.14: a shorter list repeats its last value
         // no limit running on device 60: full speed
         assert_eq!(duty(60), None);
     }

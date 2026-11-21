@@ -136,10 +136,9 @@ fn prev_from_env_value(raw: &str, pos: usize, n: usize) -> Option<Prev> {
     let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
     let s = if parts.len() == 1 {
         parts[0]
-    } else if parts.len() == n {
-        parts[pos]
     } else {
-        return None;
+        // 1.0.14: a shorter list gives its last value to the GPUs it does not name (as on the command line)
+        parts.get(pos).copied().unwrap_or(parts[parts.len() - 1])
     };
     match s.parse::<u32>() {
         Ok(0) => Some(Prev::Unlocked),
@@ -1038,7 +1037,7 @@ impl Drop for Guard {
 }
 
 /// Expands a `--lock-cclock`/… value into one entry per device: a single number applies to all, a
-/// comma-separated list is taken in `--devices` order and must have one value per device.
+/// comma-separated list is taken in `--devices` order; a shorter list gives its last value to the remaining devices (1.0.14).
 pub fn expand_u32(raw: &str, n: usize, flag: &str) -> Result<Vec<Option<u32>>> {
     expand(raw, n, flag, |s| s.parse::<u32>().ok().filter(|&v| v > 0))
 }
@@ -1048,20 +1047,24 @@ pub fn expand_i32(raw: &str, n: usize, flag: &str) -> Result<Vec<Option<i32>>> {
 fn expand<T: Copy>(raw: &str, n: usize, flag: &str, parse: impl Fn(&str) -> Option<T>) -> Result<Vec<Option<T>>> {
     let parts = crate::uv::list_parts(raw);
     if parts.len() == 1 {
+        if parts[0] == "-" || (parts[0] == "0" && parse("0").is_none()) {
+            return Ok(vec![None; n]);
+        }
         let v = parse(parts[0]).ok_or_else(|| anyhow::anyhow!("{flag}: '{}' is not a valid number", parts[0]))?;
         return Ok(vec![Some(v); n]);
     }
-    anyhow::ensure!(parts.len() == n, "{flag}: {} values for {n} device(s) (give one value for all, or one per device in --devices order)", parts.len());
-    parts
-        .iter()
-        .map(|s| {
-            if s.is_empty() || *s == "-" {
-                Ok(None) // skip this device
-            } else {
-                parse(s).map(Some).ok_or_else(|| anyhow::anyhow!("{flag}: '{s}' is not a valid number"))
-            }
-        })
-        .collect()
+    // 1.0.14 (owner's rule for all our miners, like HiveOS OC lists): a shorter list gives its LAST value to the GPUs it does not
+    // name; values past the last mining GPU are ignored. '-', an empty field, or 0 where 0 is not a valid value = skip this GPU.
+    let one = |s: &str| -> Result<Option<T>> {
+        if s.is_empty() || s == "-" || (s == "0" && parse("0").is_none()) {
+            Ok(None)
+        } else {
+            parse(s).map(Some).ok_or_else(|| anyhow::anyhow!("{flag}: '{s}' is not a valid number"))
+        }
+    };
+    let vals = parts.iter().map(|s| one(s)).collect::<Result<Vec<_>>>()?;
+    let last = *vals.last().expect("list_parts gives at least one field");
+    Ok((0..n).map(|i| vals.get(i).copied().unwrap_or(last)).collect())
 }
 
 /// 1.0.12: the L=3 gain the engine needs with --table-mclock (R111.md section 10: the 810 lock gives the pure table ~+10 % MA/W;
@@ -1177,7 +1180,8 @@ mod tests {
         assert_eq!(prev_from_env_value("0", 2, 3), Some(Prev::Unlocked));
         assert_eq!(prev_from_env_value("1200,-,1400", 1, 3), None);
         assert_eq!(prev_from_env_value("1200,-,1400", 2, 3), Some(Prev::Locked(1400)));
-        assert_eq!(prev_from_env_value("1200,1400", 0, 3), None); // wrong count: not used
+        assert_eq!(prev_from_env_value("1200,1400", 0, 3), Some(Prev::Locked(1200)));
+        assert_eq!(prev_from_env_value("1200,1400", 2, 3), Some(Prev::Locked(1400))); // 1.0.14: shorter list, last value
     }
 
     #[test]

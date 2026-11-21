@@ -156,7 +156,7 @@ OPTIONS:
     --uv-dir DIR         directory of the undervolt state files (default: next to the binary, $FFGP_STATE_DIR)
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
-    --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
+    --lock-cclock N      lock the core clock to N MHz (one value for all, or a list in --devices order: a shorter list repeats its last value, - skips a GPU); needs root/Administrator
                          auto-uv profiles are per lock: a new lock is tuned anew
     --lock-mclock N      lock the memory clock to N MHz (same syntax). NEB needs the full memory clock: a HiveOS OC profile
                          that locks the memory low (e.g. 810 MHz) is replaced by the card's maximum while mining and put back

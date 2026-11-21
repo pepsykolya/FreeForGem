@@ -525,11 +525,10 @@ mod tests {
         let all = parse("150", "--pl").unwrap();
         assert!((0..8).all(|i| all.get(i) == Some(150)));
         assert!(all.check_count(8, "--pl").is_ok());
-        // a list must name every mining GPU, like --uv-max: shorter or longer is an error, never extended
+        // 1.0.14: any count, a shorter list repeats its last value
         let l = parse("140,115", "--pl").unwrap();
-        assert!(l.check_count(2, "--pl").is_ok());
-        assert!(l.check_count(3, "--pl").is_err());
-        assert!(l.check_count(1, "--pl").is_err());
+        assert!(l.check_count(2, "--pl").is_ok() && l.check_count(3, "--pl").is_ok() && l.check_count(1, "--pl").is_ok());
+        assert_eq!((l.get(0), l.get(1), l.get(2)), (Some(140), Some(115), Some(115)));
         // bad values
         assert!(parse("abc", "--pl").is_err());
         assert!(parse("0", "--pl").is_err());
