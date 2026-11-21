@@ -41,4 +41,13 @@ checkj split-ver "$SPL" '.ver' '"1.8.0 split: neb 0.083 MA/W + pearl 0.600 TH/W"
 SPL2='[ting] [  60s] GPU0 5.0 (100 W, 0.05 GH/W) group 7 | total 5.0 GH/s, 100 W, 0.05 GH/W | candidates 1 | user sub 1 acc 1 rej 0
 [ting2] [  61s] GPU1 6.0 (100 W, 0.06 GH/W) group 7 | total 6.0 GH/s, 100 W, 0.06 GH/W | candidates 1 | user sub 2 acc 2 rej 0'
 checkj split-same-unit "$SPL2" '[.algo,.hs_units,.hs,.ar]' '["ting","khs",[5000000,6000000],[3,0]]'
+# FFGN 1.0.12: a lost GPU (LOST / DEAD on its entry) counts 0 and the total is the sum of the others; REBOOT NEEDED / NO TABLE /
+# GPU LOST / REBOOTING go next to the version
+LOST='[ 600s] GPU0 12.0 (150 W, 0.08 MA/W)  GPU1 0.000 (75 W, PL 140 W, 0.0000 MA/W) LOST | total 12.0 MA/s, 225 W, 0.053 MA/W | avg 5 min 24.0 MA/s (15.0 9.0) | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)  [REBOOT NEEDED: Xid 79 GPU1]  [GPU LOST: GPU1 (bus 02) 3.0 min]'
+check neb-lost "$LOST" nebhash 15000.0 'REBOOT NEEDED (Xid 79 GPU1), GPU LOST GPU1'
+checkj neb-lost-hs "$LOST" '.hs|map(floor)' '[15000,0]'
+check neb-dead-notable '[  90s] GPU0 10.0 (150 W, 0.066 MA/W)  GPU1 9.0 DEAD  GPU2 11.0 (150 W, 0.073 MA/W) | total 30.0 MA/s, 300 W, 0.070 MA/W | found 1 (bad 0) | user sub 1 acc 1 rej 0 (stale 0)  [NO TABLE: GPU2 (no digest table for 10+ min: driver degraded?)]  [REBOOTING]' nebhash 21000.0 'NO TABLE GPU2, REBOOTING'
+SPL3='[neb] [  60s] GPU0 12.0 (150 W, 0.08 MA/W)  GPU1 13.0 (150 W, 0.087 MA/W) LOST | total 25.0 MA/s, 300 W, 0.083 MA/W | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)  [GPU LOST: GPU1 (bus 02) 1.0 min]
+[pearl] [  55s] GPU2 60.0 | total 60.0 TH/s, 100 W, 0.600 TH/W | user sub 4 acc 4 rej 1 | fee sub 0 acc 0 rej 0'
+checkj split-lost "$SPL3" '[.hs,.ver]' '[[12000000,0,60000000000000],"1.8.0 split: neb 0.083 MA/W, GPU LOST GPU1 + pearl 0.600 TH/W"]'
 [[ $fail == 0 ]] && echo "h-stats: all coins ok" || { echo "h-stats: FAILED"; exit 1; }

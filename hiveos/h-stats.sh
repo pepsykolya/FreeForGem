@@ -22,7 +22,7 @@ _age=$(( $(date +%s) - $(stat -c %Y "$_log" 2>/dev/null || echo 0) ))
 
 # one stats line -> L_ids L_ths (per GPU, in the line's unit) L_total L_mul L_kmul L_fmt L_units L_algo L_up L_acc L_rej L_extra
 _ffg_parse() {
-  local _line=$1 _avg _avgs _kavg _unheld _uvw _slot _mem
+  local _line=$1 _avg _avgs _kavg _unheld _uvw _slot _mem _down _zero _i _rb _nt _gl
   mapfile -t L_ids < <(grep -oP 'GPU\K[0-9]+(?= [0-9.]+)' <<< "$_line")
   mapfile -t L_ths < <(grep -oP 'GPU[0-9]+ \K[0-9.]+' <<< "$_line")
   L_total=$(grep -oP 'total \K[0-9.]+' <<< "$_line")
@@ -45,6 +45,15 @@ _ffg_parse() {
       if [[ ${#_kavg[@]} -eq ${#L_ids[@]} ]]; then L_ths=("${_kavg[@]}"); L_total=$_avg; fi
     fi
   fi
+  # FFGN 1.0.12 (every coin): a lost GPU (DEAD / LOST on the line: Xid 79, its engine cannot reopen the device, gone from
+  # NVML) counts 0, never its last rate, and the total is the sum of the others: the HiveOS Watchdog's minimal hashrate rule
+  # sees the true total
+  mapfile -t _down < <(grep -oP 'GPU\K[0-9]+(?= [0-9.]+(?: \([^)]*\))? (?:DEAD|LOST)\b)' <<< "$_line")
+  _zero=
+  for _i in "${!L_ids[@]}"; do
+    if [[ " ${_down[*]} " == *" ${L_ids[$_i]} "* ]]; then L_ths[$_i]=0; _zero=1; fi
+  done
+  [[ -n $_zero ]] && L_total=$(printf '%s\n' "${L_ths[@]}" | awk '{s+=$1} END{printf "%.6f", s}')
   L_up=$(grep -oP '^\[\s*\K[0-9]+' <<< "$_line")
   if [[ $_line == *'user sub '* ]]; then
     L_acc=$(grep -oP 'user sub [0-9]+ acc \K[0-9]+' <<< "$_line")
@@ -68,6 +77,15 @@ _ffg_parse() {
     _mem=$(grep -oP '\[WARNING \K[^]]*runs ~6x slower[^]]*' <<< "$_line" | head -n 1)
     [[ -n $_mem ]] && L_extra="$L_extra, $_mem"
   fi
+  # FFGN 1.0.12: a GPU fell off the bus (Xid 79: the rig needs a reboot) / GPUs without their digest table for 10+ min (NEB)
+  _rb=$(grep -oP '\[REBOOT NEEDED: \K[^]]+' <<< "$_line" | head -n 1)
+  [[ -n $_rb ]] && L_extra="$L_extra, REBOOT NEEDED ($_rb)"
+  _nt=$(grep -oP '\[NO TABLE: \K[^ \]]+' <<< "$_line" | head -n 1)
+  [[ -n $_nt ]] && L_extra="$L_extra, NO TABLE $_nt"
+  # FFGN 1.0.12: GPUs lost (--reboot-on-lost-gpu: the rig reboots after MIN minutes of it) / the reboot asked
+  _gl=$(grep -oP '\[GPU LOST: \KGPU[0-9]+' <<< "$_line" | paste -sd, -)
+  [[ -n $_gl ]] && L_extra="$L_extra, GPU LOST $_gl"
+  [[ $_line == *'[REBOOTING]'* ]] && L_extra="$L_extra, REBOOTING"
   L_extra=${L_extra#, }
 }
 
