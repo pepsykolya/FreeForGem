@@ -240,6 +240,21 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut extra: Vec<String> = Vec::new();
     let mut api_seen = false;
+    // options this group has a tagged value of: their untagged values are for the other groups (HiveOS: the flight sheet's
+    // Pool URL / Wallet are untagged, `--pool pearl=... --wallet pearl=...` in Extra config gives the Pearl group its own)
+    let own: BTreeSet<&str> = argv
+        .iter()
+        .enumerate()
+        .filter_map(|(j, a)| {
+            if !a.starts_with("--") || NOT_TAGGED.contains(&a.as_str()) || a == SPLIT_ARGS_FLAG {
+                return None;
+            }
+            if let Some((k, val)) = a.split_once('=') {
+                return tag_of(val).filter(|(c, _)| *c == g.coin).map(|_| k);
+            }
+            argv.get(j + 1).filter(|n| !n.starts_with("--")).and_then(|n| tag_of(n)).filter(|(c, _)| *c == g.coin).map(|_| a.as_str())
+        })
+        .collect();
     let mut i = 0;
     while i < argv.len() {
         let a = &argv[i];
@@ -291,6 +306,15 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
                     }
                 }
             }
+        }
+        // untagged, but this group has a tagged value of the option: not for this group
+        if own.contains(a.as_str()) && next.is_some_and(|n| !n.starts_with("--")) {
+            i += 2;
+            continue;
+        }
+        if a.starts_with("--") && a.split_once('=').is_some_and(|(k, _)| own.contains(k)) {
+            i += 1;
+            continue;
         }
         // untagged: to every group (an API port moves by the group's place, so two groups never share one)
         if (a == "--api" || a == "--api-port") && next.is_some() {
@@ -708,6 +732,20 @@ mod tests {
         let l = format!("[33mgroup {} ended, PAUSED[0m", blue_if(true, "neb"));
         assert_eq!(keep_outer(l), "[33mgroup [96mneb[0m[33m ended, PAUSED[0m");
         assert_eq!(keep_outer("plain".into()), "plain");
+    }
+
+    #[test]
+    fn tagged_value_replaces_untagged() {
+        // HiveOS: h-config puts the flight sheet's pool / wallet untagged, Extra config adds the second coin's
+        let a = v("--pool stratum+tcp://neb.suprnova.cc:7804 --wallet neb1q --worker rig02 --split neb:0,1 pearl:2,3 --pool pearl=prl-ru.kryptex.network:7048 --wallet pearl=prl1x --auto-uv");
+        let g = parse_spec("neb:0,1 pearl:2,3", Some(4)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--pool stratum+tcp://neb.suprnova.cc:7804 --wallet neb1q --worker rig02 --auto-uv --algo neb --devices 0,1"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--worker rig02 --pool prl-ru.kryptex.network:7048 --wallet prl1x --auto-uv --algo pearl --devices 2,3"));
+        // two untagged pools (a failover list) stay a list for the group without a tag
+        let a = v("--pool A:1 --pool B:2 --split neb:0 pearl:1 --pool pearl=C:3");
+        let g = parse_spec("neb:0 pearl:1", Some(2)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--pool A:1 --pool B:2 --algo neb --devices 0"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--pool C:3 --algo pearl --devices 1"));
     }
 
     #[test]
