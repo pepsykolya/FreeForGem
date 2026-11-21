@@ -316,6 +316,16 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
             i += 1;
             continue;
         }
+        // untagged per-GPU list of the whole rig (`--lock-cclock 1800,1800,1410,1410`): numbered by the rig's GPUs, so each group
+        // gets the values of its own cards (a shorter list repeats its last value, owner's rule for every list)
+        if PER_GPU_LISTS.contains(&a.as_str()) {
+            if let Some(n) = next.filter(|n| !n.starts_with("--") && n.contains(',')) {
+                out.push(a.clone());
+                out.push(slice_list(n, &g.devs));
+                i += 2;
+                continue;
+            }
+        }
         // untagged: to every group (an API port moves by the group's place, so two groups never share one)
         if (a == "--api" || a == "--api-port") && next.is_some() {
             out.push(a.clone());
@@ -337,6 +347,16 @@ pub fn child_args(argv: &[String], g: &Group, idx: usize) -> Vec<String> {
     out.push("--devices".into());
     out.push(g.devs.iter().map(u32::to_string).collect::<Vec<_>>().join(","));
     out
+}
+
+/// Per-GPU list options (one value per GPU of the rig); a group's child numbers its own cards from 0.
+const PER_GPU_LISTS: [&str; 11] = ["--lock-cclock", "--lock-mclock", "--moffset", "--table-mclock", "--uv-offset", "--uv-max", "--uv-min", "--temp-limit", "--temp-stop", "--pl", "--power-limit"];
+
+/// The values of a rig-wide list for the cards `devs` (rig GPU numbers): past the list's end its last value.
+fn slice_list(v: &str, devs: &[u32]) -> String {
+    let parts: Vec<&str> = v.split(',').map(str::trim).collect();
+    let last = parts.last().copied().unwrap_or("");
+    devs.iter().map(|&d| parts.get(d as usize).copied().unwrap_or(last)).collect::<Vec<_>>().join(",")
 }
 
 /// An API port value moved by `idx` (`4068` → `4069` for the second group; `HOST:PORT` likewise; `0` / `off` stay).
@@ -746,6 +766,17 @@ mod tests {
         let g = parse_spec("neb:0 pearl:1", Some(2)).unwrap();
         assert_eq!(child_args(&a, &g[0], 0), v("--pool A:1 --pool B:2 --algo neb --devices 0"));
         assert_eq!(child_args(&a, &g[1], 1), v("--pool C:3 --algo pearl --devices 1"));
+    }
+
+    #[test]
+    fn rig_lists_are_sliced_per_group() {
+        let a = v("--split neb:0,1 pearl:2,3 --lock-cclock 1800,1800,1410,1410 --uv-max 300 --table-mclock neb=810 --temp-limit 80,-");
+        let g = parse_spec("neb:0,1 pearl:2,3", Some(4)).unwrap();
+        assert_eq!(child_args(&a, &g[0], 0), v("--lock-cclock 1800,1800 --uv-max 300 --table-mclock 810 --temp-limit 80,- --algo neb --devices 0,1"));
+        assert_eq!(child_args(&a, &g[1], 1), v("--lock-cclock 1410,1410 --uv-max 300 --temp-limit -,- --algo pearl --devices 2,3"));
+        // a short list: the cards past it take its last value
+        assert_eq!(slice_list("1500,1650", &[3, 5]), "1650,1650");
+        assert_eq!(slice_list("1500,1650,1800", &[0, 2]), "1500,1800");
     }
 
     #[test]
