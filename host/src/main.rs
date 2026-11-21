@@ -507,6 +507,10 @@ fn mine(a: Args) -> Result<()> {
         None
     };
     if nv {
+        // FFG 1.8.0 (recover.rs, FFGN 1.0.13): after a fault-restart of the whole process (faults::restart_self) the faulted GPU gets
+        // its safe state (the driver's reset, a probe process, not above its crash - 2 steps) before this run sets clocks or opens it
+        let buses: Vec<String> = devices.iter().map(|&d| gpu::device_pci_bus_id(d).unwrap_or_default()).collect();
+        recover::at_restart(&buses, &uv::state_dir(&a.uv), a.uv.step, &stop, "recover");
         clocks::recover(&clock_dir);
     }
     let mut clock_opts = clocks::ClockOpts {
