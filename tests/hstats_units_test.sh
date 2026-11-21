@@ -50,4 +50,10 @@ check neb-dead-notable '[  90s] GPU0 10.0 (150 W, 0.066 MA/W)  GPU1 9.0 DEAD  GP
 SPL3='[neb] [  60s] GPU0 12.0 (150 W, 0.08 MA/W)  GPU1 13.0 (150 W, 0.087 MA/W) LOST | total 25.0 MA/s, 300 W, 0.083 MA/W | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)  [GPU LOST: GPU1 (bus 02) 1.0 min]
 [pearl] [  55s] GPU2 60.0 | total 60.0 TH/s, 100 W, 0.600 TH/W | user sub 4 acc 4 rej 1 | fee sub 0 acc 0 rej 0'
 checkj split-lost "$SPL3" '[.hs,.ver]' '[[12000000,0,60000000000000],"1.8.0 split: neb 0.083 MA/W, GPU LOST GPU1 + pearl 0.600 TH/W"]'
+SPL2B='[neb] [  60s] GPU1 12.0 (150 W, 0.08 MA/W) | total 12.0 MA/s, 150 W, 0.08 MA/W | found 1 (bad 0) | user sub 1 acc 1 rej 0 (stale 0)
+[pearl] [  61s] GPU0 60.0 | total 60.0 TH/s, 100 W, 0.600 TH/W | user sub 4 acc 4 rej 0 | fee sub 0 acc 0 rej 0'
+# equal groups: the first group of --split is the main one, whatever the log order
+printf -- '--pool neb=x --split pearl:0 neb:1\n' > "$T/config.txt"
+printf 'CUSTOM_CONFIG_FILENAME=%s/config.txt\n' "$T" >> "$T/h-manifest.conf"
+checkj split-order "$SPL2B" '.algo' '"pearlhash"'
 [[ $fail == 0 ]] && echo "h-stats: all coins ok" || { echo "h-stats: FAILED"; exit 1; }

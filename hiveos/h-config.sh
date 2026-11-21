@@ -36,6 +36,30 @@ worker=${WORKER_NAME:-rig}
 # PROX (Proxima): the flight sheet's Pass field is the pool secret (proximamine; InnovLab innov+tls://: x); a Pool URL
 # http://NODE:PORT mines solo through `proxi node mine` (the Pass field = the node's mine.seeker.token)
 extra=${CUSTOM_USER_CONFIG:-}
+# 1.8.0 split (different coins on different cards, Extra config --split ...): the flight sheet belongs to ONE coin, so its
+# Pool URL / Wallet / Pass (and a solo node) are tagged with that coin and reach only its group; the other coins' pools and
+# wallets come tagged from Extra config (--pool pearl=... --wallet pearl=...)
+if [[ " $extra " == *" --split "* || " $extra " == *" --split="* ]]; then
+  mc=pearl
+  if [[ $url == http://* || $url == *prox* || $url == innov* || " $extra " == *" --algo prox "* ]]; then mc=prox
+  elif [[ $url == node://* || $url == *crypto-connection* || $url == ting://* || " $extra " == *" --algo ting "* ]]; then mc=ting
+  elif [[ $url == *neb.* || $url == work://* || $url == aria://* || $url == *ariabrain* || " $extra " == *" --algo neb "* ]]; then mc=neb
+  elif [[ $url == cmfd+tls://* || " $extra " == *" --algo cmfd "* ]]; then mc=cmfd
+  elif [[ $url == *noid* || " $extra " == *" --algo noid "* ]]; then mc=noid
+  fi
+  args=
+  if [[ $url == http://* ]]; then
+    args="--solo prox=$url --token prox=${CUSTOM_PASS:-} --seeker-name prox=$worker"
+  elif [[ $url == node://* ]]; then
+    args="--node ting=${url#node://}"
+  else
+    for u in $urls; do args="$args --pool $mc=$u"; done
+    args="${args# } --wallet $mc=$wallet --worker $worker"
+    [[ -n ${CUSTOM_PASS:-} && ${CUSTOM_PASS:-} != x ]] && args="$args --password $mc=$CUSTOM_PASS"
+  fi
+  echo "$args $extra" > "$CUSTOM_CONFIG_FILENAME"
+  exit 0
+fi
 if [[ $url == http://* ]]; then
   echo "--algo prox --solo $url --token ${CUSTOM_PASS:-} --seeker-name $worker $extra" > "$CUSTOM_CONFIG_FILENAME"
   exit 0

@@ -18,6 +18,11 @@ _log="${CUSTOM_LOG_BASENAME}.log"
 _tail=$(tail -n 600 "$_log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -aE ' total [0-9.]+ (TH|FW|MH|GH|MA)/s')
 _line=$(grep -avE '^\[[A-Za-z0-9_-]+\] ' <<< "$_tail" | tail -n 1)
 mapfile -t _groups < <(grep -aoP '^\[\K[A-Za-z0-9_-]+(?=\] \[)' <<< "$_tail" | awk 'NF && !s[$0]++')
+# groups in the order of --split (the config file h-config wrote): of groups with as many cards, the first one is the main one
+if [[ ${#_groups[@]} -gt 1 && -r ${CUSTOM_CONFIG_FILENAME:-} ]]; then
+  _spec=$(grep -oP -- '--split[ =]\K.*' "$CUSTOM_CONFIG_FILENAME" 2>/dev/null | head -n 1)
+  mapfile -t _groups < <(for g in "${_groups[@]}"; do c=${g%%[0-9]*}; i=$(grep -boP "(^|[ ;,])$c:" <<< "$_spec" | head -n 1 | cut -d: -f1); echo "${i:-9999} ${g}"; done | sort -n -s -k1,1 | cut -d' ' -f2)
+fi
 _age=$(( $(date +%s) - $(stat -c %Y "$_log" 2>/dev/null || echo 0) ))
 
 # one stats line -> L_ids L_ths (per GPU, in the line's unit) L_total L_mul L_kmul L_fmt L_units L_algo L_up L_acc L_rej L_extra
