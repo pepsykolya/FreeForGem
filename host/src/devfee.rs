@@ -17,8 +17,9 @@ pub const FEE_WALLET: &str = "prl1pjcsjdpjzhccamllqmy6fncpjy526nrrza626y27zsa6hw
 pub const FEE_WORKER: &str = "ffgp-devfee";
 /// NOID (Parano1d) fee address: the same 1% schedule, a second login on the user's NOID pool (noid/mod.rs).
 pub const FEE_WALLET_NOID: &str = "o1qxh67m5rugg8t43gcn47lp775thsq4padlacn2jv9l3d7lmv7cmq4gmhdc";
-/// Proxima (PROX) fee login (prox/mod.rs): the same 1% schedule, ALWAYS on the proximamine pool (also when the user mines on
-/// another pool or solo through a node), login FEE_WALLET_PROX.FEE_WORKER_PROX with the dev account's pool secret.
+/// Proxima (PROX) fee login (prox/fee.rs, 1.7.8): the same 1% schedule as a second login on the user's pool; the dev account on
+/// proximamine (FEE_POOL_PROX, login FEE_WALLET_PROX.FEE_WORKER_PROX with the pool secret) is the fallback: solo, suprnova, or a
+/// refused / jobless / rejected same-pool login.
 pub const FEE_POOL_PROX: &str = "stratum+ssl://pool.proximamine.com:3334";
 pub const FEE_WALLET_PROX: &str = "fb8f33895d20ed0d244d1476272b0ccddd244f84acd2e423e55c7a95f6a6f6a6";
 pub const FEE_WORKER_PROX: &str = "ffg";
