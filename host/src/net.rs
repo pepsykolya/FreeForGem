@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // the session loop sends the queued shares once per read timeout: short, so a share waits at most this long (stale risk)
-const READ_TICK_MS: u64 = 20;
+// (FFGN 1.0.13 stale-share fix: 5 ms, was 20; the loop reads what the pool sent before it sends)
+const READ_TICK_MS: u64 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoolUrl {

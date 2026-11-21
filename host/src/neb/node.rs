@@ -305,6 +305,7 @@ pub fn session(l: &NodeLogin, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats
                         received: Instant::now(),
                         ref_next: AtomicU64::new(0),
                         ref_base: super::random_base(),
+                        obsolete: std::sync::atomic::AtomicBool::new(false),
                         job,
                     };
                     let _ = tx.send((l.src, Ev::Job(Arc::new(nj))));

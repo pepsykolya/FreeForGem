@@ -23,6 +23,54 @@ pub const PROTOCOL: &str = "neb-pool/1";
 /// submits per second at most (F-14)
 const SUBMIT_RATE: u32 = 25;
 const SILENCE_LIMIT: Duration = Duration::from_secs(300);
+/// stale-share fix: the pool said "job not found" for its newest job and sent no new one this long: a new connection
+const GONE_RECONNECT: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 20 });
+
+/// FFGN 1.0.13 (Rig05, 5x CMP 50HX, 21.11.2026): 25 % stale shares ("job not found") from 12:37 on, the same binary 0-3 %
+/// before; the pool's answers came 2-34 s after the submit, several at once (a TCP retransmission backoff: the rig's r8169 NIC
+/// logged "NETDEV WATCHDOG: transmit queue 0 timed out", 63 % of the pool connection's bytes retransmitted, 30 % loss of
+/// 1200-byte pings).  The miner cannot repair that, so it says so loudly: answers this late, this many within the window, one
+/// WARNING line per WARN_EVERY with the median delay and the stale count.
+const LATE_ANSWER: Duration = Duration::from_secs(2);
+const LATE_N: usize = 3;
+const LATE_WINDOW: Duration = Duration::from_secs(300);
+const LATE_WARN_EVERY: Duration = Duration::from_secs(600);
+
+/// Late pool answers (see LATE_ANSWER).
+#[derive(Default)]
+pub struct LateAnswers {
+    late: std::collections::VecDeque<(Instant, Duration)>,
+    warned: Option<Instant>,
+}
+
+impl LateAnswers {
+    /// An answer `delay` after its submit, at `now`; Some(line) = warn now.
+    pub fn note(&mut self, now: Instant, delay: Duration, stale: u64, sent: u64) -> Option<String> {
+        while self.late.front().is_some_and(|x| now.saturating_duration_since(x.0) > LATE_WINDOW) {
+            self.late.pop_front();
+        }
+        if delay < LATE_ANSWER {
+            return None;
+        }
+        self.late.push_back((now, delay));
+        if self.late.len() < LATE_N || self.warned.is_some_and(|w| now.saturating_duration_since(w) < LATE_WARN_EVERY) {
+            return None;
+        }
+        self.warned = Some(now);
+        let mut d: Vec<f64> = self.late.iter().map(|x| x.1.as_secs_f64()).collect();
+        d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        Some(format!(
+            "WARNING: the pool answers late: {} answers {:.0}-{:.0} s (median {:.1} s) after their submit within {} min; stale so far {stale} of {sent} sent. \
+             The shares reach the pool late and come back as stale (\"job not found\"). A ping can look fine: this is lost packets on \
+             this rig's network (NIC / cable / switch; Linux: dmesg | grep -i 'transmit queue' / ss -ti), not the miner's queue",
+            d.len(),
+            d[0],
+            d[d.len() - 1],
+            d[d.len() / 2],
+            LATE_WINDOW.as_secs() / 60
+        ))
+    }
+}
 
 /// The protocol of a pool entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +204,303 @@ pub fn auth_password(password: &str, entry: usize, is_gate: bool, supr: bool) ->
 }
 
 #[cfg(test)]
+mod stale_tests {
+    use super::super::{DatasetFile, Opener, Shared, Work, refc, start_verifiers};
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    const FF: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+    fn job_line(id: &str, height: u32, wh: &str) -> String {
+        let t = super::super::now_unix();
+        let z = "00".repeat(32);
+        format!(
+            "{}\n",
+            json!({"method":"mining.notify","params":[{"job_id":id,"slot":0,"clean":true,"version":1,"parent":format!("{height:064x}"),"time_start":t,"time_window":600,"bits":0,"target":z,"share_target":FF,"coinbase_prefix":"0102","coinbase_suffix":"0304","branch":[],"tx_count":1,"shares_root":z,"height":height,"expiry":t+600,"weights_hash":wh}]})
+        )
+    }
+
+    /// Rig05 (5 GPUs, an Athlon X4 840): a backlog of hits behind a slow CPU check when the pool's clean job arrives. The
+    /// pool session reads the new job at once (the checks do not hold it up), not one share of the old job is sent after
+    /// it, the old job's backlog is dropped and counted ("dropped stale"), never rejected; every share sent passed the check.
+    #[test]
+    fn a_clean_job_behind_a_slow_cpu_check_is_read_at_once_and_no_old_share_follows_it() {
+        let (set, m) = refc::synthetic(refc::Arch::Kep1).unwrap();
+        let wh = hex(&m.hash);
+        let packed = hex(&m.packed);
+        let file = Arc::new(DatasetFile { hash: [0; 32], bytes: Arc::new(Vec::new()), network: "test", sets: vec![Arc::new(set)] });
+        // the mock pool: every submit recorded (job id, when), answered "true"; job B when the test says so
+        let lst = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = lst.local_addr().unwrap().port();
+        let (go_b, go_rx) = mpsc::channel::<()>();
+        let (b_sent_tx, b_sent) = mpsc::channel::<Instant>();
+        let submits: Arc<Mutex<Vec<(String, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
+        let subs2 = submits.clone();
+        let pool = std::thread::spawn(move || {
+            let (s, _) = lst.accept().unwrap();
+            let w = Arc::new(Mutex::new(s.try_clone().unwrap()));
+            let put = |w: &Mutex<std::net::TcpStream>, v: Value| w.lock().unwrap().write_all(format!("{v}
+").as_bytes()).unwrap();
+            let wb = w.clone();
+            let wh2 = wh.clone();
+            std::thread::spawn(move || {
+                if go_rx.recv().is_ok() {
+                    wb.lock().unwrap().write_all(job_line("B", 101, &wh2).as_bytes()).unwrap();
+                    let _ = b_sent_tx.send(Instant::now());
+                }
+            });
+            for line in BufReader::new(s).lines() {
+                let Ok(line) = line else { break };
+                let v: Value = serde_json::from_str(line.trim()).unwrap();
+                let id = v["id"].as_u64().unwrap_or(0);
+                match v["method"].as_str().unwrap_or("") {
+                    "mining.subscribe" => put(&w, json!({"id":id,"result":{"session":"t","extranonce1":"01020304","extranonce2_size":4},"error":null})),
+                    "mining.authorize" => {
+                        put(&w, json!({"id":id,"result":true,"error":null}));
+                        put(&w, json!({"method":"mining.set_target","params":[FF]}));
+                        put(&w, json!({"method":"mining.set_model","params":[0, wh, packed]}));
+                        w.lock().unwrap().write_all(job_line("A", 100, &wh).as_bytes()).unwrap();
+                    }
+                    "mining.submit" => {
+                        subs2.lock().unwrap().push((v["params"][1].as_str().unwrap().to_string(), Instant::now()));
+                        put(&w, json!({"id":id,"result":true,"error":null}));
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let url = parse_url(&format!("127.0.0.1:{port}")).unwrap();
+        let l = Login {
+            name: "test",
+            entry: 0,
+            url: url.clone(),
+            urls: vec![url],
+            link: crate::failover::Link::new(1),
+            follow: None,
+            src: Src::User,
+            login: "addr.rig05".into(),
+            password: String::new(),
+            fee_login: None,
+            enabled: Arc::new(AtomicBool::new(true)),
+            stop: Arc::new(AtomicBool::new(false)),
+            dataset_hash: [0; 32],
+            fee_ok: Arc::new(AtomicBool::new(false)),
+            conn_seq: Arc::new(AtomicU64::new(0)),
+            fee_stats: Arc::new(Stats::default()),
+            kinds: Arc::new(Mutex::new(vec![Kind::Json])),
+            ns: Arc::new(super::super::node::NodeStats::default()),
+            ready: Arc::new(AtomicBool::new(false)),
+            gate: Arc::new(AtomicBool::new(false)),
+        };
+        let stats = Arc::new(Stats::default());
+        let (ev_tx, ev_rx) = mpsc::channel::<(Src, Ev)>();
+        let (share_tx, share_rx) = mpsc::channel::<Find>();
+        let lstop = l.stop.clone();
+        let st2 = stats.clone();
+        let sess = std::thread::spawn(move || session(&l, &ev_tx, &share_rx, &st2));
+        // the miner's side: a slow CPU check (30 ms a hit, 2 threads), the checked shares straight to the session
+        let (find_tx, find_rx) = mpsc::channel::<Find>();
+        let open: Opener = Arc::new(|_, _, _| anyhow::bail!("no device in this test"));
+        let sh = Arc::new(Shared::new(Arc::new(AtomicBool::new(false)), find_tx, file, Arc::new(Vec::new()), false, open, Duration::ZERO, Duration::from_millis(30)));
+        let vs = start_verifiers(&sh, 2);
+        let router = std::thread::spawn(move || {
+            while let Ok(f) = find_rx.recv() {
+                let _ = share_tx.send(f);
+            }
+        });
+        let job_a = match ev_rx.recv_timeout(Duration::from_secs(10)).expect("job A") {
+            (_, Ev::Job(j)) => j,
+            _ => panic!("not a job"),
+        };
+        assert_eq!(job_a.job.height, 100);
+        let gs = super::super::tests::test_gpu(0, 0);
+        let w = Arc::new(Work::new(job_a.clone(), false, 1));
+        // the GPUs found 40 hits of job A at once: 40 x 30 ms / 2 threads = 600 ms of CPU checks
+        let hits: Vec<(u32, [u8; 32])> = (0..40u32).map(|n| (n, [0u8; 32])).collect();
+        sh.enqueue(&gs, &w, 0, &hits, Instant::now());
+        std::thread::sleep(Duration::from_millis(150));
+        go_b.send(()).unwrap();
+        let b_at = b_sent.recv_timeout(Duration::from_secs(5)).unwrap();
+        let job_b = match ev_rx.recv_timeout(Duration::from_secs(5)).expect("job B") {
+            (_, Ev::Job(j)) => j,
+            _ => panic!("not a job"),
+        };
+        let read_ms = b_at.elapsed().as_millis();
+        let lag = job_b.received.saturating_duration_since(b_at);
+        assert_eq!(job_b.job.height, 101);
+        assert!(lag < Duration::from_millis(60), "the clean job was read {} ms after the pool sent it (a check backlog in front of it)", lag.as_millis());
+        assert!(job_a.voided() && !job_b.voided(), "the clean job voided job A at once");
+        // the backlog: what is left of job A is dropped before (or after) its check, never sent
+        let t = Instant::now();
+        while (sh.checking.load(Ordering::SeqCst) > 0 || !sh.checkq.lock().unwrap().is_empty()) && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        lstop.store(true, Ordering::SeqCst);
+        sh.stop.store(true, Ordering::SeqCst);
+        for h in vs {
+            h.join().unwrap();
+        }
+        let _ = sess.join();
+        pool.join().unwrap();
+        let subs = submits.lock().unwrap().clone();
+        let sent_a = subs.iter().filter(|s| s.0 == "A").count() as u64;
+        let late_a: Vec<u128> = subs.iter().filter(|s| s.0 == "A" && s.1 > b_at + Duration::from_millis(30)).map(|s| s.1.duration_since(b_at).as_millis()).collect();
+        assert!(late_a.is_empty(), "job A shares reached the pool after its clean job B: {late_a:?} ms after B");
+        assert!(sent_a > 0, "the checks before job B went out");
+        let dropped = sh.dropped[0].load(Ordering::Relaxed) + stats.stale_drop.load(Ordering::Relaxed);
+        assert!(dropped >= 20, "most of the 600 ms backlog was dropped, not sent: dropped {dropped}, sent {sent_a}");
+        assert_eq!(sent_a + dropped, 40, "every hit is sent once or dropped once (sent {sent_a}, dropped {dropped})");
+        assert_eq!(stats.rejected.load(Ordering::Relaxed), 0, "no stale reject");
+        assert_eq!(stats.submitted.load(Ordering::Relaxed), sent_a);
+        assert_eq!(gs.bad.load(Ordering::Relaxed), 0);
+        assert!(sh.shares.load(Ordering::Relaxed) >= sent_a, "every share sent passed the CPU check");
+        drop(router);
+        println!("job B read {read_ms} ms after the pool sent it ({} ms socket -> session); job A: {sent_a} sent before B, {dropped} dropped", lag.as_millis());
+    }
+
+    /// Rig01 (8x RTX 3070): rejects in bursts on a job the pool had dropped before its new job reached us. The first
+    /// "job not found" voids the job: its next shares are dropped (not sent, not rejected); no new job within
+    /// GONE_RECONNECT -> a new connection.
+    #[test]
+    fn job_not_found_voids_the_job_and_no_new_job_reconnects() {
+        let (_set, m) = refc::synthetic(refc::Arch::Kep1).unwrap();
+        let (wh, packed) = (hex(&m.hash), hex(&m.packed));
+        let lst = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = lst.local_addr().unwrap().port();
+        let submits = Arc::new(AtomicU64::new(0));
+        let sub2 = submits.clone();
+        let pool = std::thread::spawn(move || {
+            let (s, _) = lst.accept().unwrap();
+            let mut w = s.try_clone().unwrap();
+            for line in BufReader::new(s).lines() {
+                let Ok(line) = line else { break };
+                let v: Value = serde_json::from_str(line.trim()).unwrap();
+                let id = v["id"].as_u64().unwrap_or(0);
+                let out = match v["method"].as_str().unwrap_or("") {
+                    "mining.subscribe" => format!("{}
+", json!({"id":id,"result":{"session":"t","extranonce1":"01020304","extranonce2_size":4},"error":null})),
+                    "mining.authorize" => format!(
+                        "{}
+{}
+{}
+{}",
+                        json!({"id":id,"result":true,"error":null}),
+                        json!({"method":"mining.set_target","params":[FF]}),
+                        json!({"method":"mining.set_model","params":[0, wh, packed]}),
+                        job_line("A", 100, &wh)
+                    ),
+                    "mining.submit" => {
+                        sub2.fetch_add(1, Ordering::SeqCst);
+                        format!("{}
+", json!({"id":id,"result":null,"error":[21,"job not found"]}))
+                    }
+                    _ => String::new(),
+                };
+                if w.write_all(out.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        });
+        let url = parse_url(&format!("127.0.0.1:{port}")).unwrap();
+        let l = Login {
+            name: "test",
+            entry: 0,
+            url: url.clone(),
+            urls: vec![url],
+            link: crate::failover::Link::new(1),
+            follow: None,
+            src: Src::User,
+            login: "addr.rig01".into(),
+            password: String::new(),
+            fee_login: None,
+            enabled: Arc::new(AtomicBool::new(true)),
+            stop: Arc::new(AtomicBool::new(false)),
+            dataset_hash: [0; 32],
+            fee_ok: Arc::new(AtomicBool::new(false)),
+            conn_seq: Arc::new(AtomicU64::new(0)),
+            fee_stats: Arc::new(Stats::default()),
+            kinds: Arc::new(Mutex::new(vec![Kind::Json])),
+            ns: Arc::new(super::super::node::NodeStats::default()),
+            ready: Arc::new(AtomicBool::new(false)),
+            gate: Arc::new(AtomicBool::new(false)),
+        };
+        let stats = Arc::new(Stats::default());
+        let (ev_tx, ev_rx) = mpsc::channel::<(Src, Ev)>();
+        let (share_tx, share_rx) = mpsc::channel::<Find>();
+        let st2 = stats.clone();
+        let t0 = Instant::now();
+        let sess = std::thread::spawn(move || session(&l, &ev_tx, &share_rx, &st2));
+        let a = match ev_rx.recv_timeout(Duration::from_secs(10)).expect("job A") {
+            (_, Ev::Job(j)) => j,
+            _ => panic!("not a job"),
+        };
+        let find = |n: u32| Find { job: a.clone(), extranonce: vec![1, 2, 3, 4, 0, 0, 0, 1], time: a.job.time_start, nonce: n, ticket: [0; 32], share: true, block: false, fee: false, found: Instant::now(), checked: Instant::now() };
+        share_tx.send(find(1)).unwrap();
+        let t = Instant::now();
+        while !a.voided() && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(a.voided(), "the pool's \"job not found\" voids the job");
+        for n in 2..5 {
+            share_tx.send(find(n)).unwrap();
+        }
+        let r = sess.join().unwrap();
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("sent no new one")), "{r:?}");
+        assert!(t0.elapsed() < Duration::from_secs(8));
+        pool.join().unwrap();
+        assert_eq!(submits.load(Ordering::SeqCst), 1, "only the first share of the dropped job went out");
+        assert_eq!(stats.rejected.load(Ordering::Relaxed), 1);
+        assert_eq!(stats.stale_drop.load(Ordering::Relaxed), 3, "the next 3 were dropped (dropped stale), not rejected");
+    }
+
+    /// A clean job voids every other job of the connection once; the end of the connection voids the rest.
+    #[test]
+    fn a_clean_job_voids_the_other_jobs_once() {
+        let mk = |id: &str| {
+            let mut j = Arc::try_unwrap(super::super::tests::njob(4, None)).ok().unwrap();
+            j.origin = Origin::Pool { job_id: id.into() };
+            Arc::new(j)
+        };
+        let (a, b, c) = (mk("a"), mk("b"), mk("c"));
+        let mut is = Issued(vec![a.clone(), b.clone()]);
+        assert_eq!(is.void_except("b"), 1);
+        assert!(a.voided() && !b.voided());
+        assert_eq!(is.void_except("b"), 0, "voided once");
+        is.0.push(c.clone());
+        drop(is);
+        assert!(b.voided() && c.voided(), "the connection's end voids its jobs");
+    }
+}
+
+#[cfg(test)]
+mod late_tests {
+    use super::*;
+
+    /// The Rig05 pattern: answers 2-34 s late in bursts: one WARNING, then quiet for 10 min; answers on time never warn.
+    #[test]
+    fn late_pool_answers_warn_once_per_ten_minutes() {
+        let mut l = LateAnswers::default();
+        let t = Instant::now();
+        for i in 0..50 {
+            assert!(l.note(t + Duration::from_secs(i), Duration::from_millis(60), 0, i).is_none());
+        }
+        assert!(l.note(t + Duration::from_secs(60), Duration::from_secs(34), 0, 51).is_none());
+        assert!(l.note(t + Duration::from_secs(61), Duration::from_secs(20), 0, 52).is_none());
+        let w = l.note(t + Duration::from_secs(62), Duration::from_secs(3), 5, 53).expect("the third late answer warns");
+        assert!(w.contains("median 20.0 s") && w.contains("stale so far 5 of 53") && w.contains("transmit queue"), "{w}");
+        for i in 0..20 {
+            assert!(l.note(t + Duration::from_secs(70 + i), Duration::from_secs(5), 5, 60).is_none(), "once per 10 min");
+        }
+        assert!(l.note(t + Duration::from_secs(700), Duration::from_secs(5), 9, 90).is_none(), "the old ones fell out of the 5 min window");
+        assert!(l.note(t + Duration::from_secs(701), Duration::from_secs(5), 9, 91).is_none());
+        assert!(l.note(t + Duration::from_secs(702), Duration::from_secs(5), 9, 92).is_some());
+    }
+}
+
+#[cfg(test)]
 mod pw_tests {
     use super::auth_password;
     #[test]
@@ -272,6 +617,32 @@ fn parse_job(j: &Value, en_size: usize) -> Result<(String, Job, u8, [u8; 32]), S
     Ok((job_id, job, u8::try_from(slot).map_err(|_| "slot too large")?, b32("weights_hash")?))
 }
 
+/// stale-share fix: the jobs a pool connection gave out (the newest 16).
+struct Issued(Vec<Arc<NJob>>);
+
+impl Issued {
+    /// a clean job: every other job of the connection is void; how many were voided now
+    fn void_except(&mut self, job_id: &str) -> usize {
+        let mut n = 0;
+        for j in &self.0 {
+            let same = matches!(&j.origin, Origin::Pool { job_id: x } if x == job_id);
+            if !same && !j.obsolete.swap(true, Ordering::SeqCst) {
+                n += 1;
+            }
+        }
+        n
+    }
+}
+
+impl Drop for Issued {
+    /// the connection ended: its jobs are void (a new connection has a new extranonce1 and new job ids)
+    fn drop(&mut self) {
+        if self.void_except("") > 0 {
+            super::jobs_voided();
+        }
+    }
+}
+
 fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats) -> std::io::Result<()> {
     let kind = l.kinds.lock().unwrap().get(l.entry).copied().unwrap_or(Kind::Auto);
     if kind == Kind::Work || kind == Kind::TryWork {
@@ -330,7 +701,16 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
     let mut rate_win = (Instant::now(), 0u32);
     let started = Instant::now();
     let mut answered = false;
+    let mut late = LateAnswers::default();
+    // stale-share fix: the jobs this connection gave out; a clean job voids the others (NJob::obsolete), so do the end of
+    // this connection
+    let mut issued = Issued(Vec::new());
+    // stale-share fix: since when the pool's "job not found" voided the newest job (no new job since)
+    let mut gone_since: Option<Instant> = None;
     loop {
+        if gone_since.is_some_and(|t| t.elapsed() > GONE_RECONNECT) {
+            return Err(err(format!("the pool dropped its newest job (\"job not found\") and sent no new one in {} s: reconnecting", GONE_RECONNECT.as_secs())));
+        }
         if kind == Kind::Auto && !answered && started.elapsed() > Duration::from_secs(6) {
             l.kinds.lock().unwrap()[l.entry] = Kind::TryWork;
             return Err(err("no answer to mining.subscribe in 6 s: the next connection tries the NEB work protocol (as Aria)"));
@@ -340,38 +720,6 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
         }
         if let Some(idle) = sil.expired() {
             return Err(crate::silence::Silence::error(idle));
-        }
-        while let Ok(f) = rx.try_recv() {
-            let Origin::Pool { job_id } = &f.job.origin else { continue };
-            if f.job.conn != conn || drain.frozen() || !valid.contains(job_id) {
-                stats.stale_drop.fetch_add(1, Ordering::Relaxed);
-                continue;
-            }
-            // F-14: at most SUBMIT_RATE submits per second (a pool target far too easy), the rest dropped and counted
-            if rate_win.0.elapsed() >= Duration::from_secs(1) {
-                rate_win = (Instant::now(), 0);
-            }
-            rate_win.1 += 1;
-            if rate_win.1 > SUBMIT_RATE && !f.block {
-                stats.skipped.fetch_add(1, Ordering::Relaxed);
-                continue;
-            }
-            let fee = f.fee;
-            let login = if fee { l.fee_login.clone().unwrap_or_else(|| l.login.clone()) } else { l.login.clone() };
-            next_id += 1;
-            let en2 = hex(&f.extranonce[f.job.en1.len()..]);
-            let line = if supr {
-                json!({"id": next_id, "method": "mining.submit", "params": [login, job_id, en2, format!("{:08x}", f.time), format!("{:08x}", f.nonce)]})
-            } else {
-                json!({"id": next_id, "method": "mining.submit", "params": [login, job_id, en2, f.time, f.nonce]})
-            };
-            pending.insert(next_id, (fee, job_id.clone(), Instant::now()));
-            let st = if fee { &**fee_stats } else { stats };
-            st.submitted.fetch_add(1, Ordering::Relaxed);
-            if f.block {
-                println!("[pool:{}] BLOCK candidate (ticket under the network target) submitted: height {} nonce {}", l.name, f.job.job.height, f.nonce);
-            }
-            c.send(format!("{line}\n").as_bytes())?;
         }
         if pending.len() > 256 {
             pending.retain(|_, (_, _, t)| t.elapsed() < Duration::from_secs(120));
@@ -390,6 +738,18 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
             Some(n) => {
                 buf.extend_from_slice(&chunk[..n]);
                 sil.rx();
+                // stale-share fix: a full chunk = more is waiting (a model + the job): read it before anything is sent
+                let mut more = n == chunk.len();
+                while more && buf.len() < 262_144 * 2 {
+                    match c.recv(&mut chunk)? {
+                        Some(0) => return Err(err("the pool closed the connection")),
+                        Some(k) => {
+                            buf.extend_from_slice(&chunk[..k]);
+                            more = k == chunk.len();
+                        }
+                        None => more = false,
+                    }
+                }
             }
             None => {}
         }
@@ -478,6 +838,9 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                         Ok((job_id, job, slot, wh)) => {
                             if job.clean {
                                 valid.clear();
+                                if issued.void_except(&job_id) > 0 {
+                                    super::jobs_voided();
+                                }
                             }
                             valid.retain(|x| x != &job_id);
                             valid.push(job_id.clone());
@@ -511,10 +874,18 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                                 received: Instant::now(),
                         ref_next: AtomicU64::new(0),
                         ref_base: super::random_base(),
+                        obsolete: AtomicBool::new(false),
                                 job,
                             };
                             l.ready.store(true, Ordering::Relaxed);
-                            let _ = tx.send((l.src, Ev::Job(Arc::new(nj))));
+                            gone_since = None;
+                            let nj = Arc::new(nj);
+                            issued.0.retain(|j| !j.voided());
+                            issued.0.push(nj.clone());
+                            if issued.0.len() > 16 {
+                                issued.0.remove(0);
+                            }
+                            let _ = tx.send((l.src, Ev::Job(nj)));
                         }
                         Err(e) => eprintln!("[pool:{}] job not understood ({e}): {}", l.name, short(line)),
                     }
@@ -587,6 +958,9 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                     } else if let Some((fee, job_id, sent)) = pending.remove(&id) {
                         let st = if fee { &**fee_stats } else { stats };
                         let who = if fee { " (dev fee)" } else { "" };
+                        if let Some(w) = late.note(Instant::now(), sent.elapsed(), st.stale_rej.load(Ordering::Relaxed), st.submitted.load(Ordering::Relaxed)) {
+                            eprintln!("[pool:{}] {w}", l.name);
+                        }
                         if ok {
                             st.accepted.fetch_add(1, Ordering::Relaxed);
                             println!("[pool:{}] share ACCEPTED{who} (job {job_id}, {} ms)", l.name, sent.elapsed().as_millis());
@@ -594,6 +968,19 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                             st.rejected.fetch_add(1, Ordering::Relaxed);
                             if etext.contains("21") || etext.to_lowercase().contains("expir") || etext.to_lowercase().contains("not found") {
                                 st.stale_rej.fetch_add(1, Ordering::Relaxed);
+                                // stale-share fix (Rig01: rejects in bursts before the pool's new job reached us): the pool has
+                                // dropped this job; it is not mined any more, its queued hits are dropped, until the next job
+                                let gone = etext.starts_with("[21,") || etext.to_lowercase().contains("job not found");
+                                if let Some(j) = issued.0.iter().filter(|_| gone).find(|j| matches!(&j.origin, Origin::Pool { job_id: x } if *x == job_id)) {
+                                    if !j.obsolete.swap(true, Ordering::SeqCst) {
+                                        let newest = issued.0.last().is_some_and(|n| Arc::ptr_eq(n, j));
+                                        println!("[pool:{}] job {job_id} is gone at the pool (\"job not found\"): not mined any more{}", l.name, if newest { ", waiting for the pool's next job" } else { "" });
+                                        if newest {
+                                            gone_since = Some(Instant::now());
+                                        }
+                                        super::jobs_voided();
+                                    }
+                                }
                             }
                             println!("[pool:{}] share REJECTED{who} (job {job_id}): {etext}", l.name);
                         }
@@ -601,6 +988,48 @@ fn session(l: &Login, tx: &Sender<(Src, Ev)>, rx: &Receiver<Find>, stats: &Stats
                     }
                 }
                 _ => eprintln!("[pool:{}] ignored: {}", l.name, short(line)),
+            }
+        }
+        // stale-share fix (Rig05): the queued shares go out AFTER what the pool sent was read: a clean job read in this
+        // pass voids the old job's shares here (dropped, "dropped stale"), never sent behind the new job
+        while let Ok(f) = rx.try_recv() {
+            let Origin::Pool { job_id } = &f.job.origin else { continue };
+            if f.job.conn != conn || drain.frozen() || !valid.contains(job_id) || f.job.voided() {
+                let st = if f.fee { &**fee_stats } else { stats };
+                st.stale_drop.fetch_add(1, Ordering::Relaxed);
+                if super::debug_timing() {
+                    println!("[timing] share job {job_id} dropped before the socket: its job was voided (found {} ms ago)", f.found.elapsed().as_millis());
+                }
+                continue;
+            }
+            // F-14: at most SUBMIT_RATE submits per second (a pool target far too easy), the rest dropped and counted
+            if rate_win.0.elapsed() >= Duration::from_secs(1) {
+                rate_win = (Instant::now(), 0);
+            }
+            rate_win.1 += 1;
+            if rate_win.1 > SUBMIT_RATE && !f.block {
+                stats.skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            let fee = f.fee;
+            let login = if fee { l.fee_login.clone().unwrap_or_else(|| l.login.clone()) } else { l.login.clone() };
+            next_id += 1;
+            let en2 = hex(&f.extranonce[f.job.en1.len()..]);
+            let line = if supr {
+                json!({"id": next_id, "method": "mining.submit", "params": [login, job_id, en2, format!("{:08x}", f.time), format!("{:08x}", f.nonce)]})
+            } else {
+                json!({"id": next_id, "method": "mining.submit", "params": [login, job_id, en2, f.time, f.nonce]})
+            };
+            pending.insert(next_id, (fee, job_id.clone(), Instant::now()));
+            let st = if fee { &**fee_stats } else { stats };
+            st.submitted.fetch_add(1, Ordering::Relaxed);
+            if f.block {
+                println!("[pool:{}] BLOCK candidate (ticket under the network target) submitted: height {} nonce {}", l.name, f.job.job.height, f.nonce);
+            }
+            c.send(format!("{line}\n").as_bytes())?;
+            if super::debug_timing() {
+                let (a, b) = (f.checked.saturating_duration_since(f.found), f.checked.elapsed());
+                println!("[timing] share job {job_id}: scan -> CPU check {} ms, check -> socket {} ms, job age {} ms", a.as_millis(), b.as_millis(), f.job.received.elapsed().as_millis());
             }
         }
         let _ = user_ok;

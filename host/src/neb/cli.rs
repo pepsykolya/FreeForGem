@@ -111,7 +111,8 @@ OPTIONS:
                          most 90, at least limit + 3)
     --no-update-check    do not look for a newer FreeForGem release (default: a GitHub check ~1 min after the start,
                          then every ~12 h; a newer one is only reported: in the log and in HiveOS next to the version)
-    --check-update       check for a newer release now, then exit
+    --debug-timing       log per share: scan -> CPU check -> socket send (ms), per job: socket -> dispatch (stale-share diagnosis)
+    --check-update      check for a newer release now, then exit
     --no-color           no colours in the log (also NO_COLOR=1 or FFG_COLOR=0; FFG_COLOR=1 forces them, e.g. through tee)
     --uv-reset           forget the saved undervolt profile of the clocks this run has (core lock / clock under load);
                          the profiles of other locks stay
@@ -407,6 +408,7 @@ pub fn main() -> Result<()> {
             "--uv-reset" => a.uv.reset = true,
             "--uv-reset-all" => a.uv.reset_all = true,
             "--no-color" => color::disable(),
+            "--debug-timing" => neb::DEBUG_TIMING.store(true, std::sync::atomic::Ordering::Relaxed),
             "--uv-offset" => a.uv.fixed = uv::PerGpu::parse(&val()?, "--uv-offset")?,
             "--uv-max" => a.uv.max_offset = uv::PerGpu::parse(&val()?, "--uv-max")?,
             "--uv-min" => a.uv.min_offset = uv::PerGpu::parse(&val()?, "--uv-min")?,

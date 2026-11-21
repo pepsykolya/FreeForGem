@@ -53,6 +53,8 @@ pub struct Snapshot {
     pub height: Option<u32>,
     pub shares: u64,
     pub rejected: u64,
+    /// 1.0.13 stale-share fix: hits of jobs the pool had voided (a clean job), dropped before the socket (not rejects)
+    pub dropped_stale: u64,
     pub blocks_sub: u64,
     pub blocks_acc: u64,
     pub bad: u64,
@@ -71,7 +73,7 @@ fn summary(s: &Snapshot) -> String {
         "mode": if s.solo { "solo" } else { "pool" }, "source": s.source, "height": s.height,
         "status": s.not_mining.as_ref().map_or("mining".to_string(), |r| format!("NOT MINING: {r}")),
         "attempts_per_s": s.rate, "attempts_per_s_avg": s.rate_avg, "avg_seconds": s.avg_secs,
-        "slot": s.slot.as_ref().map(|x| x.0), "dataset": s.slot.as_ref().map(|x| x.1.clone()), "shares": s.shares, "rejected": s.rejected,
+        "slot": s.slot.as_ref().map(|x| x.0), "dataset": s.slot.as_ref().map(|x| x.1.clone()), "shares": s.shares, "rejected": s.rejected, "dropped_stale": s.dropped_stale,
         "blocks": {"submitted": s.blocks_sub, "accepted": s.blocks_acc}, "bad_results": s.bad,
         "power_w": s.gpus.iter().filter_map(|g| g.power).sum::<f64>(),
         "warnings": warnings(s),

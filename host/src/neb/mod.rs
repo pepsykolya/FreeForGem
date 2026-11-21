@@ -67,9 +67,27 @@ pub struct NJob {
     /// re-published work (F-09); a random start so that two rigs of one node do not try the same nonces first (F-13)
     pub ref_next: AtomicU64,
     pub ref_base: u32,
+    /// stale-share fix (Rig05): the pool's clean job voided this job (or its connection ended): its hits are dropped (not
+    /// checked, not sent; the "dropped stale" counter), its running scans are cancelled, it is not mined again. Set by the
+    /// pool session the moment it reads the clean `mining.notify`, before the main loop has seen the new job.
+    pub obsolete: AtomicBool,
+}
+
+/// stale-share fix: the pool session calls this right after it voided jobs (a clean job): the running scans of voided work
+/// return at once (mine() sets it; None in tests that do not mine).
+static ON_OBSOLETE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+
+pub fn jobs_voided() {
+    let h = ON_OBSOLETE.lock().unwrap().clone();
+    if let Some(h) = h {
+        h();
+    }
 }
 
 impl NJob {
+    pub fn voided(&self) -> bool {
+        self.obsolete.load(Ordering::Relaxed)
+    }
     /// a job's lifetime from its arrival (F-03: not the rig's clock against `expiry`): expiry - time_start, 60 s .. 2 h
     pub fn expired(&self) -> bool {
         let life = self.job.expiry.saturating_sub(self.job.time_start).clamp(60, 7200);
@@ -113,6 +131,18 @@ pub struct Find {
     pub block: bool,
     /// mined for the dev-fee login
     pub fee: bool,
+    /// 1.0.13 (--debug-timing): when the scan that found it returned, and when its CPU check ended
+    pub found: Instant,
+    pub checked: Instant,
+}
+
+/// 1.0.13 (Rig05 stale shares): `--debug-timing` logs per share scan -> CPU check -> socket send, and per job socket ->
+/// dispatch to the GPUs (a share queued behind the CPU check / the engines would show here; the pool's answer delay is the
+/// ACCEPTED line's ms).
+pub static DEBUG_TIMING: AtomicBool = AtomicBool::new(false);
+
+pub fn debug_timing() -> bool {
+    DEBUG_TIMING.load(Ordering::Relaxed)
 }
 
 /// What the devices mine now: one header (job + extranonce + time) and its nonce range.
@@ -495,6 +525,153 @@ struct Shared {
     crashes: Mutex<Vec<IsoCrash>>,
     /// the wait before a failed worker opens its device again
     retry: Duration,
+    /// stale-share fix: the hits waiting for their CPU check (verifier threads: the GPU workers go on scanning, the pool
+    /// session never waits for a check); `checking` = checks running now
+    checkq: Mutex<std::collections::VecDeque<Check>>,
+    checkq_cv: std::sync::Condvar,
+    checking: AtomicU64,
+    /// hits of voided jobs dropped before their check / before the socket (user, fee): not sent, not rejects
+    dropped: [AtomicU64; 2],
+    /// tests: a slow CPU check (the Athlon of Rig05)
+    check_delay: Duration,
+}
+
+/// A hit of a GPU on its way to the CPU check.
+struct Check {
+    gs: Arc<GpuStat>,
+    w: Arc<Work>,
+    ds: usize,
+    nonce: u32,
+    found: Instant,
+}
+
+/// hits waiting for the check at most (an easy pool target: F-14 limits the submits anyway)
+const CHECKQ_MAX: usize = 4096;
+
+impl Shared {
+    #[allow(clippy::too_many_arguments)]
+    fn new(stop: Arc<AtomicBool>, finds: mpsc::Sender<Find>, file: Arc<DatasetFile>, raw: Arc<Vec<u8>>, iso: bool, open: Opener, retry: Duration, check_delay: Duration) -> Shared {
+        Shared {
+            stop,
+            cur: Mutex::new(None),
+            finds: Mutex::new(finds),
+            file,
+            raw,
+            hits: AtomicU64::new(0),
+            shares: AtomicU64::new(0),
+            blocks: AtomicU64::new(0),
+            stale: AtomicU64::new(0),
+            audits: AtomicU64::new(0),
+            easy_warned: AtomicU64::new(0),
+            verbose_mem: AtomicU64::new(0),
+            en2: AtomicU64::new(0),
+            iso,
+            open,
+            crashes: Mutex::new(Vec::new()),
+            retry,
+            checkq: Mutex::new(std::collections::VecDeque::new()),
+            checkq_cv: std::sync::Condvar::new(),
+            checking: AtomicU64::new(0),
+            dropped: [AtomicU64::new(0), AtomicU64::new(0)],
+            check_delay,
+        }
+    }
+
+    /// `n` hits of `w` dropped: its job was voided (they count as found, not as sent or rejected)
+    fn drop_voided(&self, w: &Work, n: u64, dev: i32, what: &str) {
+        self.dropped[w.fee as usize].fetch_add(n, Ordering::Relaxed);
+        if debug_timing() {
+            println!("[timing] GPU{dev}: {n} hit(s) of job height {} dropped {what}: voided by the pool's clean job {} ms ago", w.nj.job.height, w.nj.received.elapsed().as_millis());
+        }
+    }
+
+    /// a GPU's hits to the CPU check (never blocks the worker)
+    fn enqueue(&self, gs: &Arc<GpuStat>, w: &Arc<Work>, ds: usize, hits: &[(u32, [u8; 32])], found: Instant) {
+        if hits.is_empty() {
+            return;
+        }
+        self.hits.fetch_add(hits.len() as u64, Ordering::Relaxed);
+        if w.nj.voided() {
+            self.drop_voided(w, hits.len() as u64, gs.dev, "after the scan");
+            return;
+        }
+        let mut q = self.checkq.lock().unwrap();
+        for (nonce, _) in hits {
+            if q.len() >= CHECKQ_MAX {
+                if self.easy_warned.fetch_add(1, Ordering::Relaxed) % 100 == 0 {
+                    eprintln!("GPU{}: {CHECKQ_MAX} hits wait for the CPU check: the pool's target is very easy; the newest are dropped", gs.dev);
+                }
+                break;
+            }
+            q.push_back(Check { gs: gs.clone(), w: w.clone(), ds, nonce: *nonce, found });
+        }
+        drop(q);
+        self.checkq_cv.notify_all();
+    }
+
+    /// the next hit to check; None = the miner stops and nothing is queued
+    fn next_check(&self) -> Option<Check> {
+        let mut q = self.checkq.lock().unwrap();
+        loop {
+            if let Some(c) = q.pop_front() {
+                self.checking.fetch_add(1, Ordering::SeqCst);
+                return Some(c);
+            }
+            if self.stop.load(Ordering::Relaxed) {
+                return None;
+            }
+            q = self.checkq_cv.wait_timeout(q, Duration::from_millis(50)).unwrap().0;
+        }
+    }
+
+    fn run_check(&self, sc: &mut refc::Scratch, c: Check) {
+        if c.w.nj.voided() {
+            self.drop_voided(&c.w, 1, c.gs.dev, "before its CPU check");
+        } else {
+            if !self.check_delay.is_zero() {
+                std::thread::sleep(self.check_delay);
+            }
+            check_hit(self, &c.gs, sc, &c.w, &self.file.sets[c.ds], c.nonce, c.found);
+        }
+        self.checking.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// at the end of the run (the workers have stopped): the queued hits are checked here, the running checks awaited
+    fn drain_checks(&self) {
+        let mut sc = refc::Scratch::default();
+        let t = Instant::now();
+        loop {
+            let c = self.checkq.lock().unwrap().pop_front();
+            match c {
+                Some(c) => {
+                    self.checking.fetch_add(1, Ordering::SeqCst);
+                    self.run_check(&mut sc, c);
+                }
+                None if self.checking.load(Ordering::SeqCst) == 0 || t.elapsed() > Duration::from_secs(10) => return,
+                None => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+    }
+}
+
+/// A verifier thread: the CPU check of the GPUs' hits (stale-share fix: off the GPU workers and the pool session).
+fn verifier(sh: Arc<Shared>) {
+    let mut sc = refc::Scratch::default();
+    while let Some(c) = sh.next_check() {
+        sh.run_check(&mut sc, c);
+    }
+}
+
+/// verifier threads: one per CPU core, 2..4 (Rig05: an Athlon X4 840 for 5 GPUs)
+fn verifier_threads() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(2, 4)
+}
+
+fn start_verifiers(sh: &Arc<Shared>, n: usize) -> Vec<std::thread::JoinHandle<()>> {
+    (0..n).map(|i| {
+        let sh = sh.clone();
+        std::thread::Builder::new().name(format!("neb-check{i}")).spawn(move || verifier(sh)).expect("spawn the CPU check thread")
+    }).collect()
 }
 
 type Opener = Arc<dyn Fn(i32, &Arc<DatasetFile>, &[u8]) -> Result<Box<dyn gpu::Scanner>> + Send + Sync>;
@@ -535,8 +712,16 @@ const AUDIT_BATCHES: u64 = 64;
 /// hits of one batch checked on the CPU at most (F-14)
 const MAX_CHECKS: usize = 64;
 
-/// errors in a row after which a GPU is given up (its context is reopened before each retry)
+/// errors in a row after which a GPU is given up (its context is reopened before each retry): the errors that are not a
+/// device fault (a wrong model probe, ...).  1.0.13: device faults (sticky) count only at a SAFE offset (`recover::Budget`).
 const WORKER_RETRIES: u32 = 3;
+/// 1.0.13: the window of the retry budget of device faults at a safe offset
+const FAULT_WINDOW: Duration = Duration::from_secs(600);
+/// 1.0.13: a GPU that faults more than WORKER_RETRIES times within FAULT_WINDOW at its safe offset is faulty there (not lost):
+/// it pauses this long, then a new engine again (the other GPUs mine on; no reboot is asked for)
+const FAULTY_PAUSE: Duration = Duration::from_secs(600);
+/// 1.0.13: an engine that could not open a device that is gone (recover::device_gone) this many times in a row: DEAD
+const GONE_OPENS: u32 = 2;
 
 fn worker(dev: i32, sh: Arc<Shared>, gs: Arc<GpuStat>) {
     // F-16: whatever ends this thread (a panic included), the GPU is reported as stopped
@@ -551,55 +736,151 @@ fn worker(dev: i32, sh: Arc<Shared>, gs: Arc<GpuStat>) {
     }
     let _dead = Dead(&gs);
     let mut fails = 0u32;
+    let mut budget = crate::recover::Budget::new(WORKER_RETRIES, FAULT_WINDOW);
+    let mut gone = 0u32;
+    // 1.0.13: a device fault gets the safe state (NVML: fresh handle, clocks, safe offset) BEFORE the new engine; a GPU of the
+    // tests (not a PCI bus id) waits `sh.retry` only
+    let nvml_gpu = gpu::backend() != gpu::Backend::Cpu && crate::nvml::quiet::norm_bus(&gs.bus).is_some();
     loop {
         let t = Instant::now();
+        let opens0 = gs.opens.load(Ordering::Relaxed);
         match worker_loop(dev, &sh, &gs) {
             Ok(()) => return,
             Err(e) => {
                 if t.elapsed() > Duration::from_secs(600) {
                     fails = 0; // it worked for a while: a new series
                 }
-                fails += 1;
                 let text = format!("{e:#}");
+                let stopping = sh.stop.load(Ordering::Relaxed);
                 // 1.0.12 (nvml.rs): any engine error of this GPU (a CUDA error, its engine process ended / hung): no NVML call for
-                // this GPU from any thread until the driver is done with it and the new context mines (iso.rs starts it earlier,
-                // at the failed call, before the engine process is dropped)
-                if !sh.stop.load(Ordering::Relaxed) {
+                // this GPU from any thread until the driver is done with it (iso.rs starts it earlier, at the failed call)
+                if !stopping {
                     crate::nvml::gpu_fault(&gs.bus, &text);
                 }
+                let sticky = crate::faults::sticky(&text) || crate::recover::device_gone(&text);
                 // 1.0.11 (iso.rs): a CUDA fault / crash / hang in this GPU's own engine process ends only that process: this GPU
                 // restarts alone (a new engine process), the other GPUs keep mining. It is counted as a crash of this GPU (not as
                 // a wrong result): the tuner and the fault record act on it
-                let crash = sh.iso && crate::faults::sticky(&text) && !sh.stop.load(Ordering::Relaxed);
+                let crash = sh.iso && sticky && !stopping;
                 if crash {
                     gs.crashes.fetch_add(1, Ordering::Relaxed);
                     sh.crashes.lock().unwrap().push(IsoCrash { dev, pos: gs.pos, err: text.clone(), at: Instant::now() });
                 }
-                // F-07: an engine error (a wrong model probe, a CUDA error) is retried on a fresh context: the engine asks to
-                // reload the model after a compute error; a card that keeps failing is given up and goes to faults.rs
                 // (one process: an injected fault stands for a fault that ends CUDA for the process; no retry)
-                if fails > WORKER_RETRIES || sh.stop.load(Ordering::Relaxed) || (!sh.iso && text.contains("injected fault")) {
+                if stopping || (!sh.iso && text.contains("injected fault")) {
                     eprintln!("GPU{dev}: NEB worker stopped: {text}");
                     *gs.err.lock().unwrap() = Some(text);
                     return;
                 }
-                let wait = sh.retry;
-                if crash {
-                    eprintln!("GPU{dev}: {text} — only this GPU restarts: a new engine process in {:.1} s (try {fails} of {WORKER_RETRIES}); the other GPUs keep mining", wait.as_secs_f64());
-                } else {
-                    eprintln!("GPU{dev}: {text} — the GPU context is opened again in {:.0} s (try {fails} of {WORKER_RETRIES})", wait.as_secs_f64());
-                    gs.bad.fetch_add(1, Ordering::Relaxed);
-                }
-                let t = Instant::now();
-                while t.elapsed() < wait {
-                    if sh.stop.load(Ordering::Relaxed) {
+                // 1.0.13: LOST / DEAD only for a device that cannot be opened (no device, the count fails, Xid 79 ...), never
+                // for kernel faults of an engine that opened it
+                let opened = gs.opens.load(Ordering::Relaxed) > opens0;
+                if !opened && crate::recover::device_gone(&text) {
+                    gone += 1;
+                    if gone >= GONE_OPENS {
+                        eprintln!("GPU{dev}: NEB worker stopped: the device cannot be opened ({text})");
+                        *gs.err.lock().unwrap() = Some(format!("the device cannot be opened: {text}"));
                         return;
                     }
-                    std::thread::sleep(Duration::from_millis(20));
+                } else if opened {
+                    gone = 0;
+                }
+                if !sticky {
+                    // F-07: an engine error that is not a device fault (a wrong model probe ...) is retried on a fresh context;
+                    // a card that keeps failing so is given up and goes to faults.rs
+                    fails += 1;
+                    if fails > WORKER_RETRIES {
+                        eprintln!("GPU{dev}: NEB worker stopped: {text}");
+                        *gs.err.lock().unwrap() = Some(text);
+                        return;
+                    }
+                    eprintln!("GPU{dev}: {text} — the GPU context is opened again in {:.0} s (try {fails} of {WORKER_RETRIES})", sh.retry.as_secs_f64());
+                    gs.bad.fetch_add(1, Ordering::Relaxed);
+                    if wait_or_stop(&sh.stop, sh.retry) {
+                        return;
+                    }
+                    continue;
+                }
+                let what = if sh.iso { "a new engine process" } else { "a new GPU context" };
+                eprintln!("GPU{dev}: {text} — only this GPU restarts: {what} once it is safe (the driver's reset, a fresh NVML handle, its clocks and a safe offset first); the other GPUs keep mining");
+                // 1.0.13: the safe state BEFORE the new engine (recover.rs)
+                let lowered = if nvml_gpu {
+                    let plan = crate::recover::plan_for(&gs.bus);
+                    let hw = crate::recover::NvmlGpu { bus: gs.bus.clone(), stop: &sh.stop };
+                    let st = crate::recover::recover_after_fault(&hw, &plan, &crate::recover::Opts::default(), &mut |l| println!("GPU{dev}: {l}"));
+                    match st {
+                        crate::recover::SafeState::Stopped => return,
+                        crate::recover::SafeState::Lost(why) => {
+                            eprintln!("GPU{dev}: NEB worker stopped: {why}");
+                            *gs.err.lock().unwrap() = Some(format!("the device cannot be reached: {why}"));
+                            return;
+                        }
+                        crate::recover::SafeState::Ready { offset, lowered, waited, .. } => {
+                            if lowered {
+                                if let Some(o) = offset {
+                                    crate::offset::set_cap(&gs.bus, o);
+                                }
+                            }
+                            println!("GPU{dev}: safe to start {what} after {:.0} s: {}", waited.as_secs_f64(), ready_text(offset, lowered, &plan));
+                            lowered
+                        }
+                    }
+                } else {
+                    if wait_or_stop(&sh.stop, sh.retry) {
+                        return;
+                    }
+                    false
+                };
+                match budget.note(Instant::now(), lowered) {
+                    crate::recover::Verdict::Retry { counted: false, .. } => {
+                        println!("GPU{dev}: the fault was above its safe offset (a tuning failure): it does not count against this GPU");
+                    }
+                    crate::recover::Verdict::Retry { counted: true, n } => {
+                        println!("GPU{dev}: fault {n} of {} allowed within {} min at its safe offset", budget.tries(), FAULT_WINDOW.as_secs() / 60);
+                    }
+                    crate::recover::Verdict::Exhausted { n } => {
+                        let why = format!("{n} faults within {} min at its safe offset", FAULT_WINDOW.as_secs() / 60);
+                        eprintln!(
+                            "WARNING GPU{dev} (bus {}): FAULTY: {why} (the device itself opens: not lost, no reboot needed): this GPU pauses {} min, then a new engine; check its clocks / power / riser",
+                            crate::uv::short_bus(&gs.bus),
+                            FAULTY_PAUSE.as_secs() / 60
+                        );
+                        *gs.idle_reason.lock().unwrap() = Some(format!("FAULTY: {why}; paused {} min", FAULTY_PAUSE.as_secs() / 60));
+                        if wait_or_stop(&sh.stop, FAULTY_PAUSE) {
+                            return;
+                        }
+                        gs.idle_reason.lock().unwrap().take();
+                        budget.clear();
+                    }
                 }
             }
         }
     }
+}
+
+/// 1.0.13: the log text of a GPU's safe state before its new engine.
+fn ready_text(offset: Option<i32>, lowered: bool, plan: &crate::recover::Plan) -> String {
+    match (offset, plan.crashed) {
+        (Some(o), Some(c)) if lowered => format!(
+            "offset {c:+} -> {o:+} ({} steps below the fault, not above the last confirmed {}), set and read back",
+            crate::recover::BACK_STEPS,
+            plan.confirmed.map_or("-".into(), |k| format!("{k:+}"))
+        ),
+        (Some(o), _) => format!("offset {o:+} (its safe one), read back"),
+        _ => "its offset is not changed by this run".into(),
+    }
+}
+
+/// Sleeps `d` in short slices; true = the miner stops.
+fn wait_or_stop(stop: &AtomicBool, d: Duration) -> bool {
+    let t = Instant::now();
+    while t.elapsed() < d {
+        if stop.load(Ordering::Relaxed) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    stop.load(Ordering::Relaxed)
 }
 
 /// FFGN 1.0.5: every GPU stops making attempts in the same few seconds while there is work and none is paused: one line
@@ -774,7 +1055,7 @@ fn kep1_names(s: &str) -> String {
     o.split(';').map(|p| p.split(" |").next().unwrap_or("").trim()).collect::<Vec<_>>().join("; ")
 }
 
-fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
+fn worker_loop(dev: i32, sh: &Shared, gs: &Arc<GpuStat>) -> Result<()> {
     let pos = gs.pos;
     let mut last_scan_end = Instant::now();
     let mut gap_from: Option<Instant> = None;
@@ -839,6 +1120,12 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
             std::thread::sleep(Duration::from_millis(20));
             continue;
         };
+        // stale-share fix: the pool voided this job (its clean job is on its way to the main loop): no scan of it, the
+        // new work comes within milliseconds
+        if w.nj.voided() {
+            std::thread::sleep(Duration::from_millis(2));
+            continue;
+        }
         // 1.0.2: the job's slot must hold a dataset of the job's network (the network follows the dataset, not the slot number:
         // NEB 1.0.1 main network = KEP1 in both slots); a job this file cannot mine is reported loudly, never waited on in silence
         let ds = match refc::resolve_dataset(&sh.file.sets, w.nj.slot, w.nj.model.arch) {
@@ -891,6 +1178,9 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
             let t = Instant::now();
             s.set_model(ds, &w.nj.model)?;
             loaded[ds] = Some(w.nj.model.hash);
+            if debug_timing() {
+                println!("[timing] GPU{dev} job height {}: socket -> model in the engine {} ms (its upload + table {} ms)", w.nj.job.height, w.nj.received.elapsed().as_millis(), t.elapsed().as_millis());
+            }
             // the model on the device: exact tickets of a few keys vs the reference
             let keys: Vec<[u8; 32]> = (0..MODEL_PROBES as u32).map(|i| key_of(&w.header, i.wrapping_mul(0x9e37_79b9))).collect();
             if let Some(dt) = s.eval_keys(ds, &keys)? {
@@ -1016,9 +1306,9 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
                 proto::expected(&w.bound)
             );
         }
-        for (nonce, _dev_ticket) in &out.hits[..take] {
-            check_hit(sh, gs, &mut sc, &w, set, *nonce);
-        }
+        // stale-share fix: the CPU check runs on the verifier threads; this GPU scans on at once (a hit of a job the pool
+        // voided meanwhile is dropped there, or here when it is already voided)
+        sh.enqueue(gs, &w, ds, &out.hits[..take], last_scan_end);
         if batches % AUDIT_BATCHES == 0 {
             rng ^= rng << 13;
             rng ^= rng >> 7;
@@ -1051,8 +1341,7 @@ fn worker_loop(dev: i32, sh: &Shared, gs: &GpuStat) -> Result<()> {
     }
 }
 
-fn check_hit(sh: &Shared, gs: &GpuStat, sc: &mut refc::Scratch, w: &Arc<Work>, set: &refc::Dataset, nonce: u32) {
-    sh.hits.fetch_add(1, Ordering::Relaxed);
+fn check_hit(sh: &Shared, gs: &GpuStat, sc: &mut refc::Scratch, w: &Arc<Work>, set: &refc::Dataset, nonce: u32, found: Instant) {
     let t = match refc::ticket_of(sc, &w.nj.model, set, &w.header, nonce) {
         Ok(t) => t,
         Err(e) => {
@@ -1066,6 +1355,11 @@ fn check_hit(sh: &Shared, gs: &GpuStat, sc: &mut refc::Scratch, w: &Arc<Work>, s
         return;
     }
     gs.checked.fetch_add(1, Ordering::Relaxed);
+    // stale-share fix: the job was voided during the check (a slow CPU): not sent
+    if w.nj.voided() {
+        sh.drop_voided(w, 1, gs.dev, "after its CPU check");
+        return;
+    }
     // off the reference header (an ffgn gate's block-only work) a ticket is a solution or nothing: a Share frame of the node
     // can only name a nonce of the reference header
     let share = admits(&w.nj.job.share_target, &t) && (w.reference || w.nj.nonce_range.is_none());
@@ -1081,7 +1375,7 @@ fn check_hit(sh: &Shared, gs: &GpuStat, sc: &mut refc::Scratch, w: &Arc<Work>, s
         sh.blocks.fetch_add(1, Ordering::Relaxed);
         println!("GPU{}: BLOCK FOUND height {} nonce {nonce} ticket …{} — submitting", gs.dev, w.nj.job.height, &hex(&t)[40..]);
     }
-    let _ = sh.finds.lock().unwrap().send(Find { job: w.nj.clone(), extranonce: w.extranonce.clone(), time: w.time, nonce, ticket: t, share, block, fee: w.fee });
+    let _ = sh.finds.lock().unwrap().send(Find { job: w.nj.clone(), extranonce: w.extranonce.clone(), time: w.time, nonce, ticket: t, share, block, fee: w.fee, found, checked: Instant::now() });
 }
 
 /// 1.0.10: what a GPU mines now, for the tuner (auto-uv pairs power samples only under the same load): FNV-1a of the dataset
@@ -1407,25 +1701,30 @@ pub fn mine(o: Opts) -> Result<()> {
     }
 
     let (find_tx, find_rx) = mpsc::channel::<Find>();
-    let sh = Arc::new(Shared {
-        stop: stop.clone(),
-        cur: Mutex::new(None),
-        finds: Mutex::new(find_tx),
-        file: file.clone(),
-        raw: raw.clone(),
-        hits: AtomicU64::new(0),
-        shares: AtomicU64::new(0),
-        blocks: AtomicU64::new(0),
-        stale: AtomicU64::new(0),
-        audits: AtomicU64::new(0),
-        easy_warned: AtomicU64::new(0),
-        verbose_mem: AtomicU64::new(0),
-        en2: AtomicU64::new(0),
-        iso,
-        open: if iso { Arc::new(iso::open) } else { Arc::new(gpu::open) },
-        crashes: Mutex::new(Vec::new()),
-        retry: retry_wait(iso),
-    });
+    let open: Opener = if iso { Arc::new(iso::open) } else { Arc::new(gpu::open) };
+    let sh = Arc::new(Shared::new(stop.clone(), find_tx, file.clone(), raw.clone(), iso, open, retry_wait(iso), Duration::ZERO));
+    // stale-share fix (Rig05): the CPU check of the hits on threads of its own, the checked shares straight to their pool
+    // session (not through the main loop's tick): neither the GPUs nor the pool's socket wait for a check
+    let nver = verifier_threads();
+    let verifiers = start_verifiers(&sh, nver);
+    println!("CPU check: {nver} threads (the GPUs and the pool connection never wait for it; a hit of a job the pool voided is dropped, not sent)");
+    let find_rx = Arc::new(Mutex::new(find_rx));
+    let router_stop = Arc::new(AtomicBool::new(false));
+    let router = {
+        let (rx, rs, u, f) = (find_rx.clone(), router_stop.clone(), user_tx.clone(), fee_txs.clone());
+        std::thread::Builder::new()
+            .name("neb-route".into())
+            .spawn(move || {
+                let rx = rx.lock().unwrap();
+                while !rs.load(Ordering::Relaxed) {
+                    match rx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(x) => route(x, &u, &f),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            })?
+    };
     let watch = if cuda { crate::faults::Watch::new(&devices.iter().enumerate().map(|(p, &d)| (d, buses[p].clone(), gpu::device_name(d))).collect::<Vec<_>>()) } else { None };
     let mut gstats = Vec::new();
     let mut handles = Vec::new();
@@ -1485,6 +1784,21 @@ pub fn mine(o: Opts) -> Result<()> {
     let nvml = if cuda { crate::nvml::Nvml::load().ok() } else { None };
     let power: Option<(&crate::nvml::Nvml, Vec<Option<crate::nvml::Dev>>)> = nvml.as_ref().map(|n| (n, buses.iter().map(|b| n.by_bus(b).ok()).collect()));
     let api = o.api.as_ref().map(|a| api::start(a));
+    // stale-share fix: a clean job read by a pool session cancels the running scans of the work it voided at once (the
+    // main loop publishes the new work a moment later)
+    {
+        let (sh2, g2) = (sh.clone(), gstats.clone());
+        *ON_OBSOLETE.lock().unwrap() = Some(Arc::new(move || {
+            if sh2.cur.lock().unwrap().as_ref().is_some_and(|w| w.nj.voided()) {
+                for g in &g2 {
+                    if let Some(c) = g.ctx.lock().unwrap().as_ref() {
+                        c();
+                    }
+                }
+            }
+        }));
+    }
+    let mut ev_buf: Vec<(Src, Ev)> = Vec::new();
 
     let (start, deadline) = (Instant::now(), o.minutes.map(|m| Duration::from_secs_f64(m * 60.0)));
     let mut ujob: Option<Arc<NJob>> = None;
@@ -1583,9 +1897,13 @@ pub fn mine(o: Opts) -> Result<()> {
         if let Some(l) = crate::status::summary_due() {
             println!("{l}");
         }
-        for (src, ev) in ev_rx.try_iter() {
+        let evs: Vec<(Src, Ev)> = ev_buf.drain(..).chain(ev_rx.try_iter()).collect();
+        for (src, ev) in evs {
             match (src, ev) {
                 (Src::User, Ev::Job(j)) => {
+                    if debug_timing() {
+                        println!("[timing] job height {}: socket -> main loop {} ms", j.job.height, j.received.elapsed().as_millis());
+                    }
                     if ujob.is_none() && last_parent == Some(j.job.parent) {
                         println!("job again (height {}): mining resumed", j.job.height);
                     }
@@ -1673,18 +1991,17 @@ pub fn mine(o: Opts) -> Result<()> {
             }
             fee_active = df.active();
         }
-        // route checked nonces to their source
-        for f in find_rx.try_iter() {
-            route(f, &user_tx, &fee_txs);
-        }
+        // (the checked nonces go to their source on the router thread)
         let paused = im == crate::idle::Mode::Pause;
+        // stale-share fix: a job its pool voided (a clean job read, not here yet) is not mined
         let want: Option<(Arc<NJob>, bool)> = if paused {
             None
         } else if fee_active {
             if separate { fjob.clone().map(|j| (j, false)) } else { ujob.clone().map(|j| (j, true)) }
         } else {
             ujob.clone().map(|j| (j, false))
-        };
+        }
+        .filter(|(j, _)| !j.voided());
         let key = want.as_ref().map(|(j, f)| (Arc::as_ptr(j) as usize, *f));
         let exhausted = sh.cur.lock().unwrap().as_ref().is_some_and(|w| w.exhausted());
         if key != published || (exhausted && want.as_ref().is_some_and(|(j, _)| j.en2_size > 0)) {
@@ -1693,6 +2010,11 @@ pub fn mine(o: Opts) -> Result<()> {
             let en2 = sh.en2.fetch_add(1, Ordering::Relaxed) + 1;
             let new_job = key != published;
             published = key;
+            if new_job && debug_timing() {
+                if let Some((j, f)) = &want {
+                    println!("[timing] job height {}{}: socket -> dispatched to the GPUs {} ms", j.job.height, if *f { " (dev fee)" } else { "" }, j.received.elapsed().as_millis());
+                }
+            }
             *sh.cur.lock().unwrap() = want.map(|(j, f)| Arc::new(Work::new(j, f, en2)));
             if new_job {
                 // a running scan of the old work returns at once (its nonces up to there are still checked and sent)
@@ -1812,7 +2134,20 @@ pub fn mine(o: Opts) -> Result<()> {
             let src_part = if solo {
                 format!("shares {} | blocks sub {} acc {} rej {} | fee sub {} acc {} rej {}", ld(&ns.shares_sent), ld(&stats.submitted), ld(&stats.accepted), ld(&stats.rejected), ld(&fee_stats.submitted), ld(&fee_stats.accepted), ld(&fee_stats.rejected))
             } else {
-                format!("user sub {} acc {} rej {} (stale {}) | fee sub {} acc {} rej {}", ld(&stats.submitted), ld(&stats.accepted), ld(&stats.rejected), ld(&stats.stale_rej), ld(&fee_stats.submitted), ld(&fee_stats.accepted), ld(&fee_stats.rejected))
+                // stale-share fix: "dropped stale" = hits of jobs the pool had voided, never sent (not rejects)
+                let fd = ld(&fee_stats.stale_drop) + ld(&sh.dropped[1]);
+                format!(
+                    "user sub {} acc {} rej {} (stale {}) dropped stale {} | fee sub {} acc {} rej {}{}",
+                    ld(&stats.submitted),
+                    ld(&stats.accepted),
+                    ld(&stats.rejected),
+                    ld(&stats.stale_rej),
+                    ld(&stats.stale_drop) + ld(&sh.dropped[0]),
+                    ld(&fee_stats.submitted),
+                    ld(&fee_stats.accepted),
+                    ld(&fee_stats.rejected),
+                    if fd > 0 { format!(" dropped stale {fd}") } else { String::new() }
+                )
             };
             if !solo {
                 // accepted-shares watchdog of the user's pool session (--noshare-minutes / --reject-minutes, failover.rs)
@@ -1896,6 +2231,7 @@ pub fn mine(o: Opts) -> Result<()> {
                         height: ujob.as_ref().map(|j| j.job.height),
                         shares: if solo { ld(&ns.shares_sent) } else { ld(&stats.accepted) },
                         rejected: ld(&stats.rejected),
+                        dropped_stale: ld(&stats.stale_drop) + ld(&sh.dropped[0]),
                         // D-019: in pool mode the session counters are shares; blocks = solutions this miner found
                         blocks_sub: if solo { ld(&stats.submitted) } else { ld(&sh.blocks) },
                         blocks_acc: if solo { ld(&stats.accepted) } else { 0 },
@@ -1906,7 +2242,12 @@ pub fn mine(o: Opts) -> Result<()> {
             }
             win = Instant::now();
         }
-        std::thread::sleep(Duration::from_millis(20));
+        // stale-share fix: a new job wakes the loop at once (it was a fixed 20 ms sleep)
+        match ev_rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(e) => ev_buf.push(e),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(Duration::from_millis(20)),
+        }
     }
     stop.store(true, Ordering::SeqCst);
     crate::offset::restore_all();
@@ -1914,9 +2255,16 @@ pub fn mine(o: Opts) -> Result<()> {
     for h in handles {
         let _ = h.join();
     }
-    // the last nonces of the workers go out before the sessions close
+    *ON_OBSOLETE.lock().unwrap() = None;
+    // the last nonces of the workers are checked and go out before the sessions close
+    for h in verifiers {
+        let _ = h.join();
+    }
+    sh.drain_checks();
+    router_stop.store(true, Ordering::SeqCst);
+    let _ = router.join();
     let mut last = 0;
-    for f in find_rx.try_iter() {
+    for f in find_rx.lock().unwrap().try_iter() {
         last += 1;
         route(f, &user_tx, &fee_txs);
     }
@@ -2008,7 +2356,7 @@ fn route(f: Find, user: &mpsc::Sender<Find>, fee: &[mpsc::Sender<Find>]) {
         Src::Fee => {
             let f = Arc::new(f);
             for t in fee {
-                let _ = t.send(Find { job: f.job.clone(), extranonce: f.extranonce.clone(), time: f.time, nonce: f.nonce, ticket: f.ticket, share: f.share, block: f.block, fee: f.fee });
+                let _ = t.send(Find { job: f.job.clone(), extranonce: f.extranonce.clone(), time: f.time, nonce: f.nonce, ticket: f.ticket, share: f.share, block: f.block, fee: f.fee, found: f.found, checked: f.checked });
             }
         }
     }
@@ -2133,7 +2481,7 @@ mod tests {
         }
     }
 
-    fn test_gpu(dev: i32, pos: usize) -> Arc<GpuStat> {
+    pub(super) fn test_gpu(dev: i32, pos: usize) -> Arc<GpuStat> {
         Arc::new(GpuStat {
             dev,
             name: "CPU reference thread".into(),
@@ -2178,25 +2526,8 @@ mod tests {
             Ok(Box::new(Dying { inner, left: (dev == 0 && first).then_some(3) }) as Box<dyn gpu::Scanner>)
         });
         let (find_tx, find_rx) = mpsc::channel::<Find>();
-        let sh = Arc::new(Shared {
-            stop: Arc::new(AtomicBool::new(false)),
-            cur: Mutex::new(None),
-            finds: Mutex::new(find_tx),
-            file: file.clone(),
-            raw: Arc::new(Vec::new()),
-            hits: AtomicU64::new(0),
-            shares: AtomicU64::new(0),
-            blocks: AtomicU64::new(0),
-            stale: AtomicU64::new(0),
-            audits: AtomicU64::new(0),
-            easy_warned: AtomicU64::new(0),
-            verbose_mem: AtomicU64::new(0),
-            en2: AtomicU64::new(0),
-            iso: true,
-            open,
-            crashes: Mutex::new(Vec::new()),
-            retry: Duration::from_millis(200),
-        });
+        let sh = Arc::new(Shared::new(Arc::new(AtomicBool::new(false)), find_tx, file.clone(), Arc::new(Vec::new()), true, open, Duration::from_millis(200), Duration::ZERO));
+        let vs = start_verifiers(&sh, 2);
         let mut share = [0xffu8; 32];
         share[31] = 0x7f; // about half of the nonces are shares
         let job = proto::Job {
@@ -2218,7 +2549,7 @@ mod tests {
             height: 7,
             expiry: now_unix() + 600,
         };
-        let nj = Arc::new(NJob { src: Src::User, origin: Origin::Pool { job_id: "1".into() }, job, slot: 0, model: Arc::new(m), pool_target: Some(share), en1: vec![], en2_size: 4, nonce_range: None, conn: 1, received: Instant::now(), ref_next: AtomicU64::new(0), ref_base: 0 });
+        let nj = Arc::new(NJob { src: Src::User, origin: Origin::Pool { job_id: "1".into() }, job, slot: 0, model: Arc::new(m), pool_target: Some(share), en1: vec![], en2_size: 4, nonce_range: None, conn: 1, received: Instant::now(), ref_next: AtomicU64::new(0), ref_base: 0, obsolete: AtomicBool::new(false) });
         *sh.cur.lock().unwrap() = Some(Arc::new(Work::new(nj, false, 1)));
         let gs = [test_gpu(0, 0), test_gpu(1, 1)];
         let hs: Vec<_> = gs
@@ -2249,6 +2580,10 @@ mod tests {
         for h in hs {
             h.join().unwrap();
         }
+        for h in vs {
+            h.join().unwrap();
+        }
+        sh.drain_checks();
         assert_eq!(gs[0].crashes.load(Ordering::Relaxed), 1, "one crash of GPU0's engine process");
         assert_eq!(gs[1].crashes.load(Ordering::Relaxed), 0);
         assert_eq!(gs[0].opens.load(Ordering::Relaxed), 2, "GPU0 restarted once");
@@ -2277,6 +2612,65 @@ mod tests {
         }
     }
 
+    /// stale-share fix: a GPU scans on while its hits wait for a slow CPU check (the checks are not on its thread); once
+    /// the pool voids the job, its queued hits are dropped (counted), not one more share of it is sent, and the GPU does not
+    /// scan the voided work.
+    #[test]
+    fn a_slow_cpu_check_does_not_hold_the_gpu_and_a_voided_job_sends_nothing_more() {
+        gpu::load(Some(gpu::Backend::Cpu), 1).unwrap();
+        let (set, m) = refc::synthetic(refc::Arch::Kep1).unwrap();
+        let file = Arc::new(DatasetFile { hash: [0; 32], bytes: Arc::new(Vec::new()), network: "test", sets: vec![Arc::new(set)] });
+        let open: Opener = Arc::new(|dev, f: &Arc<DatasetFile>, _raw: &[u8]| iso::open_thread(dev, f));
+        let (find_tx, find_rx) = mpsc::channel::<Find>();
+        let sh = Arc::new(Shared::new(Arc::new(AtomicBool::new(false)), find_tx, file, Arc::new(Vec::new()), true, open, Duration::from_millis(200), Duration::from_millis(40)));
+        let vs = start_verifiers(&sh, 2);
+        let mut share = [0xffu8; 32];
+        share[31] = 0x7f;
+        let mut nj = Arc::try_unwrap(njob(4, None)).ok().unwrap();
+        nj.origin = Origin::Pool { job_id: "a".into() };
+        nj.model = Arc::new(m);
+        nj.pool_target = Some(share);
+        nj.job.share_target = share;
+        nj.job.target = [0; 32];
+        let nj = Arc::new(nj);
+        *sh.cur.lock().unwrap() = Some(Arc::new(Work::new(nj.clone(), false, 1)));
+        let g = test_gpu(0, 0);
+        let h = {
+            let (sh, g) = (sh.clone(), g.clone());
+            std::thread::spawn(move || worker(g.dev, sh, g))
+        };
+        let t = Instant::now();
+        while sh.hits.load(Ordering::Relaxed) < 60 && t.elapsed() < Duration::from_secs(30) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (found, checked) = (sh.hits.load(Ordering::Relaxed), g.checked.load(Ordering::Relaxed));
+        assert!(found >= 60 && found > 2 * checked + 10, "the GPU waited for its checks: found {found}, checked {checked}");
+        // the pool's clean job: job "a" is void
+        nj.obsolete.store(true, Ordering::SeqCst);
+        // the checks and the scan running at that moment end (the CPU engine of the tests has no cancel; a scan <= ~1 s)
+        std::thread::sleep(Duration::from_millis(1200));
+        let before: usize = find_rx.try_iter().count();
+        let scanned = g.screened.load(Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(400));
+        let after: usize = find_rx.try_iter().count();
+        assert_eq!(after, 0, "shares of the voided job were sent after it was voided");
+        assert!(sh.checkq.lock().unwrap().is_empty(), "the voided backlog was dropped, not checked");
+        assert_eq!(g.screened.load(Ordering::Relaxed), scanned, "the GPU scanned the voided work");
+        let dropped = sh.dropped[0].load(Ordering::Relaxed);
+        assert!(dropped > 0);
+        sh.stop.store(true, Ordering::SeqCst);
+        h.join().unwrap();
+        for v in vs {
+            v.join().unwrap();
+        }
+        sh.drain_checks();
+        // accounting: every hit is a sent share or a dropped one; every share sent passed the check; nothing bad
+        let found = sh.hits.load(Ordering::Relaxed);
+        assert_eq!(before as u64 + sh.dropped[0].load(Ordering::Relaxed), found, "found {found} = sent {before} + dropped {dropped}");
+        assert_eq!(sh.shares.load(Ordering::Relaxed), before as u64);
+        assert_eq!(g.bad.load(Ordering::Relaxed), 0);
+    }
+
     #[test]
     fn the_stall_line_in_one_process_per_gpu_is_not_one_gpus_fault() {
         let c = stall_cause(12, 12, true);
@@ -2295,7 +2689,7 @@ mod tests {
         assert_eq!(kep1_names("dp4a (CC 7.5: no int8 mma)"), "dp4a");
     }
 
-    fn njob(en2_size: usize, range: Option<(u32, u64)>) -> Arc<NJob> {
+    pub(super) fn njob(en2_size: usize, range: Option<(u32, u64)>) -> Arc<NJob> {
         let packed = vec![0u8; refc::Arch::Kep1.packed_bytes()];
         let model = Arc::new(Model::from_packed(&packed, &refc::weights_hash(&packed)).unwrap());
         Arc::new(NJob {
@@ -2330,6 +2724,7 @@ mod tests {
             received: Instant::now(),
             ref_next: AtomicU64::new(0),
             ref_base: random_base(),
+            obsolete: AtomicBool::new(false),
         })
     }
 

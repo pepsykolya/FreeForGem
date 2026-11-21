@@ -1059,6 +1059,9 @@ struct Card {
     stable_cur: AtomicI32,
     stable_since: AtomicU64,
     stable_saved: AtomicBool,
+    /// 1.0.13 (recover.rs): while a check window runs on the card, its last confirmed offset (the window's reference / the
+    /// offset before it), i32::MIN = no window: a fault in the window restarts the card at most there
+    win_ref: AtomicI32,
 }
 
 impl Card {
@@ -1259,6 +1262,15 @@ impl Live {
             return Res { infra: true, reason: format!("{why}: no verdict on {}", signed(at)), ..Default::default() };
         }
         let faults = crate::nvml::quiet::faults(&c.r.bus);
+        // 1.0.13 (recover.rs): the confirmed offset while this window runs (a fault in it restarts the card at most there)
+        struct Win<'a>(&'a AtomicI32);
+        impl Drop for Win<'_> {
+            fn drop(&mut self) {
+                self.0.store(i32::MIN, Ordering::Relaxed);
+            }
+        }
+        c.win_ref.store(reference.unwrap_or_else(|| c.cur.load(Ordering::Relaxed).min(at)), Ordering::Relaxed);
+        let _win = Win(&c.win_ref);
         let mut r = if c.mining.load(Ordering::Relaxed) { self.check_mining(c, at, secs, reference) } else { self.check_child(c, at, secs, refs) };
         // a fault of this GPU during the check that the check itself did not see (its NVML readings stopped): no verdict
         if r.ok && crate::nvml::quiet::faults(&c.r.bus) != faults {
@@ -2496,7 +2508,7 @@ struct CardProbe<'a> {
 impl uvmine::Probe for CardProbe<'_> {
     fn set_offset(&mut self, at: i32) -> Result<(), String> {
         offset::set(&self.c.r.bus, at).map_err(|e| format!("{e:#}"))?;
-        self.c.cur.store(at, Ordering::Relaxed);
+        self.c.cur.store(offset::capped(&self.c.r.bus, at), Ordering::Relaxed);
         Ok(())
     }
     fn sample(&mut self) -> uvmine::Sample {
@@ -2586,6 +2598,7 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
             rec_t: AtomicU64::new(0),
             cap_src,
             stable_cur: AtomicI32::new(i32::MIN),
+            win_ref: AtomicI32::new(i32::MIN),
             stable_since: AtomicU64::new(0),
             stable_saved: AtomicBool::new(false),
             r,
@@ -2612,6 +2625,7 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
     let rig = guard.start(uv::now(), env!("CARGO_PKG_VERSION"));
     guard.save(dir);
     let live = Arc::new(Live { nv, db, p: Params::from(o), driver: nv.driver_version(), cards: v, stop: stop.clone(), guard: Mutex::new(guard), rig_deadline: uv::now() + RIG_BUDGET_SECS });
+    register_recovery(&live);
     if rig == RigStart::Paused {
         // mining at the results of this version that are saved and complete, else at the GPU's own offset
         warn(format!("PAUSED on this rig: the miner ended during a tuning {RIG_EVENTS} times within an hour (restarts or reboots); mining goes on with the saved results, nothing is tuned until --uv-unpause / --uv-reset-all or a new version"));
@@ -2979,6 +2993,49 @@ pub fn fault_offset(live: &Live, dev: i32) -> Option<i32> {
     (t > 0 && uv::now().saturating_sub(t) <= RECOVER_MAX as u64 + 60).then(|| c.fault_at.load(Ordering::Relaxed))
 }
 
+/// 1.0.13 (recover.rs): the tuner of this run, for `recovery_hint` (weak: the tuner's own drop restores the offsets).
+static LIVE: Mutex<Option<std::sync::Weak<Live>>> = Mutex::new(None);
+
+pub fn register_recovery(live: &Arc<Live>) {
+    *LIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::downgrade(live));
+    crate::recover::set_hints(recovery_hint);
+}
+
+/// 1.0.13 (recover.rs): the last confirmed offset of the card on `bus` (in a check window: the window's reference), its base
+/// and the step.  None: the tuner does not own the card's offset (left to the owner / someone else: never lowered).
+pub fn recovery_hint(bus: &str) -> Option<crate::recover::Hint> {
+    let l = LIVE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()?.upgrade()?;
+    let c = l.cards.iter().find(|c| crate::nvml::quiet::same_bus(&c.r.bus, bus))?;
+    hint_of(c.win_ref.load(Ordering::Relaxed), c.owned.load(Ordering::Relaxed), c.busy.load(Ordering::Relaxed), c.cur.load(Ordering::Relaxed), c.base.load(Ordering::Relaxed), l.p.step)
+}
+
+/// 1.0.13: the hint from the card's state: a check window open (its reference), or the tuner holds the card (owned, or busy:
+/// its tuning turn, also between a failed step and its RESULT; Rig02 live: GPU2 faulted twice more at the resumed +330 and
+/// 1.0.13 first kept +330 there, as the card was not "owned" yet) -> its offset; else None (never lowered).
+fn hint_of(win: i32, owned: bool, busy: bool, cur: i32, base: i32, step: i32) -> Option<crate::recover::Hint> {
+    if win == i32::MIN && !owned && !busy {
+        return None;
+    }
+    Some(crate::recover::Hint { confirmed: if win != i32::MIN { win } else { cur }, base, step })
+}
+
+#[cfg(test)]
+mod recovery_hint_tests {
+    use super::*;
+    use crate::recover::{Plan, safe_offset};
+
+    #[test]
+    fn a_new_fault_at_the_resumed_offset_steps_two_more_while_the_tuner_holds_the_card() {
+        // Rig02 GPU2: +390 faulted -> +330; then faults at +330 while the tuning turn goes on (busy, not owned, no window)
+        let h = hint_of(i32::MIN, false, true, 330, 210, 15).expect("the tuner holds the card");
+        assert_eq!(safe_offset(&Plan { crashed: Some(330), confirmed: Some(h.confirmed), base: h.base, step: h.step }), Some(300));
+        // in a window: its reference
+        assert_eq!(hint_of(330, false, true, 390, 210, 15).unwrap().confirmed, 330);
+        // left by the tuner (someone else's offset): never lowered
+        assert_eq!(hint_of(i32::MIN, false, false, 330, 210, 15), None);
+    }
+}
+
 pub fn expected_offset(live: &Live, dev: i32) -> Option<i32> {
     live.cards.iter().find(|c| c.r.dev == dev).map(|c| c.cur.load(Ordering::Relaxed))
 }
@@ -3004,6 +3061,13 @@ pub fn tick(live: &Arc<Live>) {
             c.next_readback.store(t + 30, Ordering::Relaxed);
             if let Some(v) = offset::current(&c.r.bus) {
                 let want = c.cur.load(Ordering::Relaxed);
+                // 1.0.13 (recover.rs): the card restarted after a fault at a safe offset below what the tuner had: that one is
+                // the card's offset now (not a change by someone else)
+                if v != want && offset::cap(&c.r.bus) == Some(v) && v < want {
+                    lg(format!("{} mines at {} after its fault (the safe offset its new engine started at; {} failed - {} steps)", c.label(), signed(v), signed(want), crate::recover::BACK_STEPS));
+                    c.cur.store(v, Ordering::Relaxed);
+                    continue;
+                }
                 if v != want {
                     crate::faults::note_foreign_change(&c.r.bus);
                     match crate::hiveoc::reset_kind(live.nv, c.nv, v, c.orig) {

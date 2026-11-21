@@ -474,7 +474,7 @@ fn session_loop(sh: &Arc<Shared>, mut s: TcpStream, id: u64, stop: &AtomicBool, 
                     sh.blocks.fetch_add(1, Ordering::Relaxed);
                     println!("gate: BLOCK from {worker}: height {} nonce {nonce}{}", j.job.height, if reference { "" } else { " (off the reference header)" });
                 }
-                let _ = sh.find_tx.lock().unwrap().send(Find { job: j.clone(), extranonce: en2, time, nonce, ticket: t, share: reference, block, fee: false });
+                let _ = sh.find_tx.lock().unwrap().send(Find { job: j.clone(), extranonce: en2, time, nonce, ticket: t, share: reference, block, fee: false, found: std::time::Instant::now(), checked: std::time::Instant::now() });
                 reply(out, &rid, true, 0, "");
             }
             "mining.extranonce.subscribe" | "mining.hashrate" => reply(out, &rid, true, 0, ""),

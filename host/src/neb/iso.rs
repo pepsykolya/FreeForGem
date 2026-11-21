@@ -582,8 +582,11 @@ impl Scanner for Remote {
     }
     fn canceller(&self) -> Option<Canceller> {
         let w = self.w.clone();
+        // stale-share fix: never waits (it runs on the main loop / the pool session): the write half is busy only while the
+        // worker writes a request (a model upload or a new scan), and then no scan runs to cancel; a scan of voided work that
+        // starts anyway has its hits dropped (NJob::obsolete)
         Some(Arc::new(move || {
-            if let Ok(mut s) = w.lock() {
+            if let Ok(mut s) = w.try_lock() {
                 let _ = write_frame(&mut *s, OP_CANCEL, &[]);
             }
         }))
