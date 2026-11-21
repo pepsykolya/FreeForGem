@@ -2644,7 +2644,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         let (found, checked) = (sh.hits.load(Ordering::Relaxed), g.checked.load(Ordering::Relaxed));
-        assert!(found >= 60 && found > 2 * checked + 10, "the GPU waited for its checks: found {found}, checked {checked}");
+        // FFG 1.8.0: the GPU ran ahead of its checks (it never waited for them). Was found > 2 * checked + 10, which failed on a
+        // loaded 24-core Linux box (Shahtyor, load 20): the test's CPU "GPU" scans slower there, so the checks caught up to
+        // found 64 / checked 31 - still a GPU well ahead of its checks.
+        assert!(found >= 60 && found > checked + 20, "the GPU waited for its checks: found {found}, checked {checked}");
         // the pool's clean job: job "a" is void
         nj.obsolete.store(true, Ordering::SeqCst);
         // the checks and the scan running at that moment end (the CPU engine of the tests has no cancel; a scan <= ~1 s)
