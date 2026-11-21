@@ -410,6 +410,11 @@ fn spawn(r: &mut Run) -> Result<()> {
     cmd.args(&r.args).env(GROUP_ENV, &r.g.name).env(CHILD_ENV, "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // the child's own lines are coloured by this process (the prefix keeps the kind of line, color.rs)
     cmd.env("FFG_COLOR", "0");
+    // the cards of a group are numbered as nvidia-smi / NVML (PCI bus order) in every coin's engine: without this CUDA counts
+    // fastest first and two groups land on one card (Shahtyor 21.11: neb:0 and pearl:1 both on bus 08)
+    if std::env::var_os("CUDA_DEVICE_ORDER").is_none() {
+        cmd.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
+    }
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
