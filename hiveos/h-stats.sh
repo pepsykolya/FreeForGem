@@ -16,8 +16,9 @@ _log="${CUSTOM_LOG_BASENAME}.log"
 # 1.8.0 split (different coins on different cards, --split): every line of a group's miner carries "[group] " in front; the
 # last stats line of every group is read and the groups are merged (one HiveOS miner = one algo: the group with most cards)
 _tail=$(tail -n 600 "$_log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -aE ' total [0-9.]+ (TH|FW|MH|GH|MA)/s')
-_line=$(grep -avE '^\[[A-Za-z0-9_-]+\] ' <<< "$_tail" | tail -n 1)
-mapfile -t _groups < <(grep -aoP '^\[\K[A-Za-z0-9_-]+(?=\] \[)' <<< "$_tail" | awk 'NF && !s[$0]++')
+# a group name starts with a letter (neb, pearl2 ...): "[3743s] " of a one-coin run past 1000 s is NOT a group (Rig01 22.11)
+_line=$(grep -avE '^\[[A-Za-z][A-Za-z0-9_-]*\] ' <<< "$_tail" | tail -n 1)
+mapfile -t _groups < <(grep -aoP '^\[\K[A-Za-z][A-Za-z0-9_-]*(?=\] \[)' <<< "$_tail" | awk 'NF && !s[$0]++')
 # groups in the order of --split (the config file h-config wrote): of groups with as many cards, the first one is the main one
 if [[ ${#_groups[@]} -gt 1 && -r ${CUSTOM_CONFIG_FILENAME:-} ]]; then
   _spec=$(grep -oP -- '--split[ =]\K.*' "$CUSTOM_CONFIG_FILENAME" 2>/dev/null | head -n 1)

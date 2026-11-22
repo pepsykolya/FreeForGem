@@ -56,4 +56,9 @@ SPL2B='[neb] [  60s] GPU1 12.0 (150 W, 0.08 MA/W) | total 12.0 MA/s, 150 W, 0.08
 printf -- '--pool neb=x --split pearl:0 neb:1\n' > "$T/config.txt"
 printf 'CUSTOM_CONFIG_FILENAME=%s/config.txt\n' "$T" >> "$T/h-manifest.conf"
 checkj split-order "$SPL2B" '.algo' '"pearlhash"'
+# 1.8.0: a one-coin run past 1000 s ("[3743s]", no space) is not a split group (Rig01 showed n/a on HiveOS)
+check neb-long '[3743s] GPU0 127.008 (129 W, 0.9869 MA/W)  GPU1 127.499 (135 W, 0.9447 MA/W) | total 254.507 MA/s, 264 W, 0.9640 MA/W | found 3 (bad 0) | user sub 3 acc 3 rej 0 (stale 0)' nebhash 254507.0 '0.9640 MA/W'
+SPLL='[neb] [3743s] GPU0 10.0 (150 W, 0.066 MA/W) | total 10.0 MA/s, 150 W, 0.066 MA/W | found 1 (bad 0) | user sub 1 acc 1 rej 0 (stale 0)
+[pearl] [3744s] GPU1 60.0 | total 60.0 TH/s, 100 W, 0.600 TH/W | user sub 4 acc 4 rej 0 | fee sub 0 acc 0 rej 0'
+checkj split-long "$SPLL" '[.hs_units,.hs]' '["khs",[10000,60000000000]]'
 [[ $fail == 0 ]] && echo "h-stats: all coins ok" || { echo "h-stats: FAILED"; exit 1; }
