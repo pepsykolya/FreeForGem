@@ -26,8 +26,8 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
   from one HiveOS flight sheet. Section 27.
 * **Per-GPU lists of any length** in every coin: a shorter list gives its last value to the other cards, `-` skips a card
   (`--table-mclock 810,810,-,-` on 8 cards). Section 28.
-* **Faults:** auto-uv resumes at the crashed offset minus 2 steps; after a GPU fault the card gets a safe state (driver reset,
-  probe, clocks, safe offset) before its engine starts again; FAULTY (a 10-minute pause) instead of DEAD for a card that still
+* **Faults:** auto-uv resumes at the crashed offset minus 2 steps; after a GPU fault the card is put into a safe state before its
+  engine starts again; FAULTY (a 10-minute pause) instead of DEAD for a card that still
   opens; opt-in `--reboot-on-lost-gpu MIN`; fewer stale shares and a warning when the rig's network answers late. Section 29.
 * **Every coin:** yellow / orange auto-uv and auto-lock lines, the core lock checked under load (`[LOCK NOT HELD]`), auto-uv
   climbs while each step lowers the power, dev-fee slots retried, a memory clock policy per coin. Section 25.
@@ -111,27 +111,23 @@ automatically. Details: [MANUAL.md](MANUAL.md), section 12 (Pearl), 13 (CMFD), 1
 Near the stability limit a GPU does **not** crash and reports **no Xid**, the quick self-test passes — but some results are
 already wrong (NOID, RTX 3070 @1560 MHz, +250: **168 of 5984** launches wrong). That means invalid or never-found shares that the
 miner log does not show. FreeForGem's `--auto-uv` therefore checks every step bit-exactly over thousands of launches under full
-load (Pearl: tile digests + CPU verification; NOID: the long stress check; CMFD: digests on the real model), takes the result one
-step below the first failure and confirms it, and re-checks results while mining (CPU check of every hit; NOID watchdog every
-120 s): a failure steps the offset back automatically. [MANUAL.md](MANUAL.md), section 16.
+load, keeps a safety margin below the first failure, and keeps checking results while mining (every hit is checked on the CPU):
+a failure steps the offset back automatically. [MANUAL.md](MANUAL.md), section 16.
 
 ## Pearl (PRL)
 
-Our own CUDA kernel for NVIDIA Ampere: the A′ matrix is generated on-chip, the int8 tensor-core
-GEMM (`mma.sync m16n8k32`) runs in a persistent kernel, and the jackpot fold and the BLAKE3
-hash are fused into it. The main loop is hand-tuned at SASS level. The host builds and checks
-every share proof with the official `zk-pow` verifier before it is submitted.
+Our own GPU kernels (closed source). Every share proof is built and checked with the official `zk-pow` verifier before it is
+submitted.
 
-RTX 3070 locked at 1560 MHz core / 810 MHz memory: **~70.5 TH/s at ~107 W** (kernel bench: 69.5 TMAC/s, 94.6% of the card's
-int8 tensor peak at 1560 MHz).
+RTX 3070 locked at 1560 MHz core / 810 MHz memory: **~70.5 TH/s at ~107 W**.
 
 ### Supported hardware
 
 * **Tuned for:** RTX 30xx (Ampere, sm_86) — 3060 / 3060 Ti / 3070 / 3070 Ti / 3080 / 3090.
-* **RTX 40xx (Ada, sm_89):** own SASS kernel since 1.5.4 (256-row tiles; RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
-* **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 with a compiled kernel (untuned), needs NVIDIA driver 570+.
-* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own SASS kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives ~67 TH/s per card at lock 1300 and ~77 TH/s at 1500 on driver 610.43.03 (166-176 W; 4x CMP 50HX rig; only ~2.6 TH/s on the older drivers 550.78 / 595.91.07) and mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGem (MANUAL.md section 7, *CMP cards*).
-* **AMD Radeon (Windows only, since 1.6.0):** own OpenCL kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
+* **RTX 40xx (Ada, sm_89):** own kernel since 1.5.4 (RTX 4070 Ti @2445/810: 144.7 TH/s at ~169 W vs 144.3 at ~179 W with the RTX 30xx kernel). Tested on RTX 4070 Ti and RTX 4070 Laptop; other 40xx cards use the same kernel.
+* **RTX 50xx (Blackwell, sm_120):** supported since 1.5.0 (not specially tuned yet), needs NVIDIA driver 570+.
+* **Turing (RTX 20xx / GTX 16xx / CMP 30HX–50HX, sm_75):** supported since 1.5.3 with an own kernel (~49.9 TH/s on an RTX 2060 SUPER @1605 MHz); lock the memory at 5001, not 810. CMP 50HX gives ~67 TH/s per card at lock 1300 and ~77 TH/s at 1500 on driver 610.43.03 (166-176 W; 4x CMP 50HX rig; only ~2.6 TH/s on the older drivers 550.78 / 595.91.07) and mines CMFD well (~13 FW/s per card at ~220 W). Unlocking CMP cards is not provided by FreeForGem (MANUAL.md section 7, *CMP cards*).
+* **AMD Radeon (Windows only, since 1.6.0):** own kernel, tested on RX 6800 XT (RDNA2): 34.4 TH/s at ~260 W stock,
   ~30–32 TH/s at 160–172 W with `--auto-uv`. RX 6000 (RDNA2) supported; RX 7000/9000 should work but are untested; integrated Radeon
   graphics are skipped. No AMD build for Linux/HiveOS yet. The miner picks CUDA or AMD by itself (`--backend auto|cuda|amd`).
   Details: [MANUAL.md](MANUAL.md) section 14.
@@ -163,16 +159,14 @@ The miner reconnects to the pool on its own. Every 10 s it logs the hashrate per
 plus the submitted, accepted and rejected shares.
 
 **Tuning.** For best efficiency on a 3070, lock the core clock (for example
-`nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`). The kernel
-works from L2 cache and barely uses VRAM bandwidth. At 1560 MHz a 3070 draws ~107 W. With the optional `--auto-uv` (new in 1.4.0) the miner also finds the lowest safe core voltage
+`nvidia-smi -lgc 1560,1560`) and lower the memory clock (`nvidia-smi -lmc 810,810`): Pearl does not need a high memory
+clock. At 1560 MHz a 3070 draws ~107 W. With the optional `--auto-uv` (new in 1.4.0) the miner also finds the lowest safe core voltage
 of each GPU, checking every step bit-for-bit on the GPU and on the CPU, and restores your settings on exit
 (roughly 5-10 W less per card at the same hashrate). Mixed rig: `--auto-uv` is enough, the limits are chosen per card
-automatically (since 1.6.2); for manual control `--uv-max 225,495,150`. The default rows-per-attempt `m` is auto-picked per GPU
-from its SM count (RTX 3070 &rarr; 47104; +0.4% at the same power), so a mixed-SM rig balances each card
-(since 1.4.7); override with `FFGP_M`.
+automatically (since 1.6.2); for manual control `--uv-max 225,495,150`. The work size is picked per GPU automatically, so
+every card of a mixed rig runs at its own best rate (since 1.4.7).
 
-**CPU.** The host needs well under 10% of one CPU core per GPU (GPU waits sleep instead of spinning), so
-multi-GPU rigs with older CPUs run at full speed.
+**CPU.** The miner needs well under 10% of one CPU core per GPU, so multi-GPU rigs with older CPUs run at full speed.
 
 **NOCK merge mining (LuckyPool).** Use `prl1...+YOUR_NOCK_ADDRESS` as the wallet and LuckyPool pays NOCK for the same work,
 with no hashrate loss (Linux, Windows `.bat` and HiveOS alike; on other pools the miner drops the `+NOCK` part by itself).
@@ -206,12 +200,12 @@ Own NOID kernels (closed source, `libnoidgpu.so` / `noidgpu.dll`; NVIDIA sm_80+,
 | speed 1750 | 393.0 | 1014 | 0.388 |
 
 ¹ 1.7.2 final (27.10.2026); the other rows: eff 1.7.2-beta2 (26.10), speed 1.7.2-beta4 (27.10), same rig and settings. The
-1.7.2 tuning climbs in 30 MHz steps and reaches +150..+240 at eff 1300 (+120..+150 before).
+1.7.2 tuning reaches +150..+240 at eff 1300 (+120..+150 before).
 
 Recommended on RTX 30: **eff 1300** for the best MH/W (0.491), **speed 1500** (`--noid-mode speed --lock-cclock 1500`) for more
 hashrate: +31 % MH/s for +36 % power (0.473 MH/W).
 
-`--auto-uv` tunes a NOID-specific core offset per card and mode with a 40 s bit-exact stress check per step; without it a
+`--auto-uv` tunes a NOID-specific core offset per card and mode with bit-exact checks; without it a
 positive (Pearl) offset is set to 0 for NOID. Windows: `start-noid.bat`. Details: [MANUAL.md](MANUAL.md), section 15.
 
 ## Common Foundry (CMFD)
@@ -242,15 +236,14 @@ Pools: **Aria** (default) `cmfd+tls://159.69.194.46:29445?pin=9dfb51083f28772611
 **Midas Mining** `cmfd+tls://24.107.152.151:29745?pin=2ee4e6a028b07b300753dff3c260b79763c5e748d4e78b86cf3855e97eb2e80e`;
 more in [MANUAL.md](MANUAL.md), section 13.
 HiveOS: the same flight sheet with *Hash algorithm* `forgematrix_v4`, wallet template `%WAL%.%WORKER_NAME%` and the
-`cmfd+tls://` pool URL; Windows: `start-cmfd.bat`. Details: [MANUAL.md](MANUAL.md) section 13, [cmfd/README.md](cmfd/README.md).
+`cmfd+tls://` pool URL; Windows: `start-cmfd.bat`. Details: [MANUAL.md](MANUAL.md) section 13 and `cmfd/README.md` in the package.
 
 **CMFD dev fee: 1%**, inside the engine: 36 s per hour per GPU (random slot) on your pool, worker `ffm-fee`,
 log lines `DEV FEE | ...`. The Pearl fee below is not run in CMFD mode.
 
 ## Proxima (PROX)
 
-Since 1.7.8 the same binary mines **Proxima (PROX)**: `h = BLAKE2b-256(message || nonce)`, a share needs `k` zero low bits in the last
-8 bytes. Own CUDA kernel (closed source, `libproxgpu.so` / `proxgpu.dll`; NVIDIA sm_61+), every candidate hashed again on the CPU,
+Since 1.7.8 the same binary mines **Proxima (PROX)** (BLAKE2b-256). Own CUDA kernel (closed source, `libproxgpu.so` / `proxgpu.dll`; NVIDIA sm_61+), every candidate hashed again on the CPU,
 1% dev fee. Pools: proximamine (`stratum+ssl://pool.proximamine.com:3334`, password = your account secret), InnovLab
 (`innov+tls://eu3.innovlab.cc:19701`, own protocol, password `x`), or solo against your own node (`--solo`, `--token`).
 
@@ -258,8 +251,8 @@ Since 1.7.8 the same binary mines **Proxima (PROX)**: `h = BLAKE2b-256(message |
 ./freeforgem --algo prox --pool stratum+ssl://pool.proximamine.com:3334 --wallet ADDRESS --worker rig1 --password SECRET --auto-uv --lock-cclock 1500
 ```
 
-The kernel is pure integer ALU work: the hashrate follows the core clock, the video memory is not used (the miner locks it at the lowest
-clock that still allows the full core range by default). So the **core lock sets the speed and the offset (undervolt) sets the watts**;
+The hashrate follows the core clock and PROX does not need the video memory (by default the miner locks the memory at a low clock
+that still allows the full core range). So the **core lock sets the speed and the offset (undervolt) sets the watts**;
 `--auto-uv` finds the offset of every card with bit-exact checks (a PROX-specific tuner, opt-in as for Pearl). Measured with a fixed
 lock and offset, 0 wrong hashes at every point:
 
@@ -284,10 +277,9 @@ dataset `neb-datasets.bin` are in the packages; every nonce is checked again wit
 * **Pool:** `stratum+tcp://neb.suprnova.cc:7804` (backup `:7805`), wallet `neb1...`. **Solo:** `--node 127.0.0.1:3441` (your NEB
   node's work service); **several rigs on one node:** `--gate` beside the node, the rigs use `--pool neb://GATE_IP:3442 --password TOKEN`.
 * **Memory:** NEB is memory bound and runs at the full memory clock (a low lock of the HiveOS OC profile, e.g. Pearl's 810 MHz, is
-  lifted while NEB mines and put back on exit). `--table-mclock 810` locks it low only on the pure digest-table path (RTX 3070:
-  -10 W, +8-10 % MA/W); `--tbig auto` (default) builds a partial L=3 table of the TESS slot where it pays back.
-* **One engine process per GPU:** a CUDA fault on one card restarts only that card; after a fault the card gets a safe offset
-  before its new engine starts (section 29 of the manual).
+  lifted while NEB mines and put back on exit). `--table-mclock 810` locks it low only where NEB does not need the fast memory (RTX 3070:
+  -10 W, +8-10 % MA/W); `--tbig auto` (default) uses more GPU memory where it pays back.
+* **One engine process per GPU:** a CUDA fault on one card restarts only that card, in a safe state (section 29 of the manual).
 * **Optional power limit:** `--power-limit N` / `--pl N` (off by default; the miner's way is the core lock plus the offset).
 * auto-uv / auto-lock as for the other coins; saved NEB profiles of FFGN are taken over on the first start.
 * A 4-minute test of a 1.8.0 build (RTX 3070, Suprnova, lock 1680 MHz, +210, `--table-mclock 810`): about 165 MA/s at 118 W
@@ -300,9 +292,8 @@ HiveOS: Hash algorithm `nebhash`, Pool URL `stratum+tcp://neb.suprnova.cc:7804`,
 
 Since 1.8.0 the Ting miner FFGT (0.2.2) is a coin of FreeForGem: the same kernels and results, NVIDIA GTX 10 and newer (CUDA)
 and AMD (OpenCL). Wallet = your Ting account (64 hex digits). Pool `crypto-connection.net:4073` (password `x`), your ffgt-gate
-(`ting://GATE_IP:PORT`, the rig's password) or solo on a node of the rig (`--node 127.0.0.1:18440 --node-dir DIR`). Templates of one
-tip / jobs of one height are searched together (about +40 % solo, +25 % on the pool on RTX 30; `--no-group` turns it off); the memory
-is locked at its lowest clock by default (SHA-256 does not use it); one engine process per GPU. RTX 3070: `--lock-cclock 1500` for
+(`ting://GATE_IP:PORT`, the rig's password) or solo on a node of the rig (`--node 127.0.0.1:18440 --node-dir DIR`). Grouped search (default) gives about +40 % solo and +25 % on the pool on RTX 30
+(`--no-group` turns it off); the memory is locked at its lowest clock by default (Ting does not need it); one engine process per GPU. RTX 3070: `--lock-cclock 1500` for
 the best GH/W, `1800` for more GH/s. HiveOS: Hash algorithm left at `----`, coin `DLR`. Windows: `start-ting.bat`. Options:
 `freeforgem --algo ting --help`. Details: [MANUAL.md](MANUAL.md), section 26.
 
@@ -346,41 +337,9 @@ again up to 3 times. With `--split` every group pays 1 % of its own cards' time.
 The fee is a condition of the license: removing, reducing or redirecting it is not permitted
 (see [LICENSE](LICENSE), clause 3).
 
-## Building from source
-
-The **host program** (pool client, job and proof logic, `host/`) is open source and built from this repository.
-The **GPU kernel is closed source**: the search library is provided as a binary in `prebuilt/`
-(`linux-x86_64/libpearlgpu.so`, `windows-x64/pearlgpu.dll` + `pearlgpu.lib`; AMD: `windows-x64/pearlgpu_amd.dll`, `amduv.exe`).
-Its C API is declared in `gpu/pearlgpu.h`. The build only compiles the host; the library is loaded at run time.
-
-Requirements: Rust (stable, edition 2024), a C linker (gcc), git, and the NVIDIA driver (or the CUDA toolkit stubs) so the
-linker can resolve the library's `libcuda.so.1` dependency. No `nvcc` is needed.
-
-```
-./build.sh          # -> dist/freeforgem-<version>-linux-x86_64.tar.gz and dist/freeforgem-<version>_hiveos.tar.gz (HiveOS)
-```
-
-Windows x64 (Visual Studio 2022 or Build Tools with the C++ workload, Rust with the MSVC toolchain, git), in PowerShell:
-
-```
-.\build-windows.ps1 # -> dist\freeforgem-<version>-windows-x64.zip (+ .sha256)
-```
-
-It builds `freeforgem.exe` with a static MSVC runtime (`PEARLGPU_DIR` points `host/build.rs` at the directory with
-`pearlgpu.lib`) and packs it with `pearlgpu.dll`. The only runtime dependency is the NVIDIA driver.
-
-Portable Linux build matching the release binaries (needs Docker):
-
-```
-docker build -f Dockerfile.build -t ffgp-build .
-docker run --rm -v "$PWD":/src ffgp-build
-```
-
-The library contains only the tuned search kernel; if it can't be loaded (unsupported GPU or too old a driver),
-`pg_init` fails with a clear error and the miner reports it.
-
 ## License
 
-FreeForGem License 1.0 — free to use, study, modify and redistribute, **as long as the
-developer fee stays intact**. See [LICENSE](LICENSE). Third-party components are listed in
-[NOTICE](NOTICE).
+FreeForGem is distributed **in binary form only** (see [Releases](https://github.com/pepsykolya/FreeForGem/releases)) under the
+**FreeForGem Binary License 1.0**: free to use and to redistribute the release packages unmodified, **as long as the developer
+fee stays intact**. See [LICENSE](LICENSE). Versions up to and including 1.8.0 stay under the license they were published
+with. Third-party components are listed in [NOTICE](NOTICE).

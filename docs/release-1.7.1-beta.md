@@ -21,11 +21,10 @@ after a quick check; stopping the miner during a check (HiveOS `miner stop` / `m
   as the HiveOS profile value or as your own starting offset counts as an OC apply (at most 4 times an hour; any other value is
   your own choice and the miner stands down on that GPU):
   * **Pearl:** the verified offset is set again after a quick check (mining on that GPU pauses for ~30 s; a failure steps back).
-  * **NOID:** the offset is read back every 30 s; a tuned NOID offset comes back after a 30 s stress check with mining on that GPU
-    paused; the base 0 (without `--auto-uv`) or the `--uv-offset` value is set again at once — a Pearl offset put back by the OC
-    would make NOID compute silently wrong results.
-  * **CMFD:** the engine of that GPU stops, the saved CMFD offset gets the quick check on the model + the official test vector,
-    and the engine restarts at it.
+  * **NOID:** a tuned NOID offset comes back after a quick check with mining on that GPU paused; the base 0 (without
+    `--auto-uv`) or the `--uv-offset` value is set again at once — a Pearl offset put back by the OC would make NOID compute
+    silently wrong results.
+  * **CMFD:** the engine of that GPU stops, the saved CMFD offset gets a quick check, and the engine restarts at it.
   * A check during which an OC apply reset the offset is repeated at the right offset (Pearl, NOID, CMFD).
 * **A stop during a check is not a failure.** HiveOS `miner stop` / `miner restart` sends Ctrl+C and then closes the screen
   session (a second signal). Before, the offset under check stayed as a "crash point" (the next start: "died while checking …,
@@ -36,21 +35,20 @@ after a quick check; stopping the miner during a check (HiveOS `miner stop` / `m
 
 ### New
 
-* **`--auto-uv` for CMFD on NVIDIA:** a CMFD offset of its own per card, every step checked bit-for-bit on the real model by the
-  engine's worker + the official Common Foundry test vector; saved in `uv.json` (section `cmfd`). CMP 50HX (225 W, 1410 MHz):
+* **`--auto-uv` for CMFD on NVIDIA:** a CMFD offset of its own per card, every step checked bit-exactly; saved in `uv.json` (section `cmfd`). CMP 50HX (225 W, 1410 MHz):
   13.10 FW/s at 216 W → 13.21 at 196 W (+11 % FW/kWh). MANUAL.md, section 13.
-* **`--auto-uv` for CMFD on AMD Radeon (Windows):** amduv with a separate CMFD point, profiles `UV_GOAL` = `eff` / `bal` /
+* **`--auto-uv` for CMFD on AMD Radeon (Windows):** a separate CMFD undervolt point, profiles `UV_GOAL` = `eff` / `bal` /
   `max`; RX 6800 XT stock 10.0 FW/s at 280 W → `bal` 9.1 FW/s at 193 W (+32 % FW/W). MANUAL.md, section 14.
 * MANUAL: CMP cards (CMP 50HX: not recommended for Pearl, fine for CMFD; no CMP unlocking).
 
-### Checked (RTX 3070, Shahtyor GPU1)
+### Checked (RTX 3070)
 
 * Clock lock: Ctrl-C / SIGTERM / `kill -9` + next start → the HiveOS profile lock 1200/810 is back; `FFG_RESTORE_*` and
   `FFGP_RESTORE_*` → 1250/810, 1350/810; without either → reset (as before). The same with `--algo noid`.
 * Pearl: OC apply mid-run (0, profile value +30) → +150 back after a quick check, a hand value +45 → stands down; OC apply
   during the start check → check repeated; HiveOS-like stop during the start check → no marker, no pause. Pool 3 min:
   **66.6 TH/s @ 103 W, 9/9 accepted**.
-* NOID: self-test (eff + speed) passed; OC apply mid-run (0, +30) → +195 back after the stress check, +45 by hand → stands down;
+* NOID: self-test (eff + speed) passed; OC apply mid-run (0, +30) → +195 back after the quick check, +45 by hand → stands down;
   without `--auto-uv` the owner's +175 put back by an "OC" → 0 again; OC apply during the start check → repeated; stop during
   the check → no marker, no pause. Pool 3 min (InnovLab, eff @1400 MHz, `--auto-uv` +195): **34.8 MH/s @ 72 W (0.482 MH/W),
   37 accepted / 0 rejected**.
@@ -92,11 +90,10 @@ HiveOS Installation URL: `https://github.com/pepsykolya/FreeForGem/releases/down
   значение профиля HiveOS или как ваш исходный offset, считается применением разгона (не чаще 4 раз в час; любое другое
   значение — ваш выбор, майнер отступает на этой карте):
   * **Pearl:** проверенный offset ставится снова после быстрой проверки (майнинг на карте встаёт на ~30 с; ошибка — шаг назад).
-  * **NOID:** offset перечитывается каждые 30 с; подобранный NOID-offset возвращается после 30-секундной stress-проверки с паузой
-    майнинга на этой карте; база 0 (без `--auto-uv`) или значение `--uv-offset` ставится сразу — offset от Pearl, возвращённый
+  * **NOID:** подобранный NOID-offset возвращается после быстрой проверки с паузой майнинга на этой карте; база 0 (без `--auto-uv`) или значение `--uv-offset` ставится сразу — offset от Pearl, возвращённый
     разгоном, дал бы тихо неверные результаты NOID.
-  * **CMFD:** движок этой карты останавливается, сохранённый CMFD-offset проходит быструю проверку на модели + официальный
-    тест-вектор, движок перезапускается на нём.
+  * **CMFD:** движок этой карты останавливается, сохранённый CMFD-offset проходит быструю проверку, движок перезапускается
+    на нём.
   * Проверка, во время которой разгон сбросил offset, повторяется на нужном offset (Pearl, NOID, CMFD).
 * **Остановка во время проверки — не провал.** `miner stop` / `miner restart` в HiveOS шлёт Ctrl+C, а потом закрывает
   screen-сессию (второй сигнал). Раньше проверяемый offset оставался «точкой сбоя» (следующий старт: «died while checking …,
@@ -107,21 +104,20 @@ HiveOS Installation URL: `https://github.com/pepsykolya/FreeForGem/releases/down
 
 ### Новое
 
-* **`--auto-uv` для CMFD на NVIDIA:** свой CMFD-offset на каждую карту, каждый шаг проверяется побитно на настоящей модели воркером
-  движка + официальный тест-вектор Common Foundry; хранится в `uv.json` (раздел `cmfd`). CMP 50HX (225 Вт, 1410 МГц): 13,10 FW/s
+* **`--auto-uv` для CMFD на NVIDIA:** свой CMFD-offset на каждую карту, каждый шаг проверяется побитно; хранится в `uv.json` (раздел `cmfd`). CMP 50HX (225 Вт, 1410 МГц): 13,10 FW/s
   при 216 Вт → 13,21 при 196 Вт (+11 % FW/kWh). MANUAL.md, раздел 13.
-* **`--auto-uv` для CMFD на AMD Radeon (Windows):** amduv с отдельной точкой для CMFD, профили `UV_GOAL` = `eff` / `bal` / `max`;
+* **`--auto-uv` для CMFD на AMD Radeon (Windows):** отдельная точка андервольта для CMFD, профили `UV_GOAL` = `eff` / `bal` / `max`;
   RX 6800 XT сток 10,0 FW/s при 280 Вт → `bal` 9,1 FW/s при 193 Вт (+32 % FW/Вт). MANUAL.md, раздел 14.
 * MANUAL: карты CMP (CMP 50HX для Pearl не рекомендуется, для CMFD подходит; разблокировки CMP нет).
 
-### Проверено (RTX 3070, Шахтёр GPU1)
+### Проверено (RTX 3070)
 
 * Лок частот: Ctrl-C / SIGTERM / `kill -9` + следующий старт → лок профиля HiveOS 1200/810 на месте; `FFG_RESTORE_*` и
   `FFGP_RESTORE_*` → 1250/810, 1350/810; без них → сброс (как раньше). То же с `--algo noid`.
 * Pearl: разгон посреди майнинга (0, значение профиля +30) → +150 возвращён после быстрой проверки, +45 вручную → отступил;
   разгон во время стартовой проверки → проверка повторена; остановка как в HiveOS во время проверки → маркера нет, паузы нет.
   Пул 3 мин: **66,6 TH/s @ 103 Вт, 9/9 принято**.
-* NOID: self-test (eff + speed) пройден; разгон посреди майнинга (0, +30) → +195 возвращён после stress-проверки, +45 вручную →
+* NOID: self-test (eff + speed) пройден; разгон посреди майнинга (0, +30) → +195 возвращён после быстрой проверки, +45 вручную →
   отступил; без `--auto-uv` возвращённые «разгоном» +175 владельца → снова 0; разгон во время стартовой проверки → повторена;
   остановка во время проверки → маркера нет, паузы нет. Пул 3 мин (InnovLab, eff @1400 МГц, `--auto-uv` +195): **34,8 MH/s
   @ 72 Вт (0,482 MH/Вт), 37 принято / 0 отклонено**.

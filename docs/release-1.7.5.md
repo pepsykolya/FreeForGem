@@ -17,7 +17,7 @@ Files: `freeforgem-1.7.5.tar.gz` (HiveOS Installation URL
 **New: idle mode for Windows** (Pearl) — mine only while nobody uses the PC. Set `IDLE=1` in the start file (`--idle`).
 "In use" is keyboard / mouse / gamepad input, a fullscreen game or video, other programs at work (more than 25 % of the CPU,
 another program on the GPU, any video decoding: a film, a stream, a call) or a program from `ALWAYS_PAUSE`; other miners
-(xmrig, SRBMiner, lolMiner, T-Rex, Rigel ...) do not count. A locked screen
+do not count. A locked screen
 counts as idle. While the PC is in use the miner stops within a second (`ACTIVE=pause`, default: the GPU gets its own clocks
 and offset back) or keeps a light load you choose (`ACTIVE=light:30` = 30 % of the time, on the verified mining clocks).
 Mining comes back after `IDLE_MINUTES` (default 5) without use. The dev fee counts the mining time only. MANUAL.md, section 18.
@@ -29,7 +29,7 @@ downloaded or installed; `--no-update-check` turns it off, `--check-update` chec
 **Fixes**
 * auto-uv: a tuned offset of this miner left on the card (a run cut by a power failure, an older miner) is no longer taken for
   the owner's offset; the offset recorded before the tuning goes back. On one laptop the leftover came back after every reboot.
-* auto-uv: the check queue counts a running check only with the RAM it has not taken yet, and the log says
+* auto-uv: the check queue no longer holds GPUs back for RAM that is already in use, and the log says
   `waits its turn for a check (mining meanwhile)` instead of `waits for RAM` (the GPU mines while it waits).
 
 Tests on four Windows PCs (RTX 3080 Ti, RTX 3070, RTX 3070 Laptop, RTX 4070 Laptop; locked clocks + auto-uv): start while
@@ -57,7 +57,7 @@ Developer mode → Load unpacked.
 **Новое: режим простоя для Windows** (Pearl) — майнить, только пока компьютером никто не пользуется. `IDLE=1` в стартовом файле
 (`--idle`). «Занят» — ввод с клавиатуры, мыши, геймпада, полноэкранная игра или видео, работа других программ (больше 25 %
 процессора, другая программа на видеокарте, любое декодирование видео: фильм, стрим, звонок) или программа из `ALWAYS_PAUSE`; другие
-майнеры (xmrig, SRBMiner, lolMiner, T-Rex, Rigel ...) не считаются.
+майнеры не считаются.
 Заблокированный экран — простой. Пока компьютер занят, майнер останавливается меньше чем за секунду (`ACTIVE=pause`, по умолчанию:
 видеокарте возвращаются её собственные частоты и offset) или держит выбранную вами лёгкую нагрузку (`ACTIVE=light:30` — 30 %
 времени, на проверенных майнинговых частотах). Майнинг возвращается через `IDLE_MINUTES` (по умолчанию 5) без использования.
@@ -71,7 +71,7 @@ Developer mode → Load unpacked.
 * auto-uv: оставленный на карте подобранный offset самого майнера (запуск, прерванный отключением света, старый майнер) больше
   не принимается за ваш; возвращается offset, записанный до подбора. На одном ноутбуке этот остаток возвращался после каждой
   перезагрузки.
-* auto-uv: очередь проверок учитывает идущую проверку только той памятью, которую она ещё не заняла, а в логе вместо
+* auto-uv: очередь проверок больше не задерживает карты из-за памяти, которая уже занята, а в логе вместо
   `waits for RAM` — `waits its turn for a check (mining meanwhile)` (карта в очереди майнит).
 
 Тесты на четырёх Windows-ПК (RTX 3080 Ti, RTX 3070, RTX 3070 Laptop, RTX 4070 Laptop; лок частот + auto-uv): старт при занятом

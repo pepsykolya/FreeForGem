@@ -17,12 +17,9 @@ the Pearl miner under its own name and repository; the multi-coin line lives in 
 * Pool protocol `parano1d-stratum-v1` over **TLS** (`stratum+ssl://`), tested on InnovLab EU
   (`stratum+ssl://eu2.innovlab.cc:19601`): all shares accepted in our runs (user 63/63, 41/41, 31/31, 24/24; dev fee 29/29), RTX 4070 Ti 32/32 and 51/51.
 * Every GPU candidate is **re-computed on the CPU with the official `noid_poseidon2b` crate** before it is submitted;
-  `--algo noid --self-test` checks the 16 official test vectors and 32768 GPU digests per kernel against the crate, and a full
-  search launch's candidate set.
-* **`--auto-uv` for NOID**: its own per-card and per-mode undervolt, every step checked by a 40 s bit-exact stress check
-  (thousands of launches compared with the CPU), one step below the first failure, 2-minute confirmation, saved in `uv.json`
-  under `noid`; while mining, a CPU check of every candidate plus a watchdog check every 120 s step the offset back on a
-  failure. Without `--auto-uv` a positive (Pearl) offset is set to 0 for NOID and put back on exit. RTX 3070 result: eff @1400 MHz 87.5 → 72.8 W (+20 % MH/W, voltage floor at +195), speed @1560 MHz 127.8 → 106.2 W (+20 % MH/W, silent edge at +225: 5 of 4597 launches wrong, no Xid).
+  `--algo noid --self-test` checks the GPU against the official test vectors.
+* **`--auto-uv` for NOID**: its own per-card and per-mode undervolt, every step checked bit-exactly under full load, saved in
+  `uv.json` under `noid`; while mining, the results keep being checked and a failure steps the offset back. Without `--auto-uv` a positive (Pearl) offset is set to 0 for NOID and put back on exit. RTX 3070 result: eff @1400 MHz 87.5 → 72.8 W (+20 % MH/W, voltage floor at +195), speed @1560 MHz 127.8 → 106.2 W (+20 % MH/W, silent edge at +225: 5 of 4597 launches wrong, no Xid).
 * Dev fee 1% for NOID, the same schedule as Pearl (60 s every 100 min, same pool).
 * HiveOS: custom miner **`freeforgem`** — **create a new flight sheet** (Miner name `freeforgem`, the new Installation URL);
   NOID: hash algorithm `parano1d`, hashrate in kH/s. Windows: `start-noid.bat`.
@@ -33,17 +30,16 @@ the Pearl miner under its own name and repository; the multi-coin line lives in 
 
 Near the stability limit a GPU does not crash, reports no Xid and passes a quick self-test, yet some of its results are wrong
 (NOID, RTX 3070 @1560 MHz, offset +250: 168 of 5984 launches wrong, the first after ~12 s, no driver error). That costs
-invalid or never-found shares that the miner log does not show. FreeForGem tunes with bit-exact checks over thousands of
-launches under full load (Pearl: tile digests + CPU verification; NOID: the long stress check; CMFD: digests on the real model),
-takes the result one step below the first failure, confirms it, and keeps checking while mining — a failure steps the offset
-back automatically. MANUAL.md, section 16.
+invalid or never-found shares that the miner log does not show. FreeForGem tunes with bit-exact checks under full load
+(Pearl, NOID and CMFD), confirms the result and keeps checking while mining — a failure steps the offset back automatically.
+MANUAL.md, section 16.
 
 ### Requirements and limits
 
 * NOID: NVIDIA sm_80+ and driver **580+** (older drivers are refused with a clear message: loading the CUDA 13 kernels on a
   575 driver crashes the process). No Turing, no AMD for NOID.
 * Pearl and CMFD are unchanged from FreeForGemPear 1.6.2 (same Pearl library, same CMFD engine).
-* Not tested in this beta: NOID on Windows hardware (the build machine has driver 576), NOID on RTX 50.
+* Not tested in this beta: NOID on Windows hardware, NOID on RTX 50.
 * NOID dev-fee address: the developer's NOID wallet (`o1qxh67…gmhdc`).
 
 ### Files
@@ -73,11 +69,9 @@ Pearl под своим именем и в своём репозитории; м
 * Протокол пула `parano1d-stratum-v1` через **TLS** (`stratum+ssl://`), проверен на InnovLab EU
   (`stratum+ssl://eu2.innovlab.cc:19601`): в наших прогонах все шары приняты (user 63/63, 41/41, 31/31, 24/24; комиссия 29/29), RTX 4070 Ti 32/32 и 51/51.
 * Каждый кандидат GPU **пересчитывается на CPU официальным крейтом `noid_poseidon2b`** перед отправкой;
-  `--algo noid --self-test` проверяет 16 официальных тест-векторов и 32768 дайджестов GPU на каждое ядро против крейта, а также
-  набор кандидатов полного запуска поиска.
-* **`--auto-uv` для NOID**: свой андервольт на каждую карту и режим, каждый шаг — 40-секундная побайтная stress-проверка (тысячи
-  запусков против CPU), результат на шаг ниже первой ошибки, подтверждение 2 минуты, сохраняется в `uv.json` в разделе `noid`;
-  в майнинге — CPU-проверка каждого кандидата и сторожевая проверка каждые 120 с, при ошибке offset откатывается. Без
+  `--algo noid --self-test` проверяет GPU по официальным тест-векторам.
+* **`--auto-uv` для NOID**: свой андервольт на каждую карту и режим, каждый шаг побайтно проверяется под полной нагрузкой,
+  сохраняется в `uv.json` в разделе `noid`; в майнинге результаты продолжают проверяться, при ошибке offset откатывается. Без
   `--auto-uv` положительный (Pearl-овский) offset на время NOID ставится в 0 и возвращается при выходе. RTX 3070: eff @1400 МГц 87.5 → 72.8 Вт (+20 % MH/Вт, пол напряжения на +195), speed @1560 МГц 127.8 → 106.2 Вт (+20 % MH/Вт, тихий край на +225: 5 из 4597 запусков с ошибкой, Xid нет).
 * Комиссия 1 % для NOID — по тому же расписанию, что у Pearl (60 с каждые 100 мин, тот же пул).
 * HiveOS: кастомный майнер **`freeforgem`** — **создайте новый полётный лист** (Miner name `freeforgem`, новая ссылка
@@ -90,14 +84,13 @@ Pearl под своим именем и в своём репозитории; м
 Вблизи предела устойчивости GPU не падает, не сообщает Xid и проходит быстрый self-test, но часть результатов уже неверна
 (NOID, RTX 3070 @1560 МГц, offset +250: 168 из 5984 запусков с ошибкой, первая через ~12 с, без ошибок драйвера). Это
 невалидные или так и не найденные шары, которых не видно в логе майнера. FreeForGem подбирает offset с побайтными проверками
-тысяч запусков под полной нагрузкой (Pearl: дайджесты тайлов + CPU-проверка; NOID: длинная stress-проверка; CMFD: дайджесты на
-настоящей модели), берёт результат на шаг ниже первой ошибки, подтверждает его и продолжает проверять в майнинге — ошибка
-автоматически откатывает offset. MANUAL.md, раздел 16.
+под полной нагрузкой (Pearl, NOID и CMFD), подтверждает результат и продолжает проверять в майнинге — ошибка автоматически
+откатывает offset. MANUAL.md, раздел 16.
 
 ### Требования и ограничения
 
 * NOID: NVIDIA sm_80+ и драйвер **580+** (со старым драйвером — понятный отказ: загрузка ядер CUDA 13 на драйвере 575 роняет
   процесс). Turing и AMD для NOID не поддерживаются.
 * Pearl и CMFD не изменились относительно FreeForGemPear 1.6.2 (та же библиотека Pearl, тот же движок CMFD).
-* Не проверено в этой бете: NOID на Windows-железе (на сборочной машине драйвер 576), NOID на RTX 50.
+* Не проверено в этой бете: NOID на Windows-железе, NOID на RTX 50.
 * Адрес комиссии NOID: NOID-кошелёк разработчика (`o1qxh67…gmhdc`).

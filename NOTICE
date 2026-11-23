@@ -1,8 +1,8 @@
 FreeForGem (the multi-coin line of FreeForGemPear: Pearl, CMFD, NOID, PROX, NEB, Ting)
-Copyright (c) 2026 pepsykolya. Licensed under the FreeForGemPear License 1.1 (see LICENSE), which applies to FreeForGem.
+Copyright (c) 2026 pepsykolya. Licensed under the FreeForGem Binary License 1.0 (see LICENSE); versions up to and
+including 1.8.0 stay under the license they were published with.
 
-The GPU kernels, the CUDA library and the host program are original work. The GPU library is
-distributed in binary form only.
+The freeforgem program, its GPU kernels and GPU libraries are original work, distributed in binary form only.
 
 Release binaries link the following third-party components, which remain under
 their own licenses:
@@ -29,18 +29,18 @@ their own licenses:
   base64, bincode, flate2, rand and their dependencies) -- each under its own
   license, typically MIT and/or Apache-2.0.
 
-* CMFD engine (folder cmfd/: cmfd-miner, cmfd-v4-replay, cmfd-launch, model preparation scripts) --
+* CMFD engine (folder cmfd/ of the packages: cmfd-miner, cmfd-v4-replay, cmfd-launch, model preparation scripts) --
   FreeForgeMiner, https://github.com/pepsykolya/freeforgeminer, MIT License,
   Copyright (c) 2026 FreeForgeMiner contributors; portions Copyright (c) 2026 CommonFoundry contributors
   (https://github.com/Common-Foundry-1/CommonFoundry). Shipped unchanged as separate programs; full license texts in
   cmfd/LICENSE-FreeForgeMiner and cmfd/LICENSE-CommonFoundry, third-party notices in cmfd/THIRD_PARTY_NOTICES.md.
-  The FreeForGemPear License does not apply to the cmfd/ folder.
+  The FreeForGem Binary License does not apply to the cmfd/ folder.
   cmfd/fixtures/: test vector (replay coefficients) from the Common Foundry v1.0.16 AMD HIP miner, MIT License,
   Copyright (c) 2026 Common Foundry AMD HIP contributors (cmfd/fixtures/LICENSE-CommonFoundry-AMD-HIP).
-  host/src/cmfd.rs: the cmfd1 address codec follows crates/cmfd-node/src/address.rs of Common Foundry v1.0.16 (MIT).
+  The cmfd1 address codec of the freeforgem program follows crates/cmfd-node/src/address.rs of Common Foundry v1.0.16 (MIT).
 
 * noid_poseidon2b, noid_core -- from https://git.parano1d.org/ignotusnemo/parano1d (commit 5302b3f),
-  Apache License 2.0, Copyright (C) 2026 Paranoid Zero. Used unchanged by the host for the NOID CPU reference
+  Apache License 2.0, Copyright (C) 2026 Paranoid Zero. Used unchanged by the freeforgem program for the NOID CPU reference
   (every NOID hit is re-computed with it before it is submitted). The NOID GPU kernels (libnoidgpu.so / noidgpu.dll)
   are original work; their test vectors were generated with this crate.
 
@@ -51,9 +51,9 @@ their own licenses:
   and redistributed under the NVIDIA CUDA Toolkit End User License Agreement. The
   CUDA driver (libcuda) is not distributed; it comes with the NVIDIA driver.
 
-* NEB (1.8.0): the NEB module of the host (host/src/neb/, from FFGN, original work) and the NEB GPU engine (nebgpu:
+* NEB (1.8.0): the NEB module of the freeforgem program (from FFGN, original work) and the NEB GPU engine (nebgpu:
   libnebgpu.so / nebgpu.dll, original work, distributed in binary form only, closed source).
-  - NEB reference implementation (C, host/nebref/) -- from https://github.com/SilasEigen/neb release 1.0.0, commit
+  - NEB reference implementation (C) -- from https://github.com/SilasEigen/neb release 1.0.0, commit
     feb0adac37af7e442f507c1853fc4b870137da06, folder pow/ref (blake3_min, chacha8, nebhash2, shares). Copyright the NEB
     authors. Apache License, Version 2.0. Unmodified; compiled in to compute again every nonce the GPU reports before it is
     sent, and as the reference of the self-test and of the undervolt checks. Parts of the GPU engine are derived from
@@ -65,8 +65,7 @@ their own licenses:
     and from OCTMNIST of MedMNIST v2 (Yang et al.), CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ ; the underlying
     images are from Kermany et al., Cell 172(5), 2018. See docs/mainnet.md of the NEB release.
   - NVIDIA CUDA runtime (cudart) -- linked statically into libnebgpu.so / nebgpu.dll (NVIDIA CUDA Toolkit EULA).
-  - cc (build only, MIT / Apache-2.0) compiles the C reference.
 
-* Ting / Daler (1.8.0): the Ting module of the host (host/src/ting/, from FFGT, original work) and the Ting GPU libraries
+* Ting / Daler (1.8.0): the Ting module of the freeforgem program (from FFGT, original work) and the Ting GPU libraries
   (tinggpu: libtinggpu.so / tinggpu.dll for CUDA, libtinggpu_cl.so / tinggpu_cl.dll for OpenCL; original work, distributed in
   binary form only, closed source). The sha2 crate (MIT / Apache-2.0) computes the SHA-256 midstate on the CPU.
