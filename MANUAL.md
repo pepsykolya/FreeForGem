@@ -51,7 +51,7 @@ FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installati
 **Installation URL (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -83,8 +83,8 @@ NEB, Ting and a rig with different coins on different cards: sections 24, 26 and
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.8.0-linux-x86_64.tar.gz
-cd freeforgem-1.8.0
+tar xzf freeforgem-1.8.1-linux-x86_64.tar.gz
+cd freeforgem-1.8.1
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS --worker rig1       # Kryptex
@@ -105,8 +105,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.8.0-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0-windows-x64.zip`
+1. Download **`freeforgem-1.8.1-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -156,7 +156,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.0-windows-x64
+cd /d C:\Mining\freeforgem-1.8.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -255,17 +255,17 @@ cards of the same generation and are not measured. Every card differs: let `--au
 
 RTX 40 and 50 run at a much higher locked core clock (**1900–2500 MHz**) and hold a higher offset than RTX 30.
 
-**Mixed rig:** `--auto-uv` is enough — the limits are chosen per card automatically (since 1.6.2): RTX 20xx / GTX 16xx up to
-+225, CMP 30HX/40HX up to +150 (CMP 50HX: +330), all others up to +495; the log shows the range of every GPU at start
-(`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). For manual control give one value
-per GPU in `--devices` order: `--uv-max 225,495,150` (`-` = that GPU's default). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
+**Mixed rig:** `--auto-uv` is enough. Since 1.8.1 the miner has no offset ceiling of its own: every card climbs, as long as each
+step lowers the power, at most to the range its driver allows (before 1.8.1 there were built-in limits per card type); the log
+shows the range of every GPU at start (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +60..+1000 (max: the driver's +1000; ...)`). To
+limit a card yourself give one value per GPU in `--devices` order: `--uv-max 225,-,150` (`-` = no limit of yours for that GPU). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) is supported since 1.5.3: unlike RTX 30 it needs the memory locked at 5001 (see the table); CMP 170HX / A100 (sm_80) are not supported.
 
 **CMP cards (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX mine Pearl with the Turing kernel (memory locked at 5001, auto-uv
 limit +150). **CMP 50HX and Pearl:** on driver 610.43.03 it mines about 67 TH/s per card at core lock 1300 and about 77 TH/s at 1500
 (166–176 W per card; 4× CMP 50HX rig, FreeForGem 1.7.8); on the older drivers 550.78 and 595.91.07 it gives only ~2.6 TH/s
 (its int8 tensor cores are cut ~17x there), so update the driver first. **For Common Foundry (CMFD) the CMP 50HX works well:** ~13 FW/s per card at ~220 W (power limit
 225 W, core lock 1410 MHz, memory not locked; 4x CMP 50HX rig on the Aria pool), with `--auto-uv` (CMFD tuner, +225) about
-13.2 FW/s at 196–203 W (+8–11 % FW/kWh); see section 13. CMFD needs ~7 GB of free GPU memory, so 6 GB cards (CMP 30HX) cannot
+13.2 FW/s at 196–203 W (+8–11 % FW/W); see section 13. CMFD needs ~7 GB of free GPU memory, so 6 GB cards (CMP 30HX) cannot
 run it. **Unlocking CMP cards is not part of FreeForGem:** we do not provide or support drivers or tools that lift the
 limits of CMP cards; all numbers here are for the cards as they are.
 
@@ -299,9 +299,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.8.0-linux-x86_64.tar.gz freeforgem-1.8.0_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.8.0-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.8.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.8.1-linux-x86_64.tar.gz freeforgem-1.8.1_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.8.1-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.8.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -355,13 +355,14 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
 
 **What it does**
 1. Reads the V/F offset the card has now (HiveOS OC, your own script, ...) and writes it to a restore file *before* changing anything.
-2. Warms the GPU up, then raises the offset step by step and checks every step bit-exactly under full load, on the GPU and
+2. Warms the GPU up (since 1.8.1 the card mines while it warms up), then raises the offset step by step and checks every step bit-exactly under full load, on the GPU and
    on the CPU with the official verifier. Wrong results without any driver error do happen near the limit, which is why every
    step is checked this way (since 1.7.6 the tuning of Pearl, NOID and CMFD takes about half as long, with the same result).
 3. A wrong result, CUDA error, Xid error or hang ends the climb. The result keeps a **safety margin** below the last good
-   step and is confirmed by a longer check; if the confirmation fails it goes lower. The highest
-   value tried is +495 (`--uv-max`, at most +600; before 1.5.1 it was +300 with a hard cap of +400); since 1.6.2 it is +225 on
-   Turing (RTX 20xx / GTX 16xx) and +150 on CMP 30HX/40HX (CMP 50HX: +330) unless `--uv-max` says otherwise. RTX 40/50 cards often hold +450..480.
+   step and is confirmed by a longer check; if the confirmation fails it goes lower. Since 1.8.1
+   there is no built-in highest value: the climb stops where the power no longer falls or at the first failing check, at the
+   latest at the top of the driver's range; `--uv-max N` sets your own limit (before 1.8.1 the miner had built-in limits per card
+   type, and a saved result that stopped at such a limit climbs on from it). RTX 40/50 cards often hold +450 and more.
    A saved result above a lowered limit is not used as is: the card runs at the limit (after a quick check) and the saved
    result is kept for when the limit goes up again; a saved result that *is* the old limit is tuned again when the limit rises.
 4. The result is saved in `uv.json`, keyed by GPU UUID, driver version, kernel build and core clock lock (one profile per lock,
@@ -370,13 +371,13 @@ means fewer watts at the same hashrate: the clock stays where you locked it (sec
    Each check needs about 1.8 GB of RAM: on a rig with little RAM the checks of several GPUs wait their turn
    (`waits its turn for a check` in the log), and the other GPUs mine meanwhile (since 1.7.2 mining starts at once; since
    1.7.1 a GPU that waits its turn for a re-check keeps mining).
-5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (mining on that GPU pauses for about 30 s).
+5. While mining: every 6 hours (`--uv-reval-hours`) the setting is re-checked (since 1.8.1 the card keeps mining during the check, at a lower hashrate for about 30 s).
    If a found result fails the CPU check, or a burst of rejected shares appears, the offset goes one step down (never
    below your own value) and is saved. **OC applies (since 1.7.1):** HiveOS `nvidia-oc` writes the *Core Clock* value of the
    OC profile at every miner start and every OC change, **0 when that field is empty** — before 1.7.1 this switched the
    undervolt off until the next restart (a 4x RTX 3070 rig ran at 604 W instead of ~440 W). Now an offset that is read back as
    0, as the HiveOS profile value or as your own starting offset counts as an OC apply: auto-uv sets the verified offset again
-   after a quick check (mining on that GPU pauses for ~30 s; a failure steps back as in the re-check; at most 4 times an hour),
+   after a quick check (the card keeps mining, at a lower hashrate for ~30 s; a failure steps back as in the re-check; at most 4 times an hour),
    log `the offset was reset to +0 by an OC apply (...); re-applying the verified +285 after a quick check`. A check during
    which an OC apply reset the offset is repeated. Any other value is your own choice: auto-uv stands down on that GPU and
    does not fight.
@@ -392,8 +393,11 @@ touched. Every GPU is matched by its PCI bus id (and UUID); the log shows the bu
 
 **Requirements.** NVIDIA driver (NVML is loaded at run time, nothing to install) and **root** on Linux / HiveOS (the miner
 runs as root there) or **Administrator** on Windows. Without NVML or permission the miner logs the reason and mines normally.
-**Time:** the first tuning takes about **15 minutes per GPU** (10-25 depending on the card; the GPUs of a rig are tuned in parallel while the others mine;
-RTX 3070 since 1.7.2: about 11 min for an 8-GPU rig). Later starts add about 30 s.
+**Time:** since 1.8.1 all GPUs are tuned at once and the first tuning takes **a few minutes** (4x RTX 3070: NEB 1.5-2 min, PROX about 5,
+Ting 6-8.5, NOID about 9, CMFD 10-18; before 1.8.1 about 15 minutes per GPU). Later starts add about 30 s. **Since 1.8.1 the card mines the whole
+time, on every coin:** while it is tuned it keeps mining and its shares go to the pool; its hashrate is somewhat lower only while a step is checked. Before 1.8.1 the card stopped
+mining at every step (Pearl: up to about 14 minutes without hashrate, the pool did not see the worker). The guards against an endless tuning and
+the flags `--uv-parallel` / `--uv-unpause`: section 30.
 
 **Windows: step by step.** Checked on Windows 11 with a GeForce RTX 3070 and driver 581.80: the driver lets the miner read
 and change the offset (the log shows `allowed -1000..1000`), the tuner found +240 instead of +225 (98.4 W → 86.5 W at the
@@ -405,15 +409,15 @@ same clock), and the safety net worked too (a found result failed the CPU check 
    without the lock the card may boost higher instead and the saving is smaller.
 3. **Turn it on**, one of:
    * `start.bat` (or any `start-luckypool-*` / `start-kryptex-*`): remove `rem` before `set "AUTO_UV=1"`. The upper limit is
-     `set "UV_MAX="` (empty = per card: +495, RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150; RTX 40/50 often hold +450..480, RTX 30
-     usually +200..360). A comma list sets one value per GPU in `DEVICES` order, e.g. `set "UV_MAX=225,495,150"`.
+     `set "UV_MAX="` (empty = no limit of yours, since 1.8.1 the driver's range; RTX 40/50 often hold +450 and more, RTX 30
+     usually +200..360). A comma list sets one value per GPU in `DEVICES` order, e.g. `set "UV_MAX=225,-,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, the range in `UV_MIN` / `UV_MAX`, plus power limit and clock lock through `nvidia-smi`.
    * your own command line: `freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Starting point.** The tuner starts from the offset the card has now (RTX 3070 / 3060 Ti since 1.7.2: from a default by the core lock, section 17); a start that fails at these clocks steps down by itself. The *Core Clock* offset of
    MSI Afterburner (or a similar tool) is this same offset, so a value you set there is your starting point and is put back
    on exit. If Afterburner re-applies a profile while mining (the offset goes back to your value or to 0), auto-uv puts the
    verified offset back after a quick check (since 1.7.1); any other value makes it stand down on that GPU. With no offset set the tuner starts at +120, on RTX 40 at +200, on RTX 50 at +300, on RTX 3070 / 3060 Ti by the lock, on RTX 3080/3090 at +180 (or `--uv-min` / `UV_MIN`).
-5. **Wait.** The first start tunes for about 15 minutes per GPU (all GPUs in parallel); since 1.7.2 the GPUs mine while they wait and only the GPU under check pauses. Later
+5. **Wait.** The first start tunes all GPUs at once, as many as the free RAM allows, for a few minutes (section 30); since 1.8.1 every GPU mines meanwhile, also the one under check. Later
    starts apply the saved value after a ~30 s check.
 6. **Files** are in the miner folder: `uv.json` (results) and `uv-restore.json` (your original offset). The folder must be
    writable, so do not put the miner into `C:\Program Files`. To tune again: `--uv-reset` for one start (in `EXTRA` of the `.bat`;
@@ -459,12 +463,12 @@ set "AUTO_UV=1"
 set "LOCK_CCLOCK=2445"
 set "LOCK_MCLOCK=810"
 set "UV_MIN=300"
-set "UV_MAX=495"
+set "UV_MAX="
 ```
 * **Mixed rig:** `LOCK_CCLOCK` / `LOCK_MCLOCK` take one value per GPU in `DEVICES` order, e.g. `set "LOCK_CCLOCK=1560,2445"`.
-  For the undervolt `AUTO_UV=1` alone is enough: the limits are chosen per card (RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150, others +495;
+  For the undervolt `AUTO_UV=1` alone is enough: since 1.8.1 every card climbs up to its driver's range (no built-in limit;
   RTX 40/50 start at +200/+300 by themselves). For manual control `UV_MIN` / `UV_MAX` / `UV_OFFSET` take a list in the same order,
-  e.g. `set "UV_MAX=225,495,150"` (`-` = that GPU's default). A list must have exactly one value per GPU.
+  e.g. `set "UV_MAX=225,-,150"` (`-` = that GPU's default). A list must have exactly one value per GPU.
 * **Faster tuning:** `set "UV_STEP=30"` halves the number of steps (coarser result). On RTX 50 a higher start (about +300)
   saves the most time: the card holds it anyway, and the search starts there (since 1.6.2 this is the default on RTX 50). Do not set it too high: if the card fails
   the check already at `UV_MIN`, it is not tuned and stays at your own offset (the log says so; lower `UV_MIN` then).
@@ -488,7 +492,7 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--uv-reset` | forget the saved profile of the current lock (and coin / mode); with `--auto-uv` that lock is tuned again; without a wallet the miner just exits |
 | `--uv-reset-all` | forget every saved result (all locks, coins, modes) |
 | `--no-color` | no colours in the log (also `NO_COLOR=1` or `FFG_COLOR=0`; `FFG_COLOR=1` forces them) |
-| `--uv-max N` | highest offset the tuner tries (at most 600; default per card: RTX 20xx / GTX 16xx 225, CMP 50HX 330, CMP 30HX/40HX 150, all others 495; on Windows: `set "UV_MAX=480"` in `start.bat`) |
+| `--uv-max N` | highest offset the tuner tries (default since 1.8.1: no limit of the miner's own, the driver's range; before 1.8.1 built-in limits per card type; on Windows: `set "UV_MAX=480"` in `start.bat`) |
 | `--uv-min N` | offset the tuner starts from; a start that fails steps down (default: RTX 3070 / 3060 Ti by the core lock, RTX 3080/3090 +180 (section 17); else the HiveOS/driver offset or 120; RTX 40: at least 200, RTX 50: at least 300; Windows: `UV_MIN`) |
 | `--uv-step N` | tuning step in MHz (default 15; a larger step tunes faster, the result is coarser; Windows: `UV_STEP`) |
 | `--uv-coarse N` | larger first steps in MHz for a faster tuning (default 30; since 1.7.6 for Pearl, NOID and CMFD); `0` = one step size, as before 1.7.6 |
@@ -497,13 +501,14 @@ offset first. Use it at your own risk, as with any overclocking.
 | `--uv-reval-hours H` | re-validation interval while mining (default 6, `0` = never) |
 | `--uv-dir DIR` | where `uv.json` and `uv-restore.json` are kept (also `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | only logs which GPUs would be changed (CUDA device → NVML device, bus id) and their ranges; changes nothing |
+| `--uv-parallel N\|auto` | how many GPUs are tuned at the same time (default `auto`; every coin since 1.8.1, section 30) |
+| `--uv-unpause` | forget the rig's auto-uv caution and pause (also `--uv-parallel-reset`; every coin since 1.8.1, section 30) |
 
 `--uv-max`, `--uv-min` and `--uv-offset` take one value for all GPUs, or a comma list with exactly one value per GPU in
 `--devices` order (without `--devices`: GPU0, GPU1, ... as in the log; on HiveOS that is the PCI bus order of the dashboard).
 `-` in a list = that GPU's default (`--uv-offset`: the GPU is left alone). A list of the wrong length is an error, it is never
-extended. An explicit `--uv-max` is used as given, also above the card's default; the log then warns
-(`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Example for 2× RTX 2060 SUPER,
-3× RTX 3070 Laptop and a CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (the same as the defaults).
+extended. An explicit `--uv-max` is used as given. Example for 2× RTX 2060 SUPER, 3× RTX 3070 Laptop and a CMP 40HX
+with your own limits on the Turing cards only: `--auto-uv --uv-max 225,225,-,-,-,150`.
 
 **Per-GPU lists (1.7.8, every coin):** every option that takes one value per GPU (`--devices`, `--lock-cclock`, `--lock-mclock`,
 `--moffset`, `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`, `--temp-stop`) accepts commas, semicolons or spaces, also mixed:
@@ -520,7 +525,7 @@ Default location of the files: next to the binary (Windows: the miner folder), o
 **Log lines** (all start with `auto-uv:`, so `grep auto-uv` shows the story):
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
-auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+1000 (max: the driver's +1000; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (...), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
@@ -616,17 +621,17 @@ Safe settings: stock clocks, a power limit, or a core lock (`--lock-cclock`).
 **`--auto-uv` for CMFD (NVIDIA).** With `--auto-uv` (HiveOS: *Extra config arguments*; Windows: `AUTO_UV=1` in
 `start-cmfd.bat`, run as Administrator) the miner finds an undervolt **for CMFD itself**, separate from the Pearl result.
 After the model is prepared and before the engine starts, every card is tuned on the real CMFD model: the core offset goes
-up from `--uv-min` (default: one step above 0) to `--uv-max` (default: the per-card limit of section 12: 495,
-RTX 20xx 225, CMP 50HX 330, CMP 30HX/40HX 150), every step is checked **bit-exactly** against stock, together with the
+up from `--uv-min` (default since 1.8.1: close to the expected result; before: one step above 0) to `--uv-max` (default since 1.8.1:
+the driver's range, no limit of the miner's own; section 12), every step is checked **bit-exactly** against stock, together with the
 official Common Foundry 1.0.16 test vector, and the result keeps a safety margin (`--uv-keep-last` keeps the last good
 step) and is confirmed by a longer check. It is saved in `uv.json` (section `cmfd`, per card UUID, with the driver and the
 engine version) and later starts apply it at once (or after a quick check when it was verified more than
 `--uv-reval-hours` ago).
 While mining, an engine `INTEGRITY | ERROR` or a CUDA fault on a tuned card steps its offset back one step (saved) and
 restarts the engine. An OC apply that resets the tuned offset while mining (HiveOS `nvidia-oc` at a miner start or after an
-OC change: the *Core Clock* value of the profile, 0 when the field is empty) gets it back (since 1.7.1): the engine of that GPU
-stops, the saved offset gets a quick check (a failure steps back), and the engine
-restarts at it; at most 4 times an hour, any other value makes the tuner stand down on that GPU. A check during which an OC
+OC change: the *Core Clock* value of the profile, 0 when the field is empty) gets it back (since 1.7.1): the GPU keeps mining
+(since 1.8.1), the saved offset gets a quick check (a failure steps back);
+at most 4 times an hour, any other value makes the tuner stand down on that GPU. A check during which an OC
 apply reset the offset is repeated. Your own offset comes back on exit (and after a crash at the next start), as without
 `--auto-uv`.
 If the check cannot run (no model, engine files missing, failure at stock) the card mines at 0 with a WARNING.
@@ -634,7 +639,7 @@ All cards are tuned at once. Log: `grep "auto-uv (cmfd)"`, e.g.
 `auto-uv (cmfd): GPU0 (bus 0d, RTX 3070) CMFD offset +0 -> +135: 19.53 -> 20.94 FW/s, 210.7 -> 215.8 W, ... saved`.
 Measured (Aria, averages of the stats line): RTX 3070 with a 135 W power limit is power-bound at ~1050 MHz, where the voltage
 is already at the bottom of the curve: result +195, no gain (13.84 → 13.97 FW/s at 135 W). The same card at 220 W:
-stock 19.5 FW/s at 214 W (328 k FW/kWh) → +135: 20.4–20.5 FW/s at 213–216 W (342–345 k, **+4–5 %**).
+stock 19.5 FW/s at 214 W (0.0911 FW/W) → +135: 20.4–20.5 FW/s at 213–216 W (0.095–0.096 FW/W, **+4–5 %**).
 CMP 50HX (power limit 225 W, core locked at 1410 MHz): stable up to its +225 limit; 13.10 FW/s at 216 W → 13.21 at 196 W
 (**+11 %**), 13.01 at 217 W → 13.17 at 203 W (**+8 %**). **The result depends on the operating point**: it is tuned again
 when the power limit changes by more than 3 %; since 1.7.2 each core clock lock (`--lock-cclock`, or the lock of the OC profile
@@ -651,7 +656,7 @@ like. Since 1.6.1 the miner checks this once per GPU after 30 s of mining and wa
 
 **Log.** The engine's lines are shown with a `[GPUn]` prefix (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` = harmless, a new
 block arrived in flight; `SHARE REJECTED` = wrong result, lower clocks). Every 10 s FreeForGem prints
-`[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
+`[ 290s] GPU0 37.04 (190 W, 0.1949 FW/W) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
 (`[DEVFEE]` during the fee slice; `STARTING` while the engine loads the model; `RESTARTING`, `DISABLED`).
 An engine that exits is restarted after 15/30/60/120/300 s; after 5 failed starts in a row (each under 2 minutes) that GPU
 is left alone and the log says why (no endless reconnects that could get the IP banned).
@@ -822,7 +827,7 @@ wrong NOID results; RTX 4070 Ti: the owner's Pearl +300 crashes NOID). So:
   offset back (saved) and mining goes on;
 * an OC apply while mining (HiveOS `nvidia-oc` at a miner start or after an OC change writes the profile's *Core Clock* value,
   0 when the field is empty; a Pearl offset there gives silently wrong NOID results) is noticed: a tuned NOID offset comes back
-  after a short check with mining on that GPU paused, the base 0 (without `--auto-uv`) or the `--uv-offset` value is set again
+  after a short check (the card keeps mining meanwhile), the base 0 (without `--auto-uv`) or the `--uv-offset` value is set again
   at once; at most 4 times an hour, then the miner stands down on that GPU (since 1.7.1).
 * RTX 3070, our runs: **eff @1400 MHz** — 87.5 W at offset 0 → **72.8 W at +195** (34.3 MH/s), MH/W **+20 %**; on the pool 34.8 MH/s @ 73 W (0.476 MH/W), 41/41 shares
   accepted. **speed @1560 MHz** — 127.8 W → **106.2 W at +195** (43.3 MH/s), edge +225, MH/W **+20 %**; on the pool
@@ -870,7 +875,7 @@ How FreeForGem handles it (Pearl, CMFD and NOID follow the same rule):
 What you see in the log (NOID speed kernel, RTX 3070, `--lock-cclock 1560 --auto-uv`, our run; the last two lines are from a run with a deliberately too deep `--uv-offset 280`):
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +495 (default) ...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +1000 (the driver's) ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (... 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
 ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (... 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
@@ -885,7 +890,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 ### 17. Profiles per clock lock, mining during tuning, crashes while mining (new in 1.7.2)
 
 **Why.** The undervolt edge moves with the core clock: an offset verified at 1410 MHz is not safe at 1805 MHz. On an 8x RTX 3070
-HiveOS rig another miner left a 1400 MHz lock behind, auto-uv found +450..+495 there, and after the HiveOS 1805 MHz lock came back
+HiveOS rig another miner left a 1400 MHz lock behind, auto-uv found offsets of +450 and more there, and after the HiveOS 1805 MHz lock came back
 these offsets were "applied without a start check": illegal memory access, Xid 13/43, a restart loop. 1.7.2 changes this:
 
 **One profile per lock.** auto-uv keeps one result per GPU, per coin / NOID mode and per core clock lock (`uv.json`, sections
@@ -906,8 +911,8 @@ these offsets were "applied without a start check": illegal memory access, Xid 1
   pick the profile again; after an OC apply without `--lock-cclock` the clock decides first, too.
 
 **Mining during tuning.** Before 1.7.2 no GPU mined until every GPU was tuned (~25 min on the 8-GPU rig). Now mining starts at
-once; each GPU's checks and tuning run in the background and pause only that GPU (for its tuning or its quick check); the
-other GPUs mine meanwhile. The RAM
+once; each GPU's checks and tuning run in the background while the GPUs mine. Since 1.8.1 this includes the GPU under check or
+tuning, on every coin, at a somewhat lower hashrate (section 30); in 1.7.2-1.8.0 only that GPU paused. The RAM
 queue of the checks ("waits its turn for a check") lets the waiting GPU mine meanwhile.
 
 **Your offset.** On HiveOS the offset put back on exit is the OC profile's *Core Clock* value of that GPU (`/hive-config/nvidia-oc.conf`),
@@ -994,7 +999,7 @@ the clocks can be set.
   lock starts near that profile, so it tunes faster (all three; not with `--uv-min`, not after a crash). The CMFD dry run (`--auto-uv-dry-run`) prints the start the tuning would take.
 - *After a crash* the search stays below the crashed offset everywhere and does not climb back into it; CMFD steps back from a crash while
   mining as NOID does.
-- *NOID and CMFD got what Pearl had:* the periodic re-validation (`--uv-reval-hours`; CMFD: its engine stops for it), a step back on a burst of
+- *NOID and CMFD got what Pearl had:* the periodic re-validation (`--uv-reval-hours`; CMFD: since 1.8.1 the card keeps mining during it), a step back on a burst of
   rejected shares, detection of a leftover tuned offset on the card (a run killed before it put the owner's offset back: the offset from before the
   tuning is put back, not the tuned one), crash records in `gpu-faults.json` for CMFD.
 - *Whose Xid:* an Xid that the kernel log (`dmesg`, Linux) pins on another process (another miner on the same rig) is not counted as this
@@ -1020,7 +1025,7 @@ HiveOS starts the miner again after the boot. A rig that already has the unlocke
 alone and mining goes on. Whether the unlocked build is in place is read from the build tag of the kernel module in
 `/proc/driver/nvidia/version` (the stock driver of the same version has another tag). The log lines begin with `--cmp-driver:`.
 
-Environment: `FFG_CMP_DRIVER_DRY_RUN=1` runs every check and says what it would do, changing nothing (use it first);
+Environment: `FFG_CMP_DRIVER_DRY_RUN=1` (or `--cmp-driver --dry-run`) runs every check and says what it would do, changing nothing (use it first);
 `FFG_CMP_DRIVER_NO_REBOOT=1` installs without the reboot; `FFG_CMP_DRIVER_FORCE=1` installs again even if the driver is in place or no CMP card is found.
 
 Before you use it: **this replaces the NVIDIA kernel driver of the whole rig** (every GPU program uses it afterwards) and needs a **reboot**;
@@ -1039,7 +1044,7 @@ address (on InnovLab: your holder id, 64 hex), Pool: *Configure in miner*, Miner
 | Field | proximamine | InnovLab | solo (your node) |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | same | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | same | same |
 | Hash algorithm | leave `----` (HiveOS has no `proxima` in its list) | same | same |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (or `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://NODE_IP:PORT` (the node's `mine.seeker.listen`) |
@@ -1205,7 +1210,7 @@ sections 12 and 17), measures hash rate and power and keeps the most efficient l
   `--lock-mclock`, `--moffset`, `--temp-limit` work as before; the memory lock is part of the saved key.
 - **The sweep, highest lock first, all GPUs in parallel.** The miner mines at each lock in turn; its log goes to the same console / log
   and HiveOS keeps showing the hash rate. At each lock auto-uv applies the verified profile of that lock, or checks / tunes it (~5-12 min;
-  only that GPU pauses), then the GPU **mines** at it for a few measured minutes. **Shares found meanwhile go to the pool as usual.**
+  since 1.8.1 the GPU keeps mining meanwhile, at a lower hashrate), then the GPU **mines** at it for a few measured minutes. **Shares found meanwhile go to the pool as usual.**
   Between rounds the miner restarts (a few seconds without hashing).
 - **Early stop:** once a lock is more than the allowed loss below the top hash rate, the lower locks are not measured.
 - **Choice:** `--auto-lock-goal eff` (default) = the best TH/W (NOID: MH/W, PROX: GH/W) among the locks within `--auto-lock-max-loss` %
@@ -1311,12 +1316,12 @@ command line works unchanged with `--algo neb` (or `--coin neb`); the NEB option
   (`freeforgem --gate --node 127.0.0.1:3441 --gate-token-file FILE --gate-listen 0.0.0.0:3442`); every rig mines with
   `--pool neb://GATE_IP:3442 --password TOKEN` (HiveOS: Pool URL `neb://GATE_IP:3442`, Pass = the token). The gate gives every
   rig a nonce range of its own and checks every share again.
-- **Files.** `nebgpu.dll` / `libnebgpu.so` (the NEB GPU engine nebgpu **0.8.1**, closed source, the same binary as in FFGN,
+- **Files.** `nebgpu.dll` / `libnebgpu.so` (the NEB GPU engine nebgpu **0.8.4** since 1.8.1, closed source, the same binary as in FFGN,
   checked by its SHA-256) and
   `neb-datasets.bin` (the dataset of the NEB main network, 16,087,037 bytes, checked by its BLAKE3 at every start) are in
   the packages. `--dataset FILE` gives another copy. A Pearl-only rig never reads them.
 - **Units.** MA/s = 10^6 attempts per second; efficiency in MA/W. HiveOS shows khs = MA/s x 1000, algo `nebhash`, and the
-  rate over the last 5 minutes (each block brings a new model, so the rate changes from block to block).
+  rate over the last 15 minutes (each block brings a new model, so the rate changes from block to block).
 - **Memory clock.** NEB is memory bound. A HiveOS OC profile that locks the memory low (Pearl's 810 MHz) is replaced by the
   card's maximum while NEB mines and put back on exit (`--keep-hive-mem` keeps the profile's lock; `--table-mclock N`:
   below). A Pearl run keeps its 810 MHz lock as before:
@@ -1351,7 +1356,7 @@ miner*, Miner *Custom* → *Setup Miner Config*:
 | Field | Suprnova | your gate |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | same |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (the blocks pay the node's `--miner-lock`) |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (with a backup: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://GATE_IP:3442` |
@@ -1359,7 +1364,7 @@ miner*, Miner *Custom* → *Setup Miner Config*:
 | Extra config arguments | for example `--auto-uv --lock-cclock 1800 --table-mclock 810` | same |
 
 The OC profile may keep Pearl's memory lock (810 MHz): NEB runs the memory at its maximum while it mines and puts the
-profile's lock back when it stops. HiveOS shows khs (MA/s x 1000), the 5-minute rate, MA/W next to the version, and the tags
+profile's lock back when it stops. HiveOS shows khs (MA/s x 1000), the 15-minute rate, MA/W next to the version, and the tags
 `LOCK NOT HELD`, `NO TABLE`, `GPU LOST`, `REBOOT NEEDED` when they apply.
 
 **Windows:** `start-neb.bat` (set `WALLET`, `POOL`, or `NODE` for solo; `PASSWORD` = a gate token; `DEVICES`, `LOCK_CCLOCK`,
@@ -1387,6 +1392,8 @@ block's model, so compare settings over hours, not minutes.
 | `--uv-parallel N`, `--uv-unpause`, `--ramp-ms N`, `--api [HOST:]PORT` | see `freeforgem --algo neb --help` |
 
 ### 25. What 1.8.0 changed for every coin
+
+*1.8.1 added mining during the auto-uv tuning on every coin and guards against an endless tuning: section 30.*
 
 **What's new in 1.8.0, in short:**
 
@@ -1459,7 +1466,7 @@ The Ting miner FFGT (0.2.2) is a coin of FreeForGem since 1.8.0: the same kernel
   given, `--no-mem-lock` leaves the memory alone (CMP 50HX: the driver has no memory lock). Core lock on an RTX 3070: `1500` =
   the best GH/W, `1800` = more GH/s.
 - **auto-uv / auto-lock** work as for the other coins: profiles per GPU and core lock in `uv.json` (section `ting`; FFGT's
-  profiles are imported once). Default ceilings per card: Turing +225, CMP 50HX +330, CMP 30HX/40HX +150, others +495. A crash
+  profiles are imported once). Since 1.8.1 no built-in ceiling: the driver's range or `--uv-max`. A crash
   while mining at a tuned offset goes 2 steps below it, without tuning from scratch.
 - **One engine process per GPU** (CUDA): a CUDA fault or a hung engine on one card restarts only that card in a few seconds
   while the others keep mining; 3 faults within 10 min at its safe offset = FAULTY, a 10-minute pause (section 29). HiveOS shows
@@ -1573,7 +1580,7 @@ get 810 back on exit), the Pearl cards keep it. Both groups use the worker name 
 What the HiveOS dashboard shows: the algo and the total of the group with the most cards (of groups with as many cards,
 the first one in `--split`); per card its own rate; when the coins have different units, every card is given as its plain rate per second (NEB
 attempts/s, Pearl hashes/s), so do not compare those numbers across coins; accepted and rejected shares are the sum of all
-groups; the version column lists every group with its efficiency, e.g. `1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`. HiveOS
+groups; the version column lists every group with its efficiency, e.g. `1.8.1 split: neb 1.40 MA/W + pearl 0.61 TH/W`. HiveOS
 shows one `freeforgem` process per group (and per GPU for NEB / Ting). Tested on a 4-card HiveOS rig (2 NEB + 2 Pearl): when one
 NEB card hung at an auto-uv step only that card's engine restarted; the other three cards kept mining. Step-by-step:
 [HIVEOS.md](HIVEOS.md).
@@ -1650,6 +1657,201 @@ so, at most once in 10 minutes: `WARNING: the pool answers late: ... this is los
 switch ...)`. The miner cannot repair the network: check the rig's network card, cable and switch. NEB: `--debug-timing` logs
 for every share the times scan -> CPU check -> socket send (ms) and for every job socket -> dispatch.
 
+### 30. What 1.8.1 changed: auto-uv while mining on every coin, new in 1.8.1
+
+**In short.** With `--auto-uv` every card now **keeps mining while its voltage is tuned**, on every coin: Pearl, NOID, PROX,
+Ting, CMFD and NEB. Shares go to the pool through the whole tuning and the pool sees the worker all the time. The tuning is
+several times shorter than in 1.8.0, all cards are tuned at once, and every step is still checked bit for bit; a wrong result is
+rolled back. The figures below were measured on our rigs (RTX 3070); read them as "about".
+
+![auto-uv on PROX: all four cards tune at once while they mine](docs/img/ffg181-autouv-prox-tuning.png)
+
+| Coin (RTX 3070) | Tuning from scratch, 4-card rig | What the tuning gives |
+|---|---|---|
+| NOID | 8.5–9.5 min (1.8.0: about 25 min) | +5…+9 % per watt |
+| PROX | 4.5–5 min (1.8.0: about 16 min) | +2…+8 % per watt |
+| Ting | 6–8.5 min | +15…+17 % per watt |
+| CMFD | about 10–18 min | +17…+20 % per watt |
+| NEB | 1.5–2 min | −9…−10 W per card |
+| Pearl, 8 cards, lock 1680 | all 8 at once | 0.660 → 0.677 TH/W at the same 601 TH/s (−72 W, −7.8 % for the rig) |
+
+- **Mining during the tuning.** Before 1.8.1 a card stopped mining at every tuning step (Pearl: up to about 14 minutes without
+  hashrate, the pool lost the worker). Now the card mines all the time; its hashrate is somewhat lower only while a step is
+  checked, and full again afterwards. The Pearl warm-up mines too.
+- **All cards at once.** As many cards are tuned at the same time as the rig's free RAM allows, usually all of them. After
+  trouble of the whole rig (a card lost from the bus, all cards stalled) the miner gets careful and tunes one card at a time, and
+  remembers that for the rig. `--uv-parallel N` sets the number by hand; `--uv-parallel-reset` forgets the caution.
+- **A short start.** The search starts close to the expected result instead of 0. `--uv-min N` sets the start by hand.
+- **No built-in ceiling.** The offset climbs as long as it saves power; the limit is the range of the card's driver or your own
+  `--uv-max N`. The miner's old per-card ceilings are gone; a saved result that stopped at such an old ceiling climbs on at the
+  next start.
+- **A failure is no reason to start over.** After a failed step or a crash while mining the card goes on 2 steps below the failed
+  offset (never above the last confirmed one) and keeps the steps that passed. Progress is saved after every step, so a stop in
+  the middle of a tuning loses nothing.
+- **Faults are counted per coin.** A card that keeps crashing is left out of mining for a while; the screen shows `OUT 14m` (the
+  minutes left), and the card comes back by itself. A card left out on one coin mines another one. A start you make (a miner
+  restart, a new flight sheet, a reboot after a clean stop) gives the card a new chance.
+- **Guards against an endless tuning and restarts** (every coin): repeated failures on a card switch its auto-uv off for 24 hours
+  (the card mines at its last confirmed offset); repeated restarts of the rig during a tuning pause the tuning until `--uv-unpause`
+  / `--uv-reset-all` or a new version; an unfinished tuning goes on at the next start. Only real failures count: a fault at the
+  edge of a tuning does not. The states show on the screen, the stats line, the API and HiveOS: `[AUTO-UV GPU3 OFF 24h]`,
+  `[AUTO-UV PAUSED]`, `[AUTO-UV NOT CALM]`.
+- **Turing (RTX 20xx, GTX 16xx, CMP HX), every coin:** a result is confirmed longer on its mining load before it counts, and a
+  card that crashes again soon after goes back at once to its stable offset instead of stepping down again and again. A Turing
+  profile tuned by an older version gets this longer check once.
+- **Pearl, a new miner core only** (the same driver and locks): the saved result gets a short check and the card mines at once.
+- **Every result says how long it took** (`RESULT ... tuning took 1 min 58 s, 6 checks`); the RIG row of the table shows the
+  saving of the whole rig and the tuning time (`-8.5% in 1m 32s`).
+
+![auto-uv on Ting: a step at +360 failed on two cards; they mine on 2 steps lower](docs/img/ffg181-autouv-ting-failed.png)
+
+**One-shot flags.** `--uv-reset`, `--uv-reset-all`, `--uv-unpause` (the same as `--uv-parallel-reset`) and `--auto-lock-reset`
+act **once, at a start you make**: a miner restart or stop + start, a new flight sheet, a start by hand, a reboot after a clean
+stop. A restart after a fault skips them, so a crash cannot wipe the progress. Add these flags for one start and take them out of
+the flight sheet afterwards: `--uv-reset` left in the sheet starts the tuning from scratch at every restart you make, and **never
+keep `--uv-unpause` in the flight sheet**: it would lift the restart guard at every start.
+
+CMFD: the efficiency is in FW/W.
+
+### 31. The screen: a table of the GPUs, new in 1.8.1
+
+In a terminal (the HiveOS miner screen, a Windows console or Windows Terminal, a Linux shell) the miner shows one table, redrawn
+in place, instead of a scrolling log. **The log itself does not change:** the log file, `tee`, HiveOS `miner log` and h-stats.sh
+get every line exactly as before.
+
+![FreeForGem 1.8.1 on NEB, 4× RTX 3070, a few seconds after the start](docs/img/ffg181-screen-neb.png)
+
+**Modes**
+
+- `--ui auto` (default): the table when someone watches the terminal, else the plain lines.
+- `--ui table`: the table even where auto would not draw it; `--ui lines`: the old line-by-line log.
+- `--ui ascii` / `--ui unicode` (or `FFG_UI_ASCII=1`): the box in `+ - |` or in Unicode lines. Take `ascii` when the terminal
+  shows odd letters instead of lines.
+- `--no-color` (or `NO_COLOR=1`): no colours; the states are read from the marks.
+- `--ui-demo [COIN] [SECS]`: the table with a made-up rig, no GPU and no pool touched (COIN: pearl, noid, prox, ting, cmfd, neb,
+  split): to see the look and the colours.
+- `--ui-dump N`: every N-th frame also into `ffg-ui-frames.txt` (to attach to a bug report).
+
+**The header**
+
+| Line | What it shows |
+|---|---|
+| first | the version (blue bar), the coin (purple) and its algorithm; on the right `up`, how long the miner runs |
+| `pool` | the pool and the worker (the worker in green); with `--split` every group's own |
+| `net` | as far as the coin has it: block height, the job's id and age (`job 3440026a 8s`), the share difficulty (`share d 1.50G`; yellow when the pool has dropped it far below normal) and the network's in the same unit (`net d 442T`), the data set or model (NEB `data slot 0 Kepler`, the model in its own colour), ping to the pool, dropped stale shares (shares of jobs the pool cancelled; not rejects), blocks found solo |
+| `mode` | first the coin's algorithm (`pearlhash`, NOID `Poseidon2b eff` / `Poseidon2b speed`, PROX `BLAKE2b txid`, Ting `SHA-256`, CMFD `ForgeMatrix V4, FreeForgeMiner x.y.z`, NEB `nebhash v2`; with `--split` per group), then the coin's mode, auto-uv, the core and memory locks |
+| `args` | your options as given: option names cyan, values white. Secrets are masked `***` (`--password`, HiveOS tokens, pool secrets). A long line wraps by words |
+| `!` | important events (warnings, faults, rejects, `clocks:`), up to 5, newest first, each with its own "ago" timer, each in full. They keep a fixed block of lines, so the table does not jump when they come and go |
+| `!!` | live alarms, as long as they hold: `REBOOT NEEDED` (Xid 79), `NO TABLE` (NEB), `GPU LOST`, `LOCK NOT HELD`, a memory lock of the HiveOS profile |
+
+**The columns**
+
+| Column | Meaning |
+|---|---|
+| GPU | the number and the state mark (`●` green: mining, `►`: tuning) |
+| BUS | the PCI bus (grey) |
+| NAME | the card model |
+| COIN | the coin of the card's group (`--split` only) |
+| TH/s, MH/s, GH/s, FW/s, MA/s | hashrate in the coin's unit (green) |
+| TEMP | core temperature: green, yellow or red |
+| FAN | fan speed in %: green, yellow from 60 %, red from 85 % |
+| W | power |
+| PL | the card's power limit; red when the card runs into it |
+| TH/W, MH/W, … | efficiency **per watt** (cyan) |
+| CORE/LOCK, MEM/LOCK | real clock / lock (the lock grey). NEB with `--table-mclock 810`: `/810` cyan while that memory lock is in use |
+| OFFSET | the V/F offset and the auto-uv state, see below |
+| FOUND / ACC / REJ / STALE | shares of the card: found / accepted (green) / rejected by the pool (red) / stale (yellow) |
+| BAD | wrong results of the card **while mining**, caught by the miner's check and never sent. Not bad shares: those the pool refused are REJ. Wrong results during an auto-uv step are the guard at work: they show in OFFSET, BAD does not count them. Red when above 0 |
+| STATUS | mining / tuning / checking / `OUT 14m` / DEAD |
+| RIG row | the rig total: hashrate, watts, per watt, shares, the saving of the tuning and its time (`-8.5% in 1m 32s`), how many cards mine |
+
+The legend under the table explains the marks and colours (and `/810 NEB table mem lock` when that lock is in use). A column the
+coin has no data for is hidden. A narrow window hides the less needed columns first; nothing runs past the edge.
+
+**The OFFSET cell**
+
+| Looks like | Means |
+|---|---|
+| `► +300 ↑ 3/9` orange | tuning: step 3 of 9 at this offset |
+| `+450 ✓ confirm` orange | the found offset is being confirmed |
+| `+375 ✗ failed` orange | a tuning step at this offset failed |
+| `+270 ✗ -2`, `+315 × roll-back` orange | a failed step and the roll-back to 2 steps below it |
+| `+390 ✗ 15 wrong` orange | the check caught 15 wrong results on the current step: none went to the pool |
+| `+315 ✓ -9.6%` green | tuned; the saving per watt against the base on the same load |
+| `+315 ✓ tuned` green | the profile is applied, there is no base for a percentage |
+| `-` yellow | auto-uv is off for this card |
+| `OUT 14m` | the card is left out after repeated faults, for the minutes shown; it comes back by itself (section 30) |
+
+**Colours of the messages.** **Yellow:** the auto-uv and auto-lock lines and warnings. **Orange:** everything that belongs to the
+tuning of a card, a failed step and its roll-back included: that is the tuning doing its job. **Red** only for what needs your
+hands: rejected shares, BAD while mining, GPU LOST, REBOOT NEEDED, NO TABLE, auto-uv off or paused, a pool that is down.
+
+![--split with four coins on four cards: COIN column, a net line per group, tuned offsets green](docs/img/ffg181-screen-split-4coins.png)
+
+![--split NEB + Pearl: the latest events above the table, roll-backs orange](docs/img/ffg181-screen-split-notices.png)
+
+**Under HiveOS** open Hive Shell (or SSH) and type `miner`. `miner log`, the web "Miner log" and the watchdog get the log lines,
+not the redrawn screen. GNU screen has 16 colours only: there orange is a dim yellow and the marks ✗ ✓ are × √. The table heals
+by itself if a browser terminal loses part of it, and it is drawn anew when `miner` attaches.
+
+### 32. Tuned offsets into the HiveOS OC profile: `--hive-oc-sync`, new in 1.8.1
+
+HiveOS only, with `--auto-uv`. Once the cards are tuned, the miner reports the results to HiveOS, and with an API token it also
+writes them into this worker's OC profile: then they stay after a reboot and with another miner.
+
+- **`--hive-oc-sync`**: one **message in the HiveOS panel** (the worker's messages), e.g. `FreeForGem auto-uv (Ting): 4 GPUs
+  tuned at 1800 MHz: -44 W (-11.8 %)`. Its details list every card (offset, lock, watts before and after), the total, and the
+  lines `Core Clock Offset: …` / `Lock Core Clock: …` (with `--lock-mclock` also `Lock Mem Clock`) ready to paste into the OC form.
+  It is sent again only when the results change, not at every start. Nothing is written.
+- **With a token** (`--hive-oc-sync-token-file PATH`, preferred, or `--hive-oc-sync-token TOKEN`, or `$FFG_HIVE_TOKEN`): the same
+  message, and the confirmed **offsets and clock locks** go into the OC profile by themselves: the core lock with `--lock-cclock` /
+  `--auto-lock`, the memory lock with `--lock-mclock`. The profile of the flight sheet's algo is used if there is one, else
+  *Default Config*. The rest of the profile (power limit, fans, memory offset, other algos) is not touched. HiveOS then applies the
+  profile on the rig. The message ends with `applied to the OC profile`, `already in the OC profile`, or says why nothing was written.
+- **`--split`:** every group writes only its own cards and sends its own message; the values of the other groups stay.
+- **Safety:** a copy of the OC profile is kept before every write. When a card loses its result, your old value goes back into the
+  profile. Values you type into the profile yourself stay yours. A card that is still being checked does not hold up the others.
+- **`--hive-oc-sync-test`:** sends one test message, prints the answer and exits; with a token it also checks that it arrived.
+
+**Making the token.** HiveOS web → account settings → *Sessions* / API → a **new API token just for this** (a token gives full
+access to your farm; a separate one can be revoked alone). Keep it in a file on the rig that only root can read:
+
+```
+nano /root/ffg-hive-token          # paste the token, save
+chmod 600 /root/ffg-hive-token
+```
+
+and put into *Extra config arguments*: `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. Not in
+`/hive-config`: the files there are readable by every user. A token written straight into the flight sheet
+(`--hive-oc-sync-token …`) works too, but it is then visible in the process list (`ps`) and in the rig's config; the miner masks it
+in its own log and screen. A rejected token: an orange line, no more OC writes until the next restart, the messages go on.
+
+![The message in HiveOS: results per card and the lines for the OC profile](docs/img/ffg181-hiveos-ocsync-message.png)
+
+![The OC profile after --hive-oc-sync: CORE 360 360 345 345, LCORE 1800, LMEM 810](docs/img/ffg181-hiveos-oc-after.png)
+
+![The miner screen: CMFD tuned (-18 % for the rig in 14 min) and the line "hive-oc-sync: sent to HiveOS"](docs/img/ffg181-autouv-cmfd-tuned.png)
+
+### 33. Other changes in 1.8.1 (HiveOS, NEB, pools)
+
+- **The HiveOS miner window stays open.** After an exit with an error the miner starts again in the same window
+  (`freeforgem exited (code N), restarting in 5 s`); the one-shot flags (section 30) are skipped at such a start. `miner stop` /
+  `miner restart` (also the HiveOS watchdog's) work as before. After frequent exits the window waits 10 minutes before the next
+  start; `miner restart` starts it at once.
+- **The HiveOS package name has exactly one dash:** `freeforgem-1.8.1_hiveos.tar.gz` (name-version_hiveos). With a second dash
+  HiveOS takes a wrong miner name and the miner silently does not start. HiveOS caches a package by its file name: a new build under
+  the same name needs a new folder in the URL, or on the rig `/hive/miners/custom/custom-get <URL> -f`.
+- **HiveOS `--split` from a flight sheet of any coin:** the flight sheet's pool and wallet go to the group of the flight sheet's
+  coin. A NOID flight sheet without `--algo` works by itself.
+- **NEB:** engine nebgpu 0.8.4, faster on Turing. `--table-mclock 810` lowers the memory only where NEB does not need it; for a
+  model that needs the full memory clock it stays full, and that is right (at 810 MHz such a model would lose most of its
+  hashrate). Such a model no longer raises a false `NO TABLE` alarm.
+- **A spoiled pool session is replaced** (NEB, NOID, PROX, Ting, Pearl stratum): when the pool drops the share difficulty or
+  answers late with many stale shares, the miner opens a new session: yellow line `pool: reconnecting: <why>`. Your session and
+  the dev fee session are watched each on its own.
+- **`--api-port N` on every coin** (Pearl, NOID, PROX and CMFD too; off by default, Ting serves 4068 as before).
+- **Dev fee unchanged:** 1 % (section 10).
+
 ## Русский
 
 ### 1. Что это
@@ -1693,7 +1895,7 @@ FreeForGem запускается в HiveOS как **Custom miner**: SSH и ру
 **Ссылка для установки (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1725,8 +1927,8 @@ NEB, Ting и риг с разными монетами на разных кар�
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.8.0-linux-x86_64.tar.gz
-cd freeforgem-1.8.0
+tar xzf freeforgem-1.8.1-linux-x86_64.tar.gz
+cd freeforgem-1.8.1
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet ВАШ_АДРЕС_PRL --worker rig1       # Kryptex
@@ -1747,8 +1949,8 @@ cd freeforgem-1.8.0
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.8.0-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0-windows-x64.zip`
+1. Скачайте **`freeforgem-1.8.1-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -1798,7 +2000,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.0-windows-x64
+cd /d C:\Mining\freeforgem-1.8.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -1894,17 +2096,17 @@ AlphaPool `eu1.alphapool.tech:5571` (также `us1`, `us2`, `ru1`, `sg1`), Him
 
 RTX 40 и 50 работают на гораздо более высоком локе ядра (**1900–2500 МГц**) и держат больший offset, чем RTX 30.
 
-**Смешанный риг:** достаточно `--auto-uv` — пределы выбираются по каждой карте автоматически (с 1.6.2): RTX 20xx / GTX 16xx
-до +225, CMP 30HX/40HX до +150 (CMP 50HX: +330), остальные до +495; при старте в логе виден диапазон каждой карты
-(`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`). Для ручного управления — по значению
-на карту в порядке `--devices`: `--uv-max 225,495,150` (`-` = значение по умолчанию для этой карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
+**Смешанный риг:** достаточно `--auto-uv`. С 1.8.1 у майнера нет своего потолка смещения: каждая карта поднимается, пока каждый
+шаг снижает мощность, самое большее до предела, который даёт её драйвер (до 1.8.1 были встроенные пределы по типу карты); при
+старте в логе виден диапазон каждой карты (`auto-uv: GPU5 (bus 0b, CMP 40HX): range +60..+1000 (max: the driver's +1000; ...)`).
+Ограничить карту самому — по значению на карту в порядке `--devices`: `--uv-max 225,-,150` (`-` = без вашего предела для карты). Turing (RTX 20 / GTX 16 / CMP 30HX–50HX, sm_75) поддерживается с 1.5.3: в отличие от RTX 30 ему нужна память на 5001 (см. таблицу); CMP 170HX / A100 (sm_80) не поддерживаются.
 
 **Карты CMP (CMP 30HX / 40HX / 50HX).** CMP 30HX/40HX майнят Pearl на Turing-ядре (память лочить на 5001, предел auto-uv +150).
 **CMP 50HX и Pearl:** на драйвере 610.43.03 карта даёт около 67 TH/s при локе ядра 1300 и около 77 TH/s при 1500
 (166–176 Вт на карту; риг 4× CMP 50HX, FreeForGem 1.7.8); на старых драйверах 550.78 и 595.91.07 только ~2,6 TH/s
 (там int8 тензорные ядра урезаны ~в 17 раз), поэтому сначала обновите драйвер. **Для Common Foundry (CMFD) CMP 50HX подходит:** ~13 FW/s на карту при ~220 Вт (лимит мощности 225 Вт,
 лок ядра 1410 МГц, память без лока; риг 4× CMP 50HX, пул Aria), с `--auto-uv` (подбор под CMFD, +225) — около 13,2 FW/s при
-196–203 Вт (+8–11 % FW/kWh); см. раздел 13. CMFD нужно ~7 ГБ свободной видеопамяти, на картах с 6 ГБ (CMP 30HX) он не
+196–203 Вт (+8–11 % FW/W); см. раздел 13. CMFD нужно ~7 ГБ свободной видеопамяти, на картах с 6 ГБ (CMP 30HX) он не
 запустится. **Разблокировка CMP не входит в FreeForGem:** драйверов и программ, снимающих ограничения CMP-карт, мы не
 предоставляем и не поддерживаем; все цифры здесь — для карт как есть.
 
@@ -1938,9 +2140,9 @@ RTX 40 и 50 работают на гораздо более высоком ло
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.8.0-linux-x86_64.tar.gz freeforgem-1.8.0_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.8.0-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.8.0-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.8.1-linux-x86_64.tar.gz freeforgem-1.8.1_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.8.1-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.8.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -1993,13 +2195,14 @@ Pearl и NOID — второй логин на вашем пуле (см. выш
 **Что делает**
 1. Читает V/F offset, который стоит сейчас (разгон в HiveOS, ваш скрипт и т. п.), и записывает его в файл восстановления
    *до* любых изменений.
-2. Прогревает карту, затем поднимает offset шаг за шагом и проверяет каждый шаг побитно под полной нагрузкой — на GPU и на
+2. Прогревает карту (с 1.8.1 карта майнит и во время прогрева), затем поднимает offset шаг за шагом и проверяет каждый шаг побитно под полной нагрузкой — на GPU и на
    CPU официальным верификатором. У предела бывают неверные результаты без всякой ошибки драйвера, поэтому каждый шаг
    проверяется именно так (с 1.7.6 подбор для Pearl, NOID и CMFD идёт примерно вдвое быстрее, с тем же результатом).
 3. Неверный результат, ошибка CUDA, Xid или зависание останавливают подъём. Итог берётся с **запасом** ниже последнего
    успешного шага и подтверждается более длинной проверкой; если подтверждение не прошло, берётся ниже.
-   Выше +495 не поднимается (`--uv-max`, максимум +600; до 1.5.1 было +300 с жёстким потолком +400); с 1.6.2 на Turing
-   (RTX 20xx / GTX 16xx) — выше +225, на CMP 30HX/40HX — выше +150 (CMP 50HX — выше +330), если `--uv-max` не задан. Карты RTX 40/50 часто держат +450..480.
+   С 1.8.1 встроенного потолка нет: подъём останавливается, когда мощность перестала падать, или на первой непрошедшей
+   проверке, самое позднее — на верхней границе диапазона драйвера; `--uv-max N` задаёт ваш предел (до 1.8.1 у майнера были
+   встроенные пределы по типу карты, и результат, упёршийся в такой предел, поднимается дальше). Карты RTX 40/50 часто держат +450 и выше.
    Сохранённый результат выше уменьшенного предела не применяется как есть: карта работает на пределе (после быстрой проверки),
    а сохранённый результат остаётся на случай, когда предел снова поднимут; если результат *равен* старому пределу, при
    повышении предела карта подбирается заново.
@@ -2009,13 +2212,13 @@ Pearl и NOID — второй логин на вашем пуле (см. выш
    Каждой проверке нужно около 1,8 ГБ ОЗУ: на риге с малым объёмом ОЗУ проверки нескольких карт ждут своей очереди
    (`waits its turn for a check` в логе), а остальные карты при этом майнят (с 1.7.2 майнинг стартует сразу; с 1.7.1 карта,
    ждущая очереди на перепроверку, продолжает майнить).
-5. Во время майнинга: каждые 6 часов (`--uv-reval-hours`) настройка перепроверяется (майнинг на этой карте приостанавливается
-   примерно на 30 с). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
+5. Во время майнинга: каждые 6 часов (`--uv-reval-hours`) настройка перепроверяется (с 1.8.1 карта продолжает майнить,
+   около 30 с с пониженным хешрейтом). Если найденный результат не прошёл проверку на CPU или пошла серия отклонённых шар, offset
    снижается на шаг (но не ниже вашего значения) и сохраняется. **Применение разгона (с 1.7.1):** `nvidia-oc` в HiveOS при
    каждом старте майнера и каждой смене OC записывает значение *Core Clock* из профиля разгона, **0, если поле пустое** — до
    1.7.1 это выключало андервольт до следующего перезапуска (риг 4× RTX 3070 ел 604 Вт вместо ~440). Теперь offset, который
    прочитан как 0, как значение профиля HiveOS или как ваш исходный offset, считается применением разгона: auto-uv ставит
-   проверенный offset обратно после быстрой проверки (майнинг на карте встаёт на ~30 с; при ошибке — шаг вниз, как при
+   проверенный offset обратно после быстрой проверки (карта продолжает майнить, ~30 с с пониженным хешрейтом; при ошибке — шаг вниз, как при
    перепроверке; не чаще 4 раз в час), в логе `the offset was reset to +0 by an OC apply (...); re-applying the verified +285
    after a quick check`. Проверка, во время которой разгон сбросил offset, повторяется. Любое другое значение — ваш собственный
    выбор: auto-uv отступает на этой карте и не воюет.
@@ -2032,8 +2235,10 @@ Pearl и NOID — второй логин на вашем пуле (см. выш
 
 **Требования.** Драйвер NVIDIA (NVML подгружается во время работы, ставить ничего не нужно) и **root** в Linux / HiveOS
 (там майнер запускается от root) или **администратор** в Windows. Без NVML или прав майнер пишет причину в лог и
-майнит как обычно. **Время:** первый подбор занимает около **15 минут на карту** (10-25 в зависимости от карты; карты рига подбираются параллельно,
-остальные при этом майнят; RTX 3070 с 1.7.2: около 11 мин на риг из 8 карт). Последующие запуски добавляют около 30 с.
+майнит как обычно. **Время:** с 1.8.1 все карты подбираются сразу, и первый подбор занимает **несколько минут** (4x RTX 3070: NEB 1,5–2 мин, PROX около 5,
+Ting 6–8,5, NOID около 9, CMFD 10–18; до 1.8.1 — около 15 минут на карту). Последующие запуски добавляют около 30 с. **С 1.8.1 карта майнит всё время,
+на всех монетах:** пока она подбирается, она продолжает майнить, и её шары идут в пул; хешрейт немного ниже, только пока шаг проверяется. До 1.8.1 на каждом шаге майнинг карты
+останавливался (на Pearl до ~14 минут без хешрейта, пул не видел воркер). Защита от бесконечного подбора и флаги `--uv-parallel` / `--uv-unpause`: раздел 30.
 
 **Windows: по шагам.** Проверено на Windows 11, GeForce RTX 3070, драйвер 581.80: драйвер даёт майнеру читать и менять
 offset (в логе `allowed -1000..1000`), подбор нашёл +240 вместо +225 (98.4 Вт → 86.5 Вт на той же частоте), и защита тоже
@@ -2045,8 +2250,8 @@ offset (в логе `allowed -1000..1000`), подбор нашёл +240 вме�
    на той же частоте; без фиксации карта может вместо этого буститься выше, и экономия меньше.
 3. **Включите**, любой из вариантов:
    * `start.bat` (или любой `start-luckypool-*` / `start-kryptex-*`): уберите `rem` перед `set "AUTO_UV=1"`. Верхний предел —
-     `set "UV_MAX="` (пусто = по карте: +495, RTX 20xx/GTX 16xx +225, CMP 50HX +330, CMP 30HX/40HX +150; RTX 40/50 часто держат +450..480, RTX 30
-     обычно +200..360). Список через запятую задаёт значение для каждой карты в порядке `DEVICES`, например `set "UV_MAX=225,495,150"`.
+     `set "UV_MAX="` (пусто = без вашего предела, с 1.8.1 — диапазон драйвера; RTX 40/50 часто держат +450 и выше, RTX 30
+     обычно +200..360). Список через запятую задаёт значение для каждой карты в порядке `DEVICES`, например `set "UV_MAX=225,-,150"`.
    * `start-nvidia-smi.bat`: `AUTO_UV=1`, диапазон в `UV_MIN` / `UV_MAX`, плюс лимит мощности и фиксация частот через `nvidia-smi`.
    * своя командная строка: `freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`.
 4. **Точка старта.** Подбор начинает с offset, который сейчас стоит на карте (RTX 3070 / 3060 Ti с 1.7.2 — со значения по локу ядра, раздел 17); старт, не прошедший проверку, понижается сам. Смещение *Core Clock*
@@ -2054,8 +2259,8 @@ offset (в логе `allowed -1000..1000`), подбор нашёл +240 вме�
    вернётся при выходе. Если Afterburner заново применит профиль во время майнинга (offset вернётся к вашему значению или к 0),
    auto-uv после быстрой проверки поставит проверенный offset обратно (с 1.7.1); любое другое значение — и он отступит на этой
    карте. Если offset не задан, подбор стартует с +120, на RTX 40 — с +200, на RTX 50 — с +300, на RTX 3070 / 3060 Ti — по локу, на RTX 3080/3090 — с +180 (или с `--uv-min` / `UV_MIN`).
-5. **Подождите.** При первом запуске подбор идёт около 15 минут на карту (все карты параллельно); с 1.7.2 карты при этом
-   майнят, на паузе только проверяемая. Следующие запуски применяют сохранённое значение после проверки ~30 с.
+5. **Подождите.** При первом запуске подбираются сразу все карты, сколько позволяет свободная память, несколько минут (раздел 30); с 1.8.1 все карты при этом
+   майнят, в том числе проверяемая. Следующие запуски применяют сохранённое значение после проверки ~30 с.
 6. **Файлы** лежат в папке майнера: `uv.json` (результаты) и `uv-restore.json` (ваш исходный offset). Папка должна быть
    доступна на запись, поэтому не кладите майнер в `C:\Program Files`. Подобрать заново: один раз `--uv-reset` (в `EXTRA`
    батника; профиль текущего лока) или `--uv-reset-all` / удалить `uv.json` (все локи). Новый драйвер или новое ядро майнера
@@ -2102,12 +2307,12 @@ set "AUTO_UV=1"
 set "LOCK_CCLOCK=2445"
 set "LOCK_MCLOCK=810"
 set "UV_MIN=300"
-set "UV_MAX=495"
+set "UV_MAX="
 ```
 * **Смешанный риг:** `LOCK_CCLOCK` / `LOCK_MCLOCK` принимают по значению на карту в порядке `DEVICES`, например
-  `set "LOCK_CCLOCK=1560,2445"`. Для андервольта достаточно `AUTO_UV=1`: пределы выбираются по каждой карте (RTX 20xx/GTX 16xx/CMP 50HX
-  +225, CMP 30HX/40HX +150, остальные +495; RTX 40/50 сами стартуют с +200/+300). Для ручного управления `UV_MIN` / `UV_MAX` / `UV_OFFSET`
-  принимают список в том же порядке, например `set "UV_MAX=225,495,150"` (`-` = значение по умолчанию для карты). В списке должно
+  `set "LOCK_CCLOCK=1560,2445"`. Для андервольта достаточно `AUTO_UV=1`: с 1.8.1 каждая карта поднимается до предела своего драйвера (встроенного потолка нет;
+  RTX 40/50 сами стартуют с +200/+300). Для ручного управления `UV_MIN` / `UV_MAX` / `UV_OFFSET`
+  принимают список в том же порядке, например `set "UV_MAX=225,-,150"` (`-` = значение по умолчанию для карты). В списке должно
   быть ровно по одному значению на карту.
 * **Быстрее подбор:** `set "UV_STEP=30"` вдвое сокращает число шагов (результат грубее). На RTX 50 больше всего времени
   экономит высокий старт (около +300): карта его всё равно держит, и поиск начинается сразу оттуда (с 1.6.2 это значение по
@@ -2133,7 +2338,7 @@ set "UV_MAX=495"
 | `--uv-reset` | забыть сохранённый профиль текущего лока (и монеты / режима); с `--auto-uv` этот лок подбирается заново; без кошелька майнер просто завершается |
 | `--uv-reset-all` | забыть все сохранённые результаты (все локи, монеты, режимы) |
 | `--no-color` | лог без цвета (также `NO_COLOR=1` или `FFG_COLOR=0`; `FFG_COLOR=1` включает его принудительно) |
-| `--uv-max N` | наибольший offset, который пробует подбор (максимум 600; по умолчанию по карте: RTX 20xx / GTX 16xx 225, CMP 50HX 330, CMP 30HX/40HX 150, остальные 495; в Windows: `set "UV_MAX=480"` в `start.bat`) |
+| `--uv-max N` | наибольший offset, который пробует подбор (по умолчанию с 1.8.1 своего предела у майнера нет — диапазон драйвера; до 1.8.1 — встроенные пределы по типу карты; в Windows: `set "UV_MAX=480"` в `start.bat`) |
 | `--uv-min N` | offset, с которого начинается подбор; старт, не прошедший проверку, понижается (по умолчанию: RTX 3070 / 3060 Ti — по локу ядра, RTX 3080/3090 — +180 (раздел 17); иначе offset из HiveOS/драйвера или 120; RTX 40 — не ниже 200, RTX 50 — не ниже 300; Windows: `UV_MIN`) |
 | `--uv-step N` | шаг подбора в МГц (по умолчанию 15; крупнее шаг — быстрее подбор, грубее результат; Windows: `UV_STEP`) |
 | `--uv-coarse N` | более крупные первые шаги в МГц для быстрого подбора (по умолчанию 30; с 1.7.6 для Pearl, NOID и CMFD); `0` — один размер шага, как до 1.7.6 |
@@ -2142,13 +2347,14 @@ set "UV_MAX=495"
 | `--uv-reval-hours H` | интервал перепроверки во время майнинга (по умолчанию 6, `0` — не перепроверять) |
 | `--uv-dir DIR` | где лежат `uv.json` и `uv-restore.json` (также `FFGP_STATE_DIR`) |
 | `--auto-uv-dry-run` | только пишет в лог, какие карты были бы изменены (устройство CUDA → устройство NVML, шина); ничего не меняет |
+| `--uv-parallel N\|auto` | сколько карт подбирается одновременно (по умолчанию `auto`; у всех монет с 1.8.1, раздел 30) |
+| `--uv-unpause` | забыть осторожность и паузу auto-uv для рига (то же, что `--uv-parallel-reset`; у всех монет с 1.8.1, раздел 30) |
 
 `--uv-max`, `--uv-min` и `--uv-offset` принимают одно значение для всех карт или список через запятую — ровно по одному
 значению на карту в порядке `--devices` (без `--devices`: GPU0, GPU1, ... как в логе; в HiveOS это порядок PCI-шины, как в
 панели). `-` в списке = значение по умолчанию для этой карты (`--uv-offset`: карта не трогается). Список неверной длины —
-ошибка, он не дополняется. Явный `--uv-max` применяется как задан, даже выше предела карты по умолчанию; тогда в логе
-предупреждение (`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`). Пример для 2× RTX 2060 SUPER,
-3× RTX 3070 Laptop и CMP 40HX: `--auto-uv --uv-max 225,225,495,495,495,150` (то же, что по умолчанию).
+ошибка, он не дополняется. Явный `--uv-max` применяется как задан. Пример для 2× RTX 2060 SUPER, 3× RTX 3070 Laptop и CMP 40HX,
+где свой предел нужен только картам Turing: `--auto-uv --uv-max 225,225,-,-,-,150`.
 
 **Списки по картам (1.7.8, все монеты):** каждая опция со значением на карту (`--devices`, `--lock-cclock`, `--lock-mclock`, `--moffset`,
 `--uv-offset`, `--uv-max`, `--uv-min`, `--temp-limit`, `--temp-stop`) принимает запятые, точки с запятой или пробелы, в том числе вперемешку:
@@ -2165,7 +2371,7 @@ set "UV_MAX=495"
 **Строки лога** (все начинаются с `auto-uv:`, так что `grep auto-uv` показывает всю историю):
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
-auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+1000 (max: the driver's +1000; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (...), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
@@ -2262,22 +2468,22 @@ HiveOS показывает FW/s по каждой карте; первый за
 **`--auto-uv` для CMFD (NVIDIA).** С `--auto-uv` (HiveOS — *Extra config arguments*; Windows — `AUTO_UV=1` в
 `start-cmfd.bat`, запуск от администратора) майнер подбирает андервольт **именно под CMFD**, отдельно от результата Pearl.
 После подготовки модели и до старта движка каждая карта подбирается на настоящей модели CMFD: смещение ядра растёт
-от `--uv-min` (по умолчанию — шаг над 0) до `--uv-max` (по умолчанию — лимит карты из раздела 12: 495, RTX 20xx 225, CMP 50HX
-330, CMP 30HX/40HX 150), каждый шаг проверяется **побитно** против стока вместе с официальным тест-вектором Common Foundry
+от `--uv-min` (по умолчанию с 1.8.1 — рядом с ожидаемым результатом; раньше — шаг над 0) до `--uv-max` (по умолчанию с 1.8.1 — диапазон
+драйвера, своего предела у майнера нет; раздел 12), каждый шаг проверяется **побитно** против стока вместе с официальным тест-вектором Common Foundry
 1.0.16, итог берётся с запасом (`--uv-keep-last` оставляет последний удачный шаг) и подтверждается более длинной
 проверкой. Результат сохраняется в `uv.json` (раздел `cmfd`, по UUID карты, с драйвером и версией движка), следующие
 запуски применяют его сразу (или после быстрой проверки, если он проверялся больше `--uv-reval-hours` назад). Во время майнинга `INTEGRITY | ERROR`
 движка или CUDA-сбой на тюненой карте — шаг назад (с сохранением) и перезапуск движка. Если применение разгона сбросило
 подобранное смещение во время майнинга (`nvidia-oc` в HiveOS при старте майнера и после смены OC пишет *Core Clock* профиля,
-0 при пустом поле), оно возвращается (с 1.7.1): движок этой карты останавливается, сохранённое смещение проходит
-быструю проверку (при ошибке — шаг назад), движок перезапускается на нём; не чаще 4 раз в час, любое
+0 при пустом поле), оно возвращается (с 1.7.1): карта продолжает майнить (с 1.8.1), сохранённое смещение проходит
+быструю проверку (при ошибке — шаг назад); не чаще 4 раз в час, любое
 другое значение — тюнер отступает на этой карте. Проверка, во время которой разгон сбросил смещение, повторяется. Ваше смещение возвращается при
 выходе (после аварии — при следующем запуске), как и без `--auto-uv`. Если проверка не может работать (нет модели, нет
-файлов движка, ошибка на стоке) — карта майнит на 0 с предупреждением WARNING. Все карты подбираются одновременно.
+файлов движка, ошибка на стоке) — карта майнит на 0 с предупреждением WARNING. Все карты подбираются сразу, сколько позволяет память (раздел 30).
 Лог: `grep "auto-uv (cmfd)"`.
 Замеры (Aria, среднее строки статистики): RTX 3070 с лимитом 135 Вт упирается в мощность на ~1050 МГц, где напряжение уже
 на дне кривой: результат +195, выигрыша нет (13,84 → 13,97 FW/s при 135 Вт). Та же карта при 220 Вт: сток 19,5 FW/s
-при 214 Вт (328 тыс. FW/kWh) → +135: 20,4–20,5 FW/s при 213–216 Вт (342–345 тыс., **+4–5 %**). CMP 50HX (лимит
+при 214 Вт (0,0911 FW/W) → +135: 20,4–20,5 FW/s при 213–216 Вт (0,095–0,096 FW/W, **+4–5 %**). CMP 50HX (лимит
 225 Вт, лок ядра 1410 МГц): стабильна до своего предела +225; 13,10 FW/s при 216 Вт → 13,21 при 196 Вт (**+11 %**), 13,01 при
 217 Вт → 13,17 при 203 Вт (**+8 %**). **Результат зависит от рабочей точки**: он подбирается заново, если лимит мощности
 изменился больше чем на 3 %; с 1.7.2 у каждого лока ядра (`--lock-cclock` или лок профиля разгона, видимый под нагрузкой)
@@ -2294,7 +2500,7 @@ HiveOS с 4× RTX 3070 карта с памятью, залоченной на 8
 
 **Лог.** Строки движка идут с префиксом `[GPUn]` (`MINER STATS`, `INTEGRITY | ok`, `SHARE STALE` — безвредно, пока шара
 летела, пришёл новый блок; `SHARE REJECTED` — неверный результат, снизьте частоты). Раз в 10 с FreeForGem печатает
-`[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
+`[ 290s] GPU0 37.04 (190 W, 0.1949 FW/W) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
 (`[DEVFEE]` во время слота комиссии; `STARTING` — движок грузит модель; `RESTARTING`, `DISABLED`).
 Упавший движок перезапускается через 15/30/60/120/300 с; после 5 неудачных запусков подряд (каждый короче 2 минут) эта GPU
 оставляется в покое, причина — в логе (никаких бесконечных переподключений, за которые банят IP).
@@ -2464,7 +2670,7 @@ RTX 3070, память 810 МГц, лимит мощности 135 Вт, по 60
   (с сохранением), майнинг продолжается;
 * применение разгона во время майнинга (`nvidia-oc` в HiveOS при старте майнера и после смены OC пишет *Core Clock* профиля,
   0 при пустом поле; offset от Pearl там даёт тихо неверные результаты NOID) замечается: подобранный NOID-offset возвращается
-  после короткой проверки с паузой майнинга на этой карте, база 0 (без `--auto-uv`) или значение `--uv-offset` ставится сразу;
+  после короткой проверки (карта при этом майнит), база 0 (без `--auto-uv`) или значение `--uv-offset` ставится сразу;
   не чаще 4 раз в час, дальше майнер отступает на этой карте (с 1.7.1);
 * RTX 3070, наши прогоны: **eff @1400 МГц** — 87.5 Вт на offset 0 → **72.8 Вт на +195** (34.3 MH/s), MH/Вт **+20 %**; на пуле 34.8 MH/s @ 73 Вт (0.476 MH/Вт), 41/41 шар
   принято. **speed @1560 МГц** — 127.8 Вт → **106.2 Вт на +195** (43.3 MH/s), край +225, MH/Вт **+20 %**; на пуле 43.8 MH/s
@@ -2511,7 +2717,7 @@ new job 46f6...0000 [user] height 239348 (share target 0000003fffffffff.., expir
 Как это выглядит в логе (ядро speed, RTX 3070, `--lock-cclock 1560 --auto-uv`, наш прогон; две последние строки — из прогона с заведомо слишком глубоким `--uv-offset 280`):
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +495 (default) ...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +1000 (the driver's) ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (... 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
 ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (... 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
@@ -2526,7 +2732,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 ### 17. Профили по локу частоты, майнинг во время тюнинга, падения в майнинге (новое в 1.7.2)
 
 **Зачем.** Край андервольта зависит от частоты ядра: offset, проверенный на 1410 МГц, небезопасен на 1805 МГц. На риге 8x RTX 3070
-(HiveOS) другой майнер оставил лок 1400 МГц, auto-uv нашёл там +450..+495, а после возврата лока HiveOS 1805 МГц эти offset'ы были
+(HiveOS) другой майнер оставил лок 1400 МГц, auto-uv нашёл там offset'ы +450 и выше, а после возврата лока HiveOS 1805 МГц эти offset'ы были
 «применены без стартовой проверки»: illegal memory access, Xid 13/43, цикл перезапусков. В 1.7.2:
 
 **Профиль на каждый лок.** auto-uv хранит отдельный результат для каждой карты, монеты / режима NOID и лока ядра (`uv.json`,
@@ -2547,8 +2753,8 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
   после OC-apply без `--lock-cclock` тоже сначала решает частота.
 
 **Майнинг во время тюнинга.** До 1.7.2 ни одна карта не майнила, пока не дотюнятся все (~25 мин на риге из 8 карт). Теперь майнинг
-стартует сразу; проверки и тюнинг каждой карты идут в фоне и ставят на паузу только её (на время её тюнинга или быстрой проверки); остальные
-карты майнят. Очередь
+стартует сразу; проверки и тюнинг каждой карты идут в фоне, пока карты майнят. С 1.8.1 это относится и к проверяемой карте, на всех монетах, с
+несколько пониженным хешрейтом (раздел 30); в 1.7.2–1.8.0 на паузе была только она. Очередь
 проверок по RAM («waits its turn for a check») не останавливает майнинг ждущей карты.
 
 **Ваш offset.** На HiveOS при выходе возвращается значение *Core Clock* профиля разгона этой карты (`/hive-config/nvidia-oc.conf`),
@@ -2632,7 +2838,7 @@ GPU на буст-частоте во время запусков, поэтом�
 - *Старт:* на RTX 40 / RTX 50 подбор NOID и CMFD стартует там же, где у Pearl; новый лок ядра, у которого есть проверенный профиль более высокого
   лока, стартует рядом с этим профилем и подбирается быстрее (во всех трёх; не с `--uv-min`, не после падения). Сухой прогон CMFD (`--auto-uv-dry-run`) печатает тот старт, с которого пойдёт подбор.
 - *После падения* поиск везде остаётся ниже упавшего offset и не поднимается к нему заново; CMFD откатывается от падения в майнинге так же, как NOID.
-- *NOID и CMFD получили то, что было у Pearl:* периодическую перепроверку (`--uv-reval-hours`; у CMFD для неё останавливается движок), откат на шаг при всплеске
+- *NOID и CMFD получили то, что было у Pearl:* периодическую перепроверку (`--uv-reval-hours`; у CMFD с 1.8.1 карта при ней продолжает майнить), откат на шаг при всплеске
   отклонённых шаров, обнаружение «хвоста» подобранного offset на карте (запуск оборвали до возврата вашего offset: возвращается offset до подбора,
   а не подобранный), записи падений в `gpu-faults.json` для CMFD.
 - *Чей Xid:* Xid, который журнал ядра (`dmesg`, Linux) приписывает другому процессу (другой майнер на том же риге), не засчитывается этому майнеру;
@@ -2658,7 +2864,7 @@ GPU на буст-частоте во время запусков, поэтом�
 Стоит ли разблокированная сборка, определяется по тегу сборки модуля ядра в `/proc/driver/nvidia/version` (у штатного драйвера той же версии
 другой тег). Строки лога начинаются с `--cmp-driver:`.
 
-Переменные окружения: `FFG_CMP_DRIVER_DRY_RUN=1` выполняет все проверки и пишет, что сделал бы, ничего не меняя (сначала запустите так);
+Переменные окружения: `FFG_CMP_DRIVER_DRY_RUN=1` (или `--cmp-driver --dry-run`) выполняет все проверки и пишет, что сделал бы, ничего не меняя (сначала запустите так);
 `FFG_CMP_DRIVER_NO_REBOOT=1` ставит без перезагрузки; `FFG_CMP_DRIVER_FORCE=1` ставит заново, даже если драйвер уже стоит или карты CMP не найдено.
 
 Прежде чем использовать: **это заменяет драйвер ядра NVIDIA на всём риге** (им потом пользуются все GPU-программы) и требует **перезагрузки**;
@@ -2677,7 +2883,7 @@ Secure Boot должен быть выключен; сборка — сторо�
 | Поле | proximamine | InnovLab | соло (своя нода) |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | то же | то же |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | то же | то же |
 | Hash algorithm | оставить `----` (в списке HiveOS нет `proxima`) | так же | так же |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (или `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://IP_НОДЫ:ПОРТ` (`mine.seeker.listen` ноды) |
@@ -2839,7 +3045,7 @@ failback шар не отправляет; основной, который по
   `--lock-mclock`, `--moffset`, `--temp-limit` работают как раньше; лок памяти входит в ключ сохранения.
 - **Перебор — сверху вниз, все карты параллельно.** Майнер по очереди майнит на каждом локе; его лог идёт в ту же консоль / лог, HiveOS
   продолжает показывать хешрейт. На каждом локе auto-uv применяет проверенный профиль этого лока или проверяет / подбирает его (~5-12 мин;
-  на паузе только эта карта), затем карта **майнит** на нём несколько минут замера. **Шары, найденные во время замера, уходят в пул
+  с 1.8.1 карта за это время продолжает майнить с пониженным хешрейтом), затем карта **майнит** на нём несколько минут замера. **Шары, найденные во время замера, уходят в пул
   как обычно.** Между раундами майнер перезапускается (несколько секунд без хеширования).
 - **Ранний останов:** как только лок ниже максимума больше допустимой потери, локи ниже не меряются.
 - **Выбор:** `--auto-lock-goal eff` (по умолчанию) — лучший TH/W (NOID: MH/W, PROX: GH/W) среди локов в пределах `--auto-lock-max-loss` %
@@ -2942,11 +3148,11 @@ NEB (nebhash v2) майнит модуль NEB — это майнер FFGN (Fre
   (`freeforgem --gate --node 127.0.0.1:3441 --gate-token-file ФАЙЛ --gate-listen 0.0.0.0:3442`), а каждый риг майнит с
   `--pool neb://IP_ШЛЮЗА:3442 --password ТОКЕН` (HiveOS: Pool URL `neb://IP_ШЛЮЗА:3442`, Pass — токен). Шлюз выдаёт каждому
   ригу свой диапазон nonce и заново проверяет каждую шару.
-- **Файлы.** `nebgpu.dll` / `libnebgpu.so` (GPU-движок NEB nebgpu **0.8.1**, закрытый, тот же бинарник, что в FFGN,
+- **Файлы.** `nebgpu.dll` / `libnebgpu.so` (GPU-движок NEB nebgpu **0.8.4** с 1.8.1, закрытый, тот же бинарник, что в FFGN,
   сверяется по SHA-256) и `neb-datasets.bin` (датасет основной сети NEB, 16 087 037 байт, на каждом старте сверяется по BLAKE3)
   лежат в пакетах. `--dataset ФАЙЛ` — другая копия. Риг, который майнит только Pearl, их не читает.
 - **Единицы.** MA/s = 10^6 попыток в секунду; эффективность — MA/W. HiveOS показывает khs = MA/s x 1000, algo `nebhash` и
-  скорость за последние 5 минут (каждый блок приносит новую модель, поэтому скорость меняется от блока к блоку).
+  скорость за последние 15 минут (каждый блок приносит новую модель, поэтому скорость меняется от блока к блоку).
 - **Частота памяти.** NEB упирается в память. Если профиль разгона HiveOS лочит память низко (810 МГц под Pearl), на время
   майнинга NEB она поднимается до максимума карты, а при выходе лок профиля возвращается (`--keep-hive-mem` оставляет лок
   профиля; `--table-mclock N` — ниже). Запуск Pearl по-прежнему держит свои 810 МГц: политика памяти — свойство монеты, и всё, что запуск залочил, при
@@ -2981,7 +3187,7 @@ Miner *Custom* → *Setup Miner Config*:
 | Поле | Suprnova | ваш шлюз |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | то же |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | то же |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (блоки получает `--miner-lock` ноды) |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (с резервным: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://IP_ШЛЮЗА:3442` |
@@ -2989,7 +3195,7 @@ Miner *Custom* → *Setup Miner Config*:
 | Extra config arguments | например `--auto-uv --lock-cclock 1800 --table-mclock 810` | то же |
 
 В профиле разгона можно оставить лок памяти под Pearl (810 МГц): пока майнит NEB, память работает на максимуме, а при остановке
-лок профиля возвращается. HiveOS показывает khs (MA/s x 1000), скорость за 5 минут, MA/W рядом с версией и, когда нужно, метки
+лок профиля возвращается. HiveOS показывает khs (MA/s x 1000), скорость за 15 минут, MA/W рядом с версией и, когда нужно, метки
 `LOCK NOT HELD`, `NO TABLE`, `GPU LOST`, `REBOOT NEEDED`.
 
 **Windows:** `start-neb.bat` (впишите `WALLET`, `POOL` или `NODE` для соло; `PASSWORD` — токен шлюза; `DEVICES`, `LOCK_CCLOCK`,
@@ -3016,6 +3222,8 @@ Miner *Custom* → *Setup Miner Config*:
 | `--uv-parallel N`, `--uv-unpause`, `--ramp-ms N`, `--api [ХОСТ:]ПОРТ` | см. `freeforgem --algo neb --help` |
 
 ### 25. Что изменилось в 1.8.0 для всех монет
+
+*В 1.8.1 добавлен майнинг во время подбора auto-uv на всех монетах и защита от бесконечного подбора: раздел 30.*
 
 **Новое в 1.8.0 коротко:**
 
@@ -3088,7 +3296,7 @@ OpenCL), те же результаты бит в бит. NVIDIA GTX 10 и но�
   сохраняются как заданы, `--no-mem-lock` оставляет память в покое (у CMP 50HX драйвер не даёт лочить память). Лок ядра на
   RTX 3070: `1500` — лучшие GH/W, `1800` — больше GH/s.
 - **auto-uv / auto-lock** — как у остальных монет: профили по карте и локу ядра в `uv.json` (раздел `ting`; профили FFGT
-  подхватываются один раз). Потолки по умолчанию: Turing +225, CMP 50HX +330, CMP 30HX/40HX +150, остальные +495. Падение в
+  подхватываются один раз). С 1.8.1 встроенного потолка нет: диапазон драйвера или `--uv-max`. Падение в
   майнинге на подобранном offset — на 2 шага ниже, без подбора с нуля.
 - **Свой процесс движка на каждую карту** (CUDA): сбой CUDA или зависший движок на одной карте перезапускает за несколько секунд
   только её, остальные майнят дальше; 3 сбоя за 10 минут на безопасном offset — FAULTY, пауза 10 минут (раздел 29). В HiveOS на
@@ -3203,7 +3411,7 @@ miner*, Miner *Custom* `freeforgem` (та же ссылка Installation URL), *
 `--split`); у
 каждой карты — её собственная скорость; если у монет разные единицы, каждая карта отдаётся в своих «штуках в секунду» (NEB —
 попытки/с, Pearl — хеши/с), так что сравнивать эти числа между монетами нельзя; принятые и отклонённые шары — сумма по всем
-группам; в колонке версии — каждая группа со своей эффективностью, например `1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`. В HiveOS
+группам; в колонке версии — каждая группа со своей эффективностью, например `1.8.1 split: neb 1.40 MA/W + pearl 0.61 TH/W`. В HiveOS
 виден свой процесс `freeforgem` на каждую группу (а у NEB / Ting — ещё и на каждую карту). Проверено на HiveOS-риге из 4 карт
 (2 NEB + 2 Pearl): когда одна карта NEB зависла на шаге auto-uv, перезапустился только движок этой карты, остальные три майнили
 дальше. По шагам: [HIVEOS.md](HIVEOS.md).
@@ -3280,7 +3488,202 @@ WARNING с картой, её шиной и командой. С FFG_NO_REBOOT=1
 не починит: проверьте сетевую карту, кабель и свитч рига. NEB: `--debug-timing` пишет для каждой шары время «скан -> проверка на
 CPU -> отправка в сокет» (мс), а для каждого задания — «сокет -> выдача картам».
 
----
+### 30. Что изменилось в 1.8.1: auto-uv во время майнинга на всех монетах, новое в 1.8.1
+
+**Коротко.** С `--auto-uv` каждая карта теперь **продолжает майнить, пока подбирается её напряжение**, на всех монетах: Pearl,
+NOID, PROX, Ting, CMFD и NEB. Шары идут в пул весь подбор, пул всё время видит воркер. Подбор в разы короче, чем в 1.8.0,
+все карты подбираются сразу, и каждый шаг по-прежнему проверяется побитно; ошибочный результат — откат. Числа ниже замерены на
+наших ригах (RTX 3070): читайте их как «около».
+
+![auto-uv на PROX: все четыре карты подбираются сразу и майнят](docs/img/ffg181-autouv-prox-tuning.png)
+
+| Монета (RTX 3070) | Подбор с нуля, риг из 4 карт | Что даёт подбор |
+|---|---|---|
+| NOID | 8,5–9,5 мин (1.8.0: около 25 мин) | +5…+9 % на ватт |
+| PROX | 4,5–5 мин (1.8.0: около 16 мин) | +2…+8 % на ватт |
+| Ting | 6–8,5 мин | +15…+17 % на ватт |
+| CMFD | около 10–18 мин | +17…+20 % на ватт |
+| NEB | 1,5–2 мин | −9…−10 Вт на карту |
+| Pearl, 8 карт, лок 1680 | все 8 сразу | 0,660 → 0,677 TH/W при тех же 601 TH/s (−72 Вт, −7,8 % на риг) |
+
+- **Майнинг во время подбора.** До 1.8.1 на каждом шаге подбора карта переставала майнить (Pearl: до ~14 минут без хешрейта,
+  пул терял воркер). Теперь карта майнит всё время; хешрейт немного ниже только пока шаг проверяется, потом снова полный.
+  Прогрев Pearl тоже майнит.
+- **Все карты сразу.** Одновременно подбирается столько карт, сколько позволяет свободная память рига, обычно все. После
+  неприятностей всего рига (карта отвалилась от шины, встали все карты) майнер осторожничает и подбирает по одной карте, и риг это
+  запоминает. `--uv-parallel N` задаёт число вручную; `--uv-parallel-reset` забывает осторожность.
+- **Короткий старт.** Поиск начинается рядом с ожидаемым результатом, а не с 0. `--uv-min N` задаёт старт вручную.
+- **Без встроенного потолка.** Смещение растёт, пока это экономит мощность; предел — диапазон драйвера карты или ваш `--uv-max N`.
+  Старых потолков майнера по типу карты больше нет; сохранённый результат, упёршийся в такой потолок, при следующем старте
+  поднимается дальше.
+- **Сбой — не повод начинать заново.** После непрошедшего шага или падения в майнинге карта продолжает на 2 шага ниже сбойного
+  смещения (но не выше последнего подтверждённого) и сохраняет пройденные шаги. Прогресс сохраняется после каждого шага,
+  остановка посреди подбора ничего не теряет.
+- **Сбои считаются по монете.** Карта, которая падает снова и снова, на время исключается из майнинга; на экране `OUT 14m`
+  (сколько минут осталось), и карта возвращается сама. Карта, исключённая на одной монете, майнит другую. Ваш старт (рестарт
+  майнера, новый полётный лист, перезагрузка после чистой остановки) даёт карте новый шанс.
+- **Защита от бесконечного подбора и перезапусков** (все монеты): повторные сбои на карте выключают её auto-uv на 24 часа (карта
+  майнит на последнем подтверждённом смещении); повторные перезапуски рига во время подбора ставят подбор на паузу до
+  `--uv-unpause` / `--uv-reset-all` или новой версии; недоделанный подбор продолжается при следующем старте. Считаются только
+  настоящие сбои: сбой на краю подбора — нет. Состояния видны на экране, в строке статистики, API и HiveOS:
+  `[AUTO-UV GPU3 OFF 24h]`, `[AUTO-UV PAUSED]`, `[AUTO-UV NOT CALM]`.
+- **Turing (RTX 20xx, GTX 16xx, CMP HX), все монеты:** результат дольше подтверждается на нагрузке майнинга, прежде чем
+  засчитаться, а карта, которая вскоре снова падает, сразу возвращается на своё стабильное смещение, без многократных откатов.
+  Профиль Turing, подобранный старой версией, один раз получает эту долгую проверку.
+- **Pearl, смена только ядра майнера** (тот же драйвер и локи): сохранённый результат проверяется коротко, и карта сразу майнит.
+- **Каждый результат говорит, сколько занял** (`RESULT ... tuning took 1 min 58 s, 6 checks`); строка RIG таблицы показывает
+  экономию всего рига и время подбора (`-8.5% in 1m 32s`).
+
+![auto-uv на Ting: шаг +360 не прошёл на двух картах; они майнят дальше на 2 шага ниже](docs/img/ffg181-autouv-ting-failed.png)
+
+**Разовые флаги.** `--uv-reset`, `--uv-reset-all`, `--uv-unpause` (то же, что `--uv-parallel-reset`) и `--auto-lock-reset`
+действуют **один раз, при вашем старте**: рестарт майнера или стоп + старт, новый полётный лист, запуск вручную, перезагрузка
+после чистой остановки. Перезапуск после сбоя их пропускает, поэтому падение не сотрёт прогресс. Добавляйте эти флаги на один
+старт и потом убирайте из листа: `--uv-reset`, оставленный в листе, начинает подбор с нуля при каждом вашем рестарте, а
+**`--uv-unpause` никогда не держите в листе**: он снимал бы защиту от перезапусков на каждом старте.
+
+CMFD: эффективность — в FW/W.
+
+### 31. Экран: таблица карт, новое в 1.8.1
+
+В терминале (экран майнера HiveOS, консоль Windows или Windows Terminal, оболочка Linux) майнер показывает одну таблицу,
+которая перерисовывается на месте, вместо бегущего лога. **Сам лог не меняется:** лог-файл, `tee`, `miner log` в HiveOS и
+h-stats.sh получают все строки ровно как раньше.
+
+![FreeForGem 1.8.1 на NEB, 4× RTX 3070, через несколько секунд после старта](docs/img/ffg181-screen-neb.png)
+
+**Режимы**
+
+- `--ui auto` (по умолчанию): таблица, если на терминал кто-то смотрит, иначе обычные строки.
+- `--ui table`: таблица и там, где auto её не рисует; `--ui lines`: прежний построчный лог.
+- `--ui ascii` / `--ui unicode` (или `FFG_UI_ASCII=1`): рамка из `+ - |` или из линий Unicode. `ascii` — если терминал показывает
+  странные буквы вместо линий.
+- `--no-color` (или `NO_COLOR=1`): без цвета; состояния читаются по значкам.
+- `--ui-demo [МОНЕТА] [СЕК]`: таблица с выдуманным ригом, карты и пул не трогаются (МОНЕТА: pearl, noid, prox, ting, cmfd, neb,
+  split): посмотреть вид и цвета.
+- `--ui-dump N`: каждый N-й кадр ещё и в `ffg-ui-frames.txt` (приложить к сообщению об ошибке).
+
+**Шапка**
+
+| Строка | Что показывает |
+|---|---|
+| первая | версия (синяя полоса), монета (пурпурная) и её алгоритм; справа `up` — сколько майнер работает |
+| `pool` | пул и воркер (воркер зелёным); с `--split` у каждой группы свои |
+| `net` | что есть у монеты: высота блока, id и возраст задания (`job 3440026a 8s`), сложность шары (`share d 1.50G`; жёлтым, если пул сильно уронил её против обычного) и сложность сети в той же единице (`net d 442T`), набор данных или модель (NEB `data slot 0 Kepler`, модель своим цветом), пинг до пула, отброшенные stale (шары заданий, которые пул отменил; это не отказы), блоки в соло |
+| `mode` | сначала алгоритм монеты (`pearlhash`, NOID `Poseidon2b eff` / `Poseidon2b speed`, PROX `BLAKE2b txid`, Ting `SHA-256`, CMFD `ForgeMatrix V4, FreeForgeMiner x.y.z`, NEB `nebhash v2`; с `--split` по группам), потом режим монеты, auto-uv, локи ядра и памяти |
+| `args` | ваши параметры как заданы: имена опций бирюзовым, значения белым. Секреты скрыты `***` (`--password`, токены HiveOS, секреты пулов). Длинная строка переносится по словам |
+| `!` | важные события (предупреждения, сбои, отказы, `clocks:`), до 5, новые сверху, у каждого свой таймер «ago», каждое целиком. Они занимают постоянный блок строк, поэтому таблица не прыгает |
+| `!!` | живые тревоги, пока они актуальны: `REBOOT NEEDED` (Xid 79), `NO TABLE` (NEB), `GPU LOST`, `LOCK NOT HELD`, лок памяти из профиля HiveOS |
+
+**Колонки**
+
+| Колонка | Смысл |
+|---|---|
+| GPU | номер и значок состояния (`●` зелёный: майнит, `►`: подбор) |
+| BUS | шина PCI (серым) |
+| NAME | модель карты |
+| COIN | монета группы карты (только `--split`) |
+| TH/s, MH/s, GH/s, FW/s, MA/s | хешрейт в единицах монеты (зелёным) |
+| TEMP | температура ядра: зелёный, жёлтый или красный |
+| FAN | обороты вентилятора в %: зелёный, с 60 % жёлтый, с 85 % красный |
+| W | мощность |
+| PL | лимит мощности карты; красный, если карта в него упирается |
+| TH/W, MH/W, … | эффективность **на ватт** (бирюзовым) |
+| CORE/LOCK, MEM/LOCK | фактическая частота / лок (лок серым). NEB с `--table-mclock 810`: `/810` бирюзовым, пока этот лок памяти действует |
+| OFFSET | смещение V/F и состояние auto-uv, см. ниже |
+| FOUND / ACC / REJ / STALE | шары карты: найдено / принято (зелёным) / отклонено пулом (красным) / устаревшие (жёлтым) |
+| BAD | неверные результаты карты **при майнинге**, пойманные проверкой майнера и в пул не отправленные. Это не плохие шары: отклонённые пулом — в REJ. Неверные результаты на шаге auto-uv — работа защиты: их показывает OFFSET, в BAD они не идут. Красный, если больше 0 |
+| STATUS | mining / tuning / checking / `OUT 14m` / DEAD |
+| строка RIG | итог рига: хешрейт, ватты, на ватт, шары, экономия подбора и его время (`-8.5% in 1m 32s`), сколько карт майнит |
+
+Легенда под таблицей объясняет значки и цвета (и `/810 NEB table mem lock`, когда этот лок действует). Колонка, для которой у
+монеты нет данных, скрывается. В узком окне сначала скрываются менее нужные колонки; за край ничего не выходит.
+
+**Ячейка OFFSET**
+
+| Вид | Значение |
+|---|---|
+| `► +300 ↑ 3/9` оранжевый | идёт подбор: шаг 3 из 9 на этом смещении |
+| `+450 ✓ confirm` оранжевый | найденное смещение подтверждается |
+| `+375 ✗ failed` оранжевый | шаг подбора на этом смещении не прошёл |
+| `+270 ✗ -2`, `+315 × roll-back` оранжевый | сбой шага и откат на 2 шага ниже |
+| `+390 ✗ 15 wrong` оранжевый | проверка поймала 15 неверных результатов на идущем шаге: в пул ничего не ушло |
+| `+315 ✓ -9.6%` зелёный | подобрано; экономия на ватт против базы на той же нагрузке |
+| `+315 ✓ tuned` зелёный | профиль применён, базы для процента нет |
+| `-` жёлтый | auto-uv для этой карты выключен |
+| `OUT 14m` | карта исключена после повторных сбоев на показанное число минут; вернётся сама (раздел 30) |
+
+**Цвета сообщений.** **Жёлтым:** строки auto-uv и auto-lock и предупреждения. **Оранжевым:** всё, что относится к подбору карты,
+включая непрошедший шаг и откат: это подбор делает свою работу. **Красным** — только то, что требует ваших рук: отклонённые шары,
+BAD при майнинге, GPU LOST, REBOOT NEEDED, NO TABLE, auto-uv выключен или на паузе, пул недоступен.
+
+![--split, четыре монеты на четырёх картах: колонка COIN, строка net на группу, подобранные смещения зелёным](docs/img/ffg181-screen-split-4coins.png)
+
+![--split NEB + Pearl: последние события над таблицей, откаты оранжевым](docs/img/ffg181-screen-split-notices.png)
+
+**В HiveOS** откройте Hive Shell (или SSH) и наберите `miner`. `miner log`, «Miner log» в веб-интерфейсе и watchdog получают
+строки лога, а не перерисовку экрана. В GNU screen только 16 цветов: оранжевый там — тусклый жёлтый, а значки ✗ ✓ — × √. Если
+браузерный терминал потерял часть таблицы, она восстанавливается сама, а при подключении `miner` рисуется заново.
+
+### 32. Подобранные смещения в профиль разгона HiveOS: `--hive-oc-sync`, новое в 1.8.1
+
+Только HiveOS, вместе с `--auto-uv`. Когда карты подобраны, майнер сообщает результаты в HiveOS, а с API-токеном ещё и
+записывает их в профиль разгона этого воркера: тогда они сохраняются после перезагрузки и с другим майнером.
+
+- **`--hive-oc-sync`**: одно **сообщение в панели HiveOS** (сообщения воркера), например `FreeForGem auto-uv (Ting): 4 GPUs
+  tuned at 1800 MHz: -44 W (-11.8 %)`. В подробностях — каждая карта (смещение, лок, ватты до и после), итог и строки
+  `Core Clock Offset: …` / `Lock Core Clock: …` (с `--lock-mclock` ещё `Lock Mem Clock`), готовые для вставки в форму разгона.
+  Повторно шлётся, только когда результаты изменились, а не на каждом старте. Ничего не записывается.
+- **С токеном** (`--hive-oc-sync-token-file ПУТЬ` — лучше всего, или `--hive-oc-sync-token ТОКЕН`, или `$FFG_HIVE_TOKEN`): то же
+  сообщение, а подтверждённые **смещения и локи частот** сами записываются в профиль разгона: лок ядра — при `--lock-cclock` /
+  `--auto-lock`, лок памяти — при `--lock-mclock`. Берётся профиль алгоритма полётного листа, если он есть, иначе *Default Config*.
+  Остальное в профиле (лимит мощности, вентиляторы, смещение памяти, другие алгоритмы) не трогается. Затем HiveOS применяет
+  профиль на риге. Сообщение заканчивается словами `applied to the OC profile`, `already in the OC profile` или объясняет, почему
+  ничего не записано.
+- **`--split`:** каждая группа пишет только свои карты и шлёт своё сообщение; значения других групп остаются.
+- **Безопасность:** перед каждой записью сохраняется копия профиля. Если карта теряет результат, в профиль возвращается ваше
+  прежнее значение. Значения, которые вы вписали в профиль сами, остаются вашими. Карта, которая ещё проверяется, не задерживает
+  остальные.
+- **`--hive-oc-sync-test`:** шлёт одно тестовое сообщение, печатает ответ и выходит; с токеном ещё проверяет, что оно дошло.
+
+**Как сделать токен.** Веб HiveOS → настройки аккаунта → *Sessions* / API → **новый API-токен только для этого** (токен даёт
+полный доступ к ферме; отдельный можно отозвать отдельно). Храните его на риге в файле, который читает только root:
+
+```
+nano /root/ffg-hive-token          # вставить токен, сохранить
+chmod 600 /root/ffg-hive-token
+```
+
+и в *Extra config arguments*: `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. Не в `/hive-config`:
+файлы там читает любой пользователь. Токен прямо в полётном листе (`--hive-oc-sync-token …`) тоже работает, но тогда он виден
+в списке процессов (`ps`) и в конфиге рига; в своём логе и на экране майнер его маскирует. Отклонённый токен: оранжевая строка,
+до следующего рестарта в профиль больше не пишется, сообщения идут дальше.
+
+![Сообщение в HiveOS: результаты по картам и строки для профиля разгона](docs/img/ffg181-hiveos-ocsync-message.png)
+
+![Профиль разгона после --hive-oc-sync: CORE 360 360 345 345, LCORE 1800, LMEM 810](docs/img/ffg181-hiveos-oc-after.png)
+
+![Экран майнера: CMFD подобран (−18 % на риг за 14 мин) и строка «hive-oc-sync: sent to HiveOS»](docs/img/ffg181-autouv-cmfd-tuned.png)
+
+### 33. Другие изменения 1.8.1 (HiveOS, NEB, пулы)
+
+- **Окно майнера HiveOS не закрывается.** После выхода с ошибкой майнер стартует снова в том же окне
+  (`freeforgem exited (code N), restarting in 5 s`); разовые флаги (раздел 30) на таком старте пропускаются. `miner stop` /
+  `miner restart` (и watchdog HiveOS) работают как раньше. После частых выходов окно ждёт 10 минут перед следующим стартом;
+  `miner restart` запускает сразу.
+- **В имени пакета HiveOS ровно один дефис:** `freeforgem-1.8.1_hiveos.tar.gz` (имя-версия_hiveos). Со вторым дефисом HiveOS
+  берёт неверное имя майнера, и майнер молча не стартует. HiveOS кэширует пакет по имени файла: новую сборку под тем же именем
+  кладите в новую папку URL или на риге выполните `/hive/miners/custom/custom-get <URL> -f`.
+- **`--split` в HiveOS с листом любой монеты:** пул и кошелёк листа уходят в группу монеты листа. Лист NOID без `--algo`
+  работает сам.
+- **NEB:** движок nebgpu 0.8.4, быстрее на Turing. `--table-mclock 810` опускает память только там, где NEB она не нужна; для
+  модели, которой нужна полная частота памяти, она остаётся полной, и это правильно (на 810 МГц такая модель потеряла бы большую
+  часть хешрейта). Ложной тревоги `NO TABLE` для такой модели больше нет.
+- **Испорченная сессия пула заменяется** (NEB, NOID, PROX, Ting, stratum Pearl): если пул уронил сложность шары или отвечает
+  поздно при большом числе stale, майнер открывает новую сессию: жёлтая строка `pool: reconnecting: <причина>`. Ваша сессия и
+  сессия комиссии отслеживаются каждая отдельно.
+- **`--api-port N` на всех монетах** (теперь и Pearl, NOID, PROX, CMFD; по умолчанию выключен, Ting по-прежнему отдаёт 4068).
+- **Комиссия без изменений:** 1 % (раздел 10).
 
 ## 中文
 
@@ -3324,7 +3727,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.8.0)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -3356,8 +3759,8 @@ NEB、Ting 以及在不同显卡上挖不同币的矿机：见第 24、26、27 �
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.8.0-linux-x86_64.tar.gz
-cd freeforgem-1.8.0
+tar xzf freeforgem-1.8.1-linux-x86_64.tar.gz
+cd freeforgem-1.8.1
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
 ./freeforgem --pool prl-eu.kryptex.network:7048 --wallet 你的PRL地址 --worker rig1       # Kryptex
@@ -3378,8 +3781,8 @@ cd freeforgem-1.8.0
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.8.0-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.8.1-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -3420,7 +3823,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.0-windows-x64
+cd /d C:\Mining\freeforgem-1.8.1-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -3498,16 +3901,16 @@ Pearl stratum gzip 协议（在 `mining.authorize` 中发送 `"type":"v2"`；Kry
 
 RTX 40 和 50 的锁定核心频率高得多（**1900–2500 MHz**），能承受的偏移也比 RTX 30 更高。
 
-**混合矿机：**只需 `--auto-uv`——上限按每块显卡自动选择（自 1.6.2 起）：RTX 20xx / GTX 16xx 最高 +225，CMP 30HX/40HX
-最高 +150（CMP 50HX：+330），其他最高 +495；启动时日志会显示每块显卡的范围（`auto-uv: GPU5 (bus 0b, CMP 40HX): range +120..+150 (max: CMP default; start: default)`）。
-如需手动控制，按 `--devices` 顺序每卡一个值：`--uv-max 225,495,150`（`-` = 该卡的默认值）。
+**混合矿机：**只需 `--auto-uv`。自 1.8.1 起矿工不再有自己的偏移上限：只要每一步都在降低功耗，每块显卡就继续爬升，最多到其驱动允许的范围
+（1.8.1 之前按显卡类型有内置上限）；启动时日志会显示每块显卡的范围（`auto-uv: GPU5 (bus 0b, CMP 40HX): range +60..+1000 (max: the driver's +1000; ...)`）。
+如需自己限制，按 `--devices` 顺序每卡一个值：`--uv-max 225,-,150`（`-` = 该卡不设你的上限）。
 Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 RTX 30 不同，它需要将显存锁定在 5001（见表）；CMP 170HX / A100（sm_80）不受支持。
 
 **CMP 显卡（CMP 30HX / 40HX / 50HX）。** CMP 30HX/40HX 使用 Turing 内核挖 Pearl（显存锁定 5001，auto-uv 上限 +150）。**CMP 50HX
 与 Pearl：** 驱动 610.43.03 下，锁频 1300 时每卡约 67 TH/s，锁频 1500 时约 77 TH/s（每卡 166–176 W；4× CMP 50HX 矿机，FreeForGem 1.7.8）；
 旧驱动 550.78 与 595.91.07 下仅约 2.6 TH/s（int8 张量核心被削减约 17 倍），请先更新驱动。**CMP 50HX 挖 Common Foundry
 （CMFD）表现良好：** 每卡约 13 FW/s、约 220 W（功耗限制 225 W，核心锁定 1410 MHz，显存不锁定；4× CMP 50HX 矿机，Aria 矿池），
-使用 `--auto-uv`（CMFD 调校，+225）约 13.2 FW/s、196–203 W（FW/kWh +8–11 %）；见第 13 节。CMFD 需要约 7 GB 空闲显存，6 GB 显卡
+使用 `--auto-uv`（CMFD 调校，+225）约 13.2 FW/s、196–203 W（FW/W +8–11 %）；见第 13 节。CMFD 需要约 7 GB 空闲显存，6 GB 显卡
 （CMP 30HX）无法运行。**FreeForGem 不提供 CMP 解锁：** 我们不提供也不支持解除 CMP 显卡限制的驱动或工具；这里的所有数据均为显卡原状下的结果。
 
 * HiveOS：Overclock 选项卡 → 核心频率（绝对值）、显存频率（绝对值）、功耗限制；V/F 偏移用 `--auto-uv`。
@@ -3540,9 +3943,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.8.0-linux-x86_64.tar.gz freeforgem-1.8.0_hiveos.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.8.0-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.8.0-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.8.1-linux-x86_64.tar.gz freeforgem-1.8.1_hiveos.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.8.1-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.8.1-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -3592,21 +3995,21 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
 
 **它做什么**
 1. 读取显卡当前的 V/F 偏移（HiveOS 超频、你自己的脚本等），并在做任何改动*之前*把它写入恢复文件。
-2. 先让显卡预热，然后逐步提高偏移，并在满负载下对每一步做逐位检查——在 GPU 上，并由官方验证器在 CPU 上验证。接近极限时会出现
+2. 先让显卡预热（自 1.8.1 起预热期间显卡也在挖矿），然后逐步提高偏移，并在满负载下对每一步做逐位检查——在 GPU 上，并由官方验证器在 CPU 上验证。接近极限时会出现
    驱动不报任何错误的错误结果，因此每一步都这样检查（1.7.6 起，Pearl、NOID、CMFD 的调校时间约减半，结果相同）。
 3. 出现错误结果、CUDA 错误、Xid 错误或卡死就结束爬升。结果在最后一个正常步之下留出**安全余量**，并用更长的
-   检查确认；确认失败则再降低。最高尝试到 +495（`--uv-max`，最多 +600；1.5.1 之前为 +300，硬上限 +400）；自 1.6.2 起，未指定 `--uv-max` 时 Turing（RTX 20xx / GTX 16xx）
-   为 +225，CMP 30HX/40HX 为 +150（CMP 50HX 为 +330）。RTX 40/50 显卡常能稳定在 +450..480。已保存的结果若高于降低后的上限，不会原样使用：显卡在上限处运行
+   检查确认；确认失败则再降低。自 1.8.1 起没有内置的最高值：功耗不再下降或首次检查失败时停止爬升，最迟停在驱动范围的上限；`--uv-max N` 设置你自己的上限
+   （1.8.1 之前矿工按显卡类型有内置上限，停在这种上限的已保存结果会继续爬升）。RTX 40/50 显卡常能稳定在 +450 以上。已保存的结果若高于降低后的上限，不会原样使用：显卡在上限处运行
    （先快速检查），已保存的结果保留，待上限再次提高时使用；若已保存的结果*正好*等于旧上限，上限提高后会重新调校。
 4. 结果保存在 `uv.json` 中，以 GPU UUID、驱动版本、内核版本和核心锁频为键（每个锁频一个配置，第 17 节）。之后启动时，经过快速检查（约 30 秒）后直接应用。
    如果驱动或内核版本发生变化，则重新调校；新的锁频调校一次，已知锁频直接复用其配置。
    每次检查约需 1.8 GB 内存：内存较小的矿机上，多块显卡的检查会排队等待（日志中的 `waits its turn for a check`），
    其他显卡同时继续挖矿（自 1.7.2 起挖矿立即开始；自 1.7.1 起，排队等待复查的显卡会继续挖矿）。
-5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（该显卡的挖矿暂停约 30 秒）。如果找到的结果未通过 CPU 验证，
+5. 挖矿期间：每 6 小时（`--uv-reval-hours`）重新检查一次（自 1.8.1 起检查期间该显卡继续挖矿，约 30 秒内算力较低）。如果找到的结果未通过 CPU 验证，
    或出现一批被拒绝的份额，偏移下调一步（不会低于你自己的值）并保存。**超频重新应用（自 1.7.1 起）：** HiveOS 的 `nvidia-oc`
    在每次矿工启动和每次修改超频时写入超频配置中的 *Core Clock* 值，**该字段为空时写入 0**——1.7.1 之前这会让降压失效直到下次重启
    （一台 4× RTX 3070 矿机功耗 604 W 而不是约 440 W）。现在，读回的偏移若为 0、HiveOS 配置值或你自己的起始偏移，就视为超频重新应用：
-   auto-uv 在快速检查后重新设置已验证的偏移（该显卡挖矿暂停约 30 秒；失败则与复查一样降一步；每小时最多 4 次），日志
+   auto-uv 在快速检查后重新设置已验证的偏移（该显卡继续挖矿，约 30 秒内算力较低；失败则与复查一样降一步；每小时最多 4 次），日志
    `the offset was reset to +0 by an OC apply (...); re-applying the verified +285 after a quick check`。检查期间偏移被超频重置时，
    该检查会重做。其他任何值都视为你自己的选择：auto-uv 会在该显卡上退让，不会与之对抗。
 6. 退出时（Ctrl+C、SIGTERM、HiveOS `miner stop`、关闭 Windows 控制台窗口、正常结束）在所有 GPU 上恢复你的偏移
@@ -3618,8 +4021,9 @@ Windows：在 `cmd` 窗口中 `set PEARL_SPIN=1`，然后在同一窗口中运�
 只修改 V/F 偏移：锁定频率、功耗上限和显存都不会被改动。只会改动矿工正在挖矿的显卡。每块显卡都通过 PCI 总线地址（和 UUID）匹配；日志中每次改动都会显示总线地址。
 
 **要求。** NVIDIA 驱动（NVML 在运行时加载，无需安装任何东西），Linux / HiveOS 上需要 **root**（那里矿工以 root 运行），
-Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在日志中说明原因并照常挖矿。**耗时：**首次调校每块显卡约
-**15 分钟**（视显卡而定，10-25 分钟；矿机上的各显卡并行调校，其他显卡继续挖矿；RTX 3070 自 1.7.2 起 8 卡矿机约 11 分钟）。之后每次启动增加约 30 秒。
+Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在日志中说明原因并照常挖矿。**耗时：**自 1.8.1 起所有显卡同时调校，首次调校只需**几分钟**（4x RTX 3070：NEB 1.5–2 分钟，PROX 约 5，Ting 6–8.5，NOID 约 9，CMFD 10–18；1.8.1 之前每块显卡约 15 分钟）。之后每次启动增加约 30 秒。**自 1.8.1 起，所有币种的显卡在调校期间始终在挖矿：**
+调校时显卡继续挖矿，份额照常提交到矿池；只有在检查某一步时算力略低。1.8.1 之前，每一步都会停止该卡的挖矿
+（Pearl 最长约 14 分钟没有算力，矿池看不到该矿工）。防止无休止调校的保护机制和参数 `--uv-parallel` / `--uv-unpause`：见第 30 节。
 
 **Windows 分步说明。** 已在 Windows 11、GeForce RTX 3070、驱动 581.80 上验证：驱动允许矿工读取并修改偏移（日志显示
 `allowed -1000..1000`），调校找到 +240（原为 +225，同频下 98.4 W → 86.5 W），保护机制也生效了（一个找到的结果未通过 CPU
@@ -3630,14 +4034,14 @@ Windows 上需要**管理员权限**。没有 NVML 或权限时，矿工会在�
    `start-nvidia-smi.bat` 中用 `nvidia-smi -lgc`。锁频后，更高的偏移意味着同频下更低的电压；不锁频时显卡可能改为提升频率，节省更少。
 3. **开启**，任选其一：
    * `start.bat`（或任一 `start-luckypool-*` / `start-kryptex-*`）：删除 `set "AUTO_UV=1"` 前面的 `rem`。上限为
-     `set "UV_MAX="`（留空 = 按显卡：+495，RTX 20xx/GTX 16xx +225，CMP 50HX +330，CMP 30HX/40HX +150；RTX 40/50 常能稳定在 +450..480，RTX 30 通常
-     +200..360）。逗号分隔的列表按 `DEVICES` 顺序为每卡设置一个值，例如 `set "UV_MAX=225,495,150"`。
+     `set "UV_MAX="`（留空 = 不设你的上限，自 1.8.1 起即驱动范围；RTX 40/50 常能稳定在 +450 以上，RTX 30 通常
+     +200..360）。逗号分隔的列表按 `DEVICES` 顺序为每卡设置一个值，例如 `set "UV_MAX=225,-,150"`。
    * `start-nvidia-smi.bat`：`AUTO_UV=1`，范围在 `UV_MIN` / `UV_MAX`，并通过 `nvidia-smi` 设置功耗限制和锁频。
    * 自己的命令行：`freeforgem.exe --pool ... --wallet ... --auto-uv --uv-max 480`。
 4. **起点。** 调校从显卡当前的偏移开始（RTX 3070 / 3060 Ti 自 1.7.2 起按核心锁频取默认起点，第 17 节）；起点检查失败时会自动下调。MSI Afterburner（或类似工具）中的 *Core Clock* 偏移就是同一个偏移：
    你在那里设置的值就是起点，退出时会恢复。如果挖矿期间 Afterburner 重新应用配置文件（偏移回到你的值或 0），auto-uv 会在快速检查后
    恢复已验证的偏移（自 1.7.1 起）；其他值则会让它在该卡上退让。未设置偏移时，调校从 +120 开始，RTX 40 从 +200、RTX 50 从 +300 开始，RTX 3070 / 3060 Ti 按锁频，RTX 3080/3090 从 +180（或 `--uv-min` / `UV_MIN`）。
-5. **等待。** 首次启动时每块显卡调校约 15 分钟（所有显卡并行），自 1.7.2 起等待期间照常挖矿，只暂停正在检查的显卡。之后的启动在约 30 秒检查后应用已保存的值。
+5. **等待。** 首次启动时同时调校所有显卡（按空闲内存允许的数量），只需几分钟（见第 30 节），自 1.8.1 起期间所有显卡都在挖矿，包括正在检查的那块。之后的启动在约 30 秒检查后应用已保存的值。
 6. **文件**在矿工目录中：`uv.json`（结果）和 `uv-restore.json`（你原来的偏移）。该目录必须可写，所以不要把矿工放在
    `C:\Program Files`。重新调校：运行一次 `--uv-reset`（在 `.bat` 的 `EXTRA` 中；清除当前锁频的配置），或 `--uv-reset-all` / 删除 `uv.json`（全部锁频）。
    新驱动或新的矿工内核会自动触发重新调校。
@@ -3676,11 +4080,11 @@ set "AUTO_UV=1"
 set "LOCK_CCLOCK=2445"
 set "LOCK_MCLOCK=810"
 set "UV_MIN=300"
-set "UV_MAX=495"
+set "UV_MAX="
 ```
 * **混合矿机：**`LOCK_CCLOCK` / `LOCK_MCLOCK` 按 `DEVICES` 顺序每卡一个值，例如 `set "LOCK_CCLOCK=1560,2445"`。
-  降压只需 `AUTO_UV=1`：上限按每块显卡选择（RTX 20xx/GTX 16xx +225，CMP 50HX +330，CMP 30HX/40HX +150，其他 +495；RTX 40/50 自动从 +200/+300 开始）。
-  如需手动控制，`UV_MIN` / `UV_MAX` / `UV_OFFSET` 接受同样顺序的列表，例如 `set "UV_MAX=225,495,150"`（`-` = 该卡默认值）。列表必须每卡恰好一个值。
+  降压只需 `AUTO_UV=1`：自 1.8.1 起每块显卡爬升到其驱动范围（没有内置上限；RTX 40/50 自动从 +200/+300 开始）。
+  如需手动控制，`UV_MIN` / `UV_MAX` / `UV_OFFSET` 接受同样顺序的列表，例如 `set "UV_MAX=225,-,150"`（`-` = 该卡默认值）。列表必须每卡恰好一个值。
 * **更快调校：**`set "UV_STEP=30"` 使步数减半（结果更粗）。在 RTX 50 上，较高的起点（约 +300）最省时间：显卡反正能承受，搜索直接从那里开始（自 1.6.2 起这是 RTX 50 的默认值）。不要设得过高：如果显卡在 `UV_MIN` 处就未通过检查，则不会调校，保持你自己的偏移（日志会说明；此时请降低 `UV_MIN`）。
 * **已知道偏移：**`set "UV_OFFSET=480"`（不开启 `AUTO_UV`）——一次快速检查后直接应用，不搜索。
 * **还需要功耗限制：**使用 `start-nvidia-smi.bat`（`CCLOCK` / `MCLOCK` / `PLIMIT`，`UV_MIN` / `UV_MAX` / `UV_STEP`）。
@@ -3701,7 +4105,7 @@ set "UV_MAX=495"
 | `--uv-reset` | 忘记当前锁频（及币种 / 模式）的已保存配置；与 `--auto-uv` 一起使用时重新调校该锁频；没有钱包地址时矿工直接退出 |
 | `--uv-reset-all` | 忘记所有已保存的结果（全部锁频、币种、模式） |
 | `--no-color` | 日志不着色（也可 `NO_COLOR=1` 或 `FFG_COLOR=0`；`FFG_COLOR=1` 强制着色） |
-| `--uv-max N` | 调校尝试的最高偏移（最多 600；默认按显卡：RTX 20xx / GTX 16xx 225，CMP 50HX 330，CMP 30HX/40HX 150，其他 495；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
+| `--uv-max N` | 调校尝试的最高偏移（自 1.8.1 起默认：矿工没有自己的上限，即驱动范围；1.8.1 之前按显卡类型有内置上限；Windows：在 `start.bat` 中 `set "UV_MAX=480"`） |
 | `--uv-min N` | 调校的起始偏移；起点检查失败时向下调整（默认：RTX 3070 / 3060 Ti 按核心锁频，RTX 3080/3090 为 +180（第 17 节）；否则为 HiveOS/驱动中的偏移或 120；RTX 40 至少 200，RTX 50 至少 300；Windows：`UV_MIN`） |
 | `--uv-step N` | 调校步长（MHz，默认 15；步长越大调校越快，结果越粗；Windows：`UV_STEP`） |
 | `--uv-coarse N` | 用于加快调校的较大初始步长（MHz，默认 30；1.7.6 起适用于 Pearl、NOID、CMFD）；`0` = 只用一种步长，与 1.7.6 之前相同 |
@@ -3710,12 +4114,13 @@ set "UV_MAX=495"
 | `--uv-reval-hours H` | 挖矿期间的复查间隔（默认 6，`0` 表示不复查） |
 | `--uv-dir DIR` | `uv.json` 和 `uv-restore.json` 的存放位置（也可用 `FFGP_STATE_DIR`） |
 | `--auto-uv-dry-run` | 只在日志中说明会改动哪些显卡（CUDA 设备 → NVML 设备、总线地址），不做任何改动 |
+| `--uv-parallel N\|auto` | 同时调校的显卡数量（默认 `auto`；自 1.8.1 起所有币种适用，第 30 节） |
+| `--uv-unpause` | 忘掉矿机上 auto-uv 的谨慎状态和暂停（同 `--uv-parallel-reset`；自 1.8.1 起所有币种适用，第 30 节） |
 
 `--uv-max`、`--uv-min` 和 `--uv-offset` 可以为所有显卡给一个值，或给逗号分隔的列表——按 `--devices` 顺序每卡恰好一个值
 （没有 `--devices` 时：按日志中的 GPU0、GPU1……；HiveOS 上即面板中的 PCI 总线顺序）。列表中的 `-` = 该卡的默认值
-（`--uv-offset`：不改动该卡）。长度不对的列表会报错，不会自动补齐。显式指定的 `--uv-max` 按原值使用，即使高于显卡默认上限；
-此时日志会给出警告（`WARNING --uv-max +495 is above the recommended +150 for this card (CMP default)`）。2× RTX 2060 SUPER、
-3× RTX 3070 Laptop 加一块 CMP 40HX 的示例：`--auto-uv --uv-max 225,225,495,495,495,150`（与默认值相同）。
+（`--uv-offset`：不改动该卡）。长度不对的列表会报错，不会自动补齐。显式指定的 `--uv-max` 按原值使用。2× RTX 2060 SUPER、
+3× RTX 3070 Laptop 加一块 CMP 40HX、只给 Turing 显卡设上限的示例：`--auto-uv --uv-max 225,225,-,-,-,150`。
 
 **GPU 频率控制（可选，基于 NVML；需要 root / 管理员权限，Windows 上可用 — 1.4.9 新增）。** `--lock-cclock N` 将核心频率锁定为 N MHz（类似 `nvidia-smi -lgc N,N`），`--lock-mclock N` 将显存频率锁定为 N MHz（类似 `-lmc`），`--moffset N` 设置显存频率偏移（MHz），可以为负数（需要驱动 555+）。每个选项可对所有 GPU 使用同一个值，也可按 `--devices` 顺序给出逗号分隔的列表（每个设备一个值）。设置在启动时应用，退出时（Ctrl-C / SIGTERM / 崩溃）自动撤销。**自 1.7.1 起，原有的锁频会被恢复而不是移除：** 在 HiveOS 上恢复超频配置中的锁频（*Lock Core Clock* / *Lock Memory Clock*，从 `/hive-config/nvidia-oc.conf` 读取）；其他系统上 NVML 无法读回锁频，可在 `FFG_RESTORE_CCLOCK` / `FFG_RESTORE_MCLOCK` 中指定（FreeForGemPear 的变量名 `FFGP_RESTORE_*` 同样有效；一个值或按显卡的列表，0 = 无锁频），否则与以前一样恢复为默认。日志：`core clock locked to 1500 MHz; lock before: 1470 MHz (HiveOS OC profile), put back on exit`，退出时 `core clock lock 1470 MHz put back`。崩溃或 `kill -9` 后，下次启动会做同样的恢复。Windows 上请在 `.bat` 文件中设置 `LOCK_CCLOCK`、`LOCK_MCLOCK`、`MOFFSET`。示例：`--lock-cclock 1500 --lock-mclock 810 --moffset -200`。 **RTX 30 提示（1.7.7）：** Pearl 在 RTX 30（Ampere）上，核心锁频约 1530 MHz 时每瓦效率最佳（相对 1560：速度 -1.9%，每瓦 +3.6%，RTX 3070 实测；1515 及以下为平台）。矿工只给出提示：RTX 30 未锁核心或高于 1530 时，启动日志有一行 `clocks: hint: ... try --lock-cclock 1530`，不会自动设置。使用 `--auto-uv` 时，新的锁频意味着单独调校（档案按核心锁频保存）。 挖矿一分钟后，矿工会在负载下检查每张已锁定显存频率的显卡的实际显存频率；若与锁定值不符，则输出一条黄色警告（例如 RTX 3070 上 `--lock-mclock 405`：显卡实际以 810 MHz 运行，这是负载下的最低值）；锁定本身不会被改动。
 
@@ -3725,7 +4130,7 @@ set "UV_MAX=495"
 **日志行**（都以 `auto-uv:` 开头，`grep auto-uv` 即可看到全过程）：
 ```
 auto-uv: GPU0 (bus 0d, RTX 3070): CUDA device 0 -> NVML index 1, PCI 0000:0D:00.0, GPU-0d06..., current offset +150
-auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+495 (max: default; start: current offset)
+auto-uv: GPU0 (bus 0d, RTX 3070): range +150..+1000 (max: the driver's +1000; start: current offset)
 auto-uv: GPU0 (bus 0d, RTX 3070) step +195: ok (...), 110.4 W, 1560 MHz, 53 C
 auto-uv: GPU0 (bus 0d, RTX 3070) step +225: FAILED (...)
 auto-uv: GPU0 (bus 0d, RTX 3070) offset +150 -> +195, 116.6 W -> 106.6 W, saved
@@ -3809,18 +4214,18 @@ HiveOS 按卡显示 FW/s；矿机首次启动会下载模型（请查看矿工�
 
 **CMFD 的 `--auto-uv`（NVIDIA）。** 使用 `--auto-uv`（HiveOS：*Extra config arguments*；Windows：`start-cmfd.bat` 中
 `AUTO_UV=1`，以管理员身份运行）时，矿工会**专门为 CMFD** 寻找降压偏移，与 Pearl 的结果分开保存。模型准备好之后、引擎启动之前，
-每张卡都在真实的 CMFD 模型上调校：核心偏移从 `--uv-min`（默认：0 之上一步）升到 `--uv-max`（默认：第 12 节的每卡上限：495，
-RTX 20xx 225，CMP 50HX 330，CMP 30HX/40HX 150），每一步都与默认设置**逐位**比对，并运行 Common Foundry 1.0.16 官方测试向量；
+每张卡都在真实的 CMFD 模型上调校：核心偏移从 `--uv-min`（自 1.8.1 起默认接近预期结果；以前为 0 之上一步）升到 `--uv-max`（自 1.8.1 起默认为驱动范围，
+矿工没有自己的上限；第 12 节），每一步都与默认设置**逐位**比对，并运行 Common Foundry 1.0.16 官方测试向量；
 结果留出安全余量（`--uv-keep-last` 保留最后成功的一步），并用更长的检查确认。结果保存在 `uv.json`（`cmfd` 部分，按显卡 UUID，
 含驱动与引擎版本），之后的启动直接应用（若上次验证早于 `--uv-reval-hours`，先做快速检查）。挖矿期间，已调优显卡上出现引擎
 `INTEGRITY | ERROR` 或 CUDA 故障时，偏移退一步（并保存）并重启引擎。挖矿期间超频重新应用（HiveOS `nvidia-oc` 在矿工启动和
-修改超频时写入配置的 *Core Clock* 值，字段为空时为 0）重置了已调优的偏移时，会将其恢复（自 1.7.1 起）：该卡的引擎停止，保存的
-偏移先做快速检查（失败则退一步），然后引擎以该偏移重启；每小时最多 4 次，其他值则调整器在该卡上退让。
+修改超频时写入配置的 *Core Clock* 值，字段为空时为 0）重置了已调优的偏移时，会将其恢复（自 1.7.1 起）：该卡继续挖矿（自 1.8.1 起），保存的
+偏移先做快速检查（失败则退一步）；每小时最多 4 次，其他值则调整器在该卡上退让。
 检查期间被超频重置偏移的检查会重做。退出时恢复您原来的偏移（崩溃后在下次启动时恢复）。
-若无法检查（没有模型、缺少引擎文件、默认设置下失败），该卡以 0 偏移挖矿并给出 WARNING。所有显卡同时调校。日志：`grep "auto-uv (cmfd)"`。
+若无法检查（没有模型、缺少引擎文件、默认设置下失败），该卡以 0 偏移挖矿并给出 WARNING。所有显卡同时调校，数量以内存允许为限（第 30 节）。日志：`grep "auto-uv (cmfd)"`。
 实测（Aria，统计行平均）：功耗限制 135 W 的 RTX 3070 在约 1050 MHz 处受功耗限制，电压已在曲线底部：结果 +195，
-没有收益（135 W 下 13.84 → 13.97 FW/s）。同一张卡在 220 W：默认 19.5 FW/s、214 W（328 k FW/kWh）→ +135：
-20.4–20.5 FW/s、213–216 W（342–345 k，**+4–5 %**）。CMP 50HX（功耗限制 225 W，核心锁定 1410 MHz）：到 +225 上限都未出错；
+没有收益（135 W 下 13.84 → 13.97 FW/s）。同一张卡在 220 W：默认 19.5 FW/s、214 W（0.0911 FW/W）→ +135：
+20.4–20.5 FW/s、213–216 W（0.095–0.096 FW/W，**+4–5 %**）。CMP 50HX（功耗限制 225 W，核心锁定 1410 MHz）：到 +225 上限都未出错；
 13.10 FW/s、216 W → 13.21、196 W（**+11 %**），13.01、217 W → 13.17、203 W（**+8 %**）。**结果取决于工作点**：功耗限制变化
 超过 3 % 时会重新调优；自 1.7.2 起每个核心锁频（`--lock-cclock`，或负载下看到的超频配置锁频）有自己的 CMFD 配置，只调校一次（第 17 节）。
 
@@ -3834,7 +4239,7 @@ RTX 20xx 225，CMP 50HX 330，CMP 30HX/40HX 150），每一步都与默认设置
 **自 1.7.6 起：** CMFD **不再应用** HiveOS 超频配置中的显存锁定（例如 Pearl 用的 810 MHz），日志会写明（`CMFD: the HiveOS profile's memory lock 810 MHz is not applied`）；显卡上已由 `nvidia-oc` 设置的锁定不会被取消，因此仍应为 CMFD 使用不锁显存的配置。核心锁定仍取自该配置。明确给出的 `--lock-mclock` 照常生效。
 **日志。** 引擎输出带 `[GPUn]` 前缀（`MINER STATS`、`INTEGRITY | ok`、`SHARE STALE` = 份额传输途中出了新区块，无害；
 `SHARE REJECTED` = 结果错误，请降低频率）。FreeForGem 每 10 秒打印一行
-`[ 290s] GPU0 37.04 (190 W, 701390 FW/kWh) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
+`[ 290s] GPU0 37.04 (190 W, 0.1949 FW/W) | total 37.04 FW/s | ... | user sub 84 acc 80 rej 0 | stale 4 | height 25089`
 （抽水期间显示 `[DEVFEE]`；`STARTING` 表示引擎正在加载模型；另有 `RESTARTING`、`DISABLED`）。
 引擎退出后分别在 15/30/60/120/300 秒后重启；连续 5 次启动失败（每次不到 2 分钟）后不再重启该 GPU，原因写在日志中
 （避免无休止重连导致 IP 被封）。
@@ -3989,7 +4394,7 @@ RTX 4070 Ti：机主为 Pearl 设置的 +300 会让 NOID 崩溃）。因此：
 * `--uv-offset N` 直接设置 N，不做检查（风险自负）；`--uv-reset` 清除当前锁频与模式的 NOID 配置，`--uv-reset-all` 清除全部；
 * 挖矿时每个候选结果都在 CPU 上复核，每张 GPU 也会定期检查；检查失败会让该卡的偏移回退（并保存），挖矿继续；
 * 挖矿期间的超频重新应用（HiveOS `nvidia-oc` 在矿工启动和修改超频时写入配置的 *Core Clock* 值，字段为空时为 0；Pearl 的偏移
-  会让 NOID 静默算错）会被发现：已调优的 NOID 偏移在该卡暂停挖矿、做简短检查后恢复，基准 0（未用 `--auto-uv`）或
+  会让 NOID 静默算错）会被发现：已调优的 NOID 偏移在做简短检查后恢复（该卡期间继续挖矿），基准 0（未用 `--auto-uv`）或
   `--uv-offset` 的值立即重新设置；每小时最多 4 次，之后矿工在该卡上退让（自 1.7.1 起）；
 * RTX 3070 实测：**eff @1400 MHz** — 偏移 0 时 87.5 W → **+195 时 72.8 W**（34.3 MH/s），MH/W **+20%**；矿池上 34.8 MH/s @ 73 W（0.476 MH/W），41/41 份额被接受。**speed @1560 MHz** —
   127.8 W → **+195 时 106.2 W**（43.3 MH/s），边缘 +225，MH/W **+20%**；矿池上 43.8 MH/s @ 107 W（0.410），24/24 被接受。
@@ -4031,7 +4436,7 @@ FreeForGem 的做法（Pearl、CMFD 和 NOID 遵循同一原则）：
 日志中的样子（speed 内核，RTX 3070，`--lock-cclock 1560 --auto-uv`，我们的实际运行；最后两行来自故意设置过深的 `--uv-offset 280` 的运行）：
 
 ```
-auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +495 (default) ...
+auto-uv (noid): GPU0 (bus 0d, RTX 3070) tuning the NOID offset (speed): base +0, limit +1000 (the driver's) ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) base +0: ok (... 43.29 MH/s, 127.8 W, 0.339 MH/W, 1560 MHz, 56 C)
 ...
 auto-uv (noid): GPU0 (bus 0d, RTX 3070) +210: ok (... 43.30 MH/s, 103.8 W, 0.417 MH/W, 1560 MHz, 55 C)
@@ -4046,7 +4451,7 @@ auto-uv (noid): GPU0: wrong GPU results at offset +280 (CPU check of a hit / wat
 ### 17. 按锁频保存的配置、调优期间继续挖矿、挖矿中的崩溃（1.7.2 新增）
 
 **原因。** 降压边缘随核心频率移动：在 1410 MHz 验证的偏移在 1805 MHz 下并不安全。在一台 8x RTX 3070 的 HiveOS 矿机上，另一个挖矿
-程序留下了 1400 MHz 锁频，auto-uv 在此找到 +450..+495；HiveOS 的 1805 MHz 锁频恢复后，这些偏移被"不经启动检查直接应用"，导致
+程序留下了 1400 MHz 锁频，auto-uv 在此找到 +450 及以上的偏移；HiveOS 的 1805 MHz 锁频恢复后，这些偏移被"不经启动检查直接应用"，导致
 illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 
 **每个锁频一个配置。** auto-uv 按显卡、币种 / NOID 模式与核心锁频分别保存结果（`uv.json` 的 `profiles`、`noid`、`cmfd_profiles`；
@@ -4062,8 +4467,8 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
   使用 `--lock-cclock` 调优的；
 * 挖矿中同一偏移下负载频率上升（锁频被提高）时恢复您的偏移并重新按频率选择配置。
 
-**调优期间继续挖矿。** 1.7.2 之前所有显卡都要等最慢的调优结束才开始挖矿。现在挖矿立即开始；每张卡的检查与调优在后台进行，只在检查
-期间暂停该卡（其调优或快速检查期间），其他卡继续挖矿。检查的内存队列（"waits its turn for a check"）期间，等待的显卡继续挖矿。
+**调优期间继续挖矿。** 1.7.2 之前所有显卡都要等最慢的调优结束才开始挖矿。现在挖矿立即开始；每张卡的检查与调优在后台进行，显卡照常挖矿。自 1.8.1 起，所有币种中正在检查或调校的那块卡也继续挖矿，
+只是算力略低（第 30 节）；1.7.2–1.8.0 中只有该卡暂停。检查的内存队列（"waits its turn for a check"）期间，等待的显卡继续挖矿。
 
 **您的偏移。** 在 HiveOS 上，退出时恢复的是该卡 OC 配置的 *Core Clock* 值（`/hive-config/nvidia-oc.conf`），而不是启动时卡上残留
 的值（曾在矿机上出现：另一个挖矿程序退出时恢复被中断而留下 +325，而配置为 +275）；启动时此类残留会被替换为配置值。在当前频率下验证过且低于您的偏移的结果会**代替您的偏移使用**，绝不在未检查的情况下保留。若调优的起始偏移本身失败，会寻找
@@ -4113,7 +4518,7 @@ illegal memory access、Xid 13/43 与重启循环。1.7.2 的改动：
 - *更快的爬升*（`--uv-coarse`，第 12 节）：相同边缘下步数约减半，现在 Pearl 和 CMFD 也适用；CMFD 现在也会在某一步不再降低功耗时停止。
 - *起点：* RTX 40 / RTX 50 上 NOID 和 CMFD 的调校起点与 Pearl 相同；新的核心锁频如果有更高锁频的已验证配置，则从该配置附近开始，调校更快（三者皆然；不适用于 `--uv-min`，崩溃后也不适用）。CMFD 试运行（`--auto-uv-dry-run`）会打印调校实际采用的起点。
 - *崩溃之后*，搜索在所有模式中都保持在崩溃偏移以下，不再爬回该偏移；CMFD 对挖矿中的崩溃与 NOID 一样回退。
-- *NOID 和 CMFD 获得了 Pearl 原有的功能：* 定期重新验证（`--uv-reval-hours`；CMFD 为此停止其引擎）、被拒份额激增时回退一步、检测显卡上遗留的调校偏移（运行在恢复您的偏移前被中断：恢复的是调校之前的偏移，而不是调校出的偏移）、CMFD 的崩溃记录写入 `gpu-faults.json`。
+- *NOID 和 CMFD 获得了 Pearl 原有的功能：* 定期重新验证（`--uv-reval-hours`；CMFD 自 1.8.1 起期间继续挖矿）、被拒份额激增时回退一步、检测显卡上遗留的调校偏移（运行在恢复您的偏移前被中断：恢复的是调校之前的偏移，而不是调校出的偏移）、CMFD 的崩溃记录写入 `gpu-faults.json`。
 - *Xid 属于谁：* 内核日志（Linux 的 `dmesg`）指明属于其他进程（同一矿机上的其他矿工）的 Xid 不计入本矿工；与其他工具改动显卡频率/偏移（HiveOS `nvidia-oc`）同时发生的崩溃，不会算作该偏移的失败。
 - *无法打开的 GPU*（前一个矿工故障后的 `busy or unavailable`）不算偏移失败：检查会等待并在 1、5、15 分钟后重试，之后每 15 分钟一次；其他 GPU 照常挖矿。
 - `uv.json`、`gpu-faults.json` 和恢复标记保持 1.7.5 的格式：1.7.6 的文件可被 1.7.5 读取，反之亦然。
@@ -4128,7 +4533,7 @@ NVIDIA CMP 挖矿卡（CMP 50HX 等）在官方驱动下只能发挥很小一部
 
 流程：检查是 HiveOS、以 root 运行、PCI 总线上有 CMP 显卡；若尚未安装解锁版本，则下载固定的驱动文件（约 540 MB），核对其 SHA-256（不符则删除，不安装），
 用 HiveOS 自带的 `nvidia-driver-update --force` 安装并**重启矿机**；重启后 HiveOS 自动再次启动矿工。已装解锁驱动、没有 CMP 显卡或非 root 时不做任何改动，继续挖矿。
-环境变量：`FFG_CMP_DRIVER_DRY_RUN=1` 只检查并说明会做什么；`FFG_CMP_DRIVER_NO_REBOOT=1` 安装但不重启；`FFG_CMP_DRIVER_FORCE=1` 强制重装。
+环境变量：`FFG_CMP_DRIVER_DRY_RUN=1`（或 `--cmp-driver --dry-run`）只检查并说明会做什么；`FFG_CMP_DRIVER_NO_REBOOT=1` 安装但不重启；`FFG_CMP_DRIVER_FORCE=1` 强制重装。
 
 使用前请注意：**这会替换整台矿机的 NVIDIA 内核驱动**并需要**重启**；必须关闭 Secure Boot；该版本是第三方修改的驱动，非 NVIDIA 官方，风险自负；安装中断电可能导致无可用驱动，请在能接触到矿机时操作。
 回退：用 `nvidia-driver-update` 安装其他版本并重启。
@@ -4143,7 +4548,7 @@ NVIDIA CMP 挖矿卡（CMP 50HX 等）在官方驱动下只能发挥很小一部
 | 字段 | proximamine | InnovLab | 单机（自己的节点） |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | 同左 | 同左 |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | 同左 | 同左 |
 | Hash algorithm | 保持 `----`（HiveOS 列表中没有 `proxima`） | 同左 | 同左 |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%`（WAL = holder id） | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701`（或 `global.`、`us3.`、`hk.innovlab.cc:19701`） | `http://节点IP:端口`（节点的 `mine.seeker.listen`） |
@@ -4266,7 +4671,7 @@ FreeForGem 使用自己的名称（`FreeForGem/<版本>`），不会冒充其他
 - 锁频：默认 1800、1700 … 1200 MHz，不超过显卡最高频率；**矿卡（CMP）起点更低：默认上限 1500 MHz**（1500 … 1100）——更高的锁频在这类卡上只会撞上功耗限制；日志会显示 `default range ... (safe top 1500 MHz for this card type ...)`。**GeForce RTX 30（及 RTX A）默认上限 1800 MHz**（1800 … 1200），原因相同。显式给出的 `--auto-lock-range` 始终优先。**撞上功耗限制的步骤不会测到最后：** 该步骤提前以 *PL-limited* 结束（`... - PL-limited: 219 W at the 225 W power limit, 1650 MHz below the lock`），并继续测下一个更低的锁频。矿工只读取功耗限制，不会设置。`--auto-lock-range 1300-1600:100` 或列表 `1350,1450,1530`。给出自己
   `--lock-cclock` 值的显卡保持该锁频、不参与测量（`--lock-cclock 1400,-` 只测第二张卡）。显存锁频是保存键的一部分。
 - 从高到低、所有显卡并行。矿工依次在每个锁频下挖矿，日志照常输出，HiveOS 照常显示算力。
-  每个锁频先由 auto-uv 应用 / 检查 / 调校该锁频的配置（约 5-12 分钟，只有该卡暂停），然后该卡**正常挖矿**并测量几分钟，份额照常提交。两轮之间矿工会重启几秒。
+  每个锁频先由 auto-uv 应用 / 检查 / 调校该锁频的配置（约 5-12 分钟；自 1.8.1 起该卡期间继续挖矿，算力较低），然后该卡**正常挖矿**并测量几分钟，份额照常提交。两轮之间矿工会重启几秒。
 - 选择：`--auto-lock-goal eff`（默认）= 在最高算力 `--auto-lock-max-loss`（10 %）范围内 TH/W（NOID: MH/W，PROX: GH/W）最好的锁频；
   `speed` = 最高算力。低于该阈值后不再测更低的锁频。频率未保持（功耗/温度限制，或锁频被其他工具重置）、测量被多次打断的点无效；驱动拒绝、显卡停止、60 分钟内无稳定挖矿记为 FAILED；
   测量中矿工死机的锁频下次启动记为 crashed，不再尝试。
@@ -4316,10 +4721,10 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
   （`freeforgem --gate --node 127.0.0.1:3441 --gate-token-file 文件 --gate-listen 0.0.0.0:3442`）；每台矿机用
   `--pool neb://网关IP:3442 --password 令牌` 挖矿（HiveOS：Pool URL `neb://网关IP:3442`，Pass = 令牌）。网关为每台矿机分配
   独立的 nonce 范围，并重新核对每个份额。
-- **文件。** `nebgpu.dll` / `libnebgpu.so`（NEB GPU 引擎 nebgpu **0.8.1**，闭源，与 FFGN 中的二进制相同，按 SHA-256 校验）和
+- **文件。** `nebgpu.dll` / `libnebgpu.so`（NEB GPU 引擎 nebgpu **0.8.4**，自 1.8.1 起，闭源，与 FFGN 中的二进制相同，按 SHA-256 校验）和
   `neb-datasets.bin`（NEB 主网数据集，16,087,037 字节，每次启动按 BLAKE3 校验）都在软件包中。`--dataset 文件` 指定另一份副本。
   只挖 Pearl 的矿机不会读取它们。
-- **单位。** MA/s = 每秒 10^6 次尝试；能效单位 MA/W。HiveOS 显示 khs = MA/s x 1000，算法 `nebhash`，以及最近 5 分钟的速率
+- **单位。** MA/s = 每秒 10^6 次尝试；能效单位 MA/W。HiveOS 显示 khs = MA/s x 1000，算法 `nebhash`，以及最近 15 分钟的速率
   （每个区块带来一个新模型，所以速率随区块变化）。
 - **显存频率。** NEB 受显存限制。若 HiveOS 超频配置把显存锁得很低（Pearl 用的 810 MHz），NEB 挖矿期间显存升到显卡最高频率，
   退出时恢复配置中的锁频（`--keep-hive-mem` 保留配置的锁频；`--table-mclock N`：见下）。Pearl 运行仍保持其 810 MHz 锁频：
@@ -4344,7 +4749,7 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 | 字段 | Suprnova | 你的网关 |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.0/freeforgem-1.8.0_hiveos.tar.gz` | 同左 |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.1/freeforgem-1.8.1_hiveos.tar.gz` | 同左 |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%`（区块奖励归节点的 `--miner-lock`） |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804`（带备用：`stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`） | `neb://网关IP:3442` |
@@ -4352,7 +4757,7 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 | Extra config arguments | 例如 `--auto-uv --lock-cclock 1800 --table-mclock 810` | 同左 |
 
 超频配置可以保留 Pearl 的显存锁频（810 MHz）：NEB 挖矿时显存以最高频率运行，停止时恢复配置中的锁频。HiveOS 显示 khs
-（MA/s x 1000）、5 分钟速率、版本旁的 MA/W，以及需要时的标记 `LOCK NOT HELD`、`NO TABLE`、`GPU LOST`、`REBOOT NEEDED`。
+（MA/s x 1000）、15 分钟速率、版本旁的 MA/W，以及需要时的标记 `LOCK NOT HELD`、`NO TABLE`、`GPU LOST`、`REBOOT NEEDED`。
 
 **Windows：** `start-neb.bat`（填写 `WALLET`、`POOL`，单机挖矿则填 `NODE`；`PASSWORD` = 网关令牌；`DEVICES`、`LOCK_CCLOCK`、
 `AUTO_UV=1`、`EXTRA`；设置频率和 auto-uv 需以管理员身份运行）。**Linux：**
@@ -4379,6 +4784,8 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 | `--uv-parallel N`、`--uv-unpause`、`--ramp-ms N`、`--api [主机:]端口` | 见 `freeforgem --algo neb --help` |
 
 ### 25. 1.8.0 对所有币种的改动
+
+*1.8.1 为所有币种加入了 auto-uv 调校期间的挖矿，以及防止无休止调校的保护机制：第 30 节。*
 
 **1.8.0 新功能概览：**
 
@@ -4439,8 +4846,8 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 - **频率。** SHA-256 不使用显存：默认把显存锁在仍允许完整核心频率范围的最低频率（RTX 30 上为 810 MHz，功耗约 −10 %）；HiveOS
   超频配置中的显存锁频、`--lock-mclock` 或 `--moffset` 按原样保留，`--no-mem-lock` 不动显存（CMP 50HX：驱动不支持显存锁频）。
   RTX 3070 的核心锁频：`1500` = 最佳 GH/W，`1800` = 更高的 GH/s。
-- **auto-uv / auto-lock** 与其他币种相同：按显卡和核心锁频保存在 `uv.json`（`ting` 部分；FFGT 的配置导入一次）。每种卡的默认上限：
-  Turing +225，CMP 50HX +330，CMP 30HX/40HX +150，其他 +495。在已调好的偏移上挖矿时崩溃会降到其下 2 步，不会从头调优。
+- **auto-uv / auto-lock** 与其他币种相同：按显卡和核心锁频保存在 `uv.json`（`ting` 部分；FFGT 的配置导入一次）。自 1.8.1 起没有内置上限：
+  驱动范围或 `--uv-max`。在已调好的偏移上挖矿时崩溃会降到其下 2 步，不会从头调优。
 - **每张显卡一个引擎进程**（CUDA）：一张卡上的 CUDA 故障或引擎卡死只会在几秒内重启这张卡，其他卡继续挖矿；10 分钟内在安全偏移下
   出错 3 次 = FAULTY，暂停 10 分钟（第 29 节）。HiveOS 中每张卡会多出一个 `freeforgem` 进程。`--single-process`（或
   FFG_SINGLE_PROCESS=1）= 旧模式。OpenCL（AMD）总是在矿工进程内运行。
@@ -4542,7 +4949,7 @@ NEB，GPU2 和 GPU3 在 Kryptex 上挖 Pearl：
 
 HiveOS 面板显示：显卡最多的组的算法和总算力（显卡数相同的组中取 `--split` 里的第一个）；每张卡显示自己的速率；若各币种单位不同，每张卡以其“每秒次数”
 给出（NEB 为尝试次数/秒，Pearl 为哈希/秒），因此不要在不同币种之间比较这些数字；已接受和已拒绝的份额为所有组之和；版本列列出每个组
-及其能效，例如 `1.8.0 split: neb 1.40 MA/W + pearl 0.61 TH/W`。HiveOS 中每个组一个 `freeforgem` 进程（NEB / Ting 还会每卡一个）。
+及其能效，例如 `1.8.1 split: neb 1.40 MA/W + pearl 0.61 TH/W`。HiveOS 中每个组一个 `freeforgem` 进程（NEB / Ting 还会每卡一个）。
 已在一台 4 卡 HiveOS 矿机上测试（2 张 NEB + 2 张 Pearl）：一张 NEB 卡在 auto-uv 某一步卡住时，只有这张卡的引擎重启，其他三张卡继续挖矿。
 分步说明：[HIVEOS.md](HIVEOS.md)。
 
@@ -4604,3 +5011,170 @@ Xid 79（显卡从总线上掉了）或 NVML 再也看不到的显卡：这样�
 （计为丢弃的过期份额，而不是拒绝）；若矿池丢弃了最新任务且 20 秒内没有发来新任务，矿工会建立新连接。份额发送更快。矿池应答迟到时（5 分钟内有 3 个应答在提交 2 秒以后才到），日志最多每 10 分钟提示一次：`WARNING: the pool answers late:
 ... this is lost packets on this rig's network (NIC / cable / switch ...)`。矿工无法修复网络：请检查矿机的网卡、网线和交换机。NEB：
 `--debug-timing` 为每个份额记录“扫描 -> CPU 核对 -> 发送到套接字”的耗时（毫秒），为每个任务记录“套接字 -> 下发”的耗时。
+
+### 30. 1.8.1 的变化：所有币种在 auto-uv 期间继续挖矿，1.8.1 新增
+
+**概要。** 使用 `--auto-uv` 时，每块显卡现在**在调校电压的同时继续挖矿**，所有币种均适用：Pearl、NOID、PROX、Ting、CMFD 和 NEB。
+整个调校期间份额都会提交到矿池，矿池始终能看到该矿工。调校时间比 1.8.0 缩短数倍，所有显卡同时调校，每一步仍然逐位检查；结果错误则回退。
+以下数字在我们的矿机（RTX 3070）上实测，请理解为“约”。
+
+![PROX 上的 auto-uv：四块卡同时调校并继续挖矿](docs/img/ffg181-autouv-prox-tuning.png)
+
+| 币种（RTX 3070） | 4 卡矿机从头调校 | 调校带来的收益 |
+|---|---|---|
+| NOID | 8.5–9.5 分钟（1.8.0：约 25 分钟） | 每瓦 +5…+9 % |
+| PROX | 4.5–5 分钟（1.8.0：约 16 分钟） | 每瓦 +2…+8 % |
+| Ting | 6–8.5 分钟 | 每瓦 +15…+17 % |
+| CMFD | 约 10–18 分钟 | 每瓦 +17…+20 % |
+| NEB | 1.5–2 分钟 | 每卡 −9…−10 W |
+| Pearl，8 卡，锁频 1680 | 8 块同时 | 同样 601 TH/s 下 0.660 → 0.677 TH/W（整机 −72 W，−7.8 %） |
+
+- **调校期间继续挖矿。** 1.8.1 之前，每个调校步骤都会停止该卡的挖矿（Pearl 最长约 14 分钟没有算力，矿池看不到该矿工）。现在显卡一直在挖矿；
+  只有在检查某一步时算力略低，之后恢复满速。Pearl 的预热也在挖矿。
+- **所有显卡同时调校。** 同时调校的显卡数量以矿机空闲内存为限，通常是全部。整台矿机出问题后（显卡掉出总线、所有显卡停顿），矿工会变得谨慎，
+  一次只调一块，并为该矿机记住。`--uv-parallel N` 手动设置数量；`--uv-parallel-reset` 清除这种谨慎。
+- **起点更近。** 搜索从接近预期结果的位置开始，而不是从 0 开始。`--uv-min N` 可手动设置起点。
+- **没有内置上限。** 只要能节省功耗，偏移就继续爬升；上限是显卡驱动的范围或你自己的 `--uv-max N`。矿工旧的按卡上限已取消；停在旧上限的已保存
+  结果会在下次启动时继续爬升。
+- **失败不必从头再来。** 某一步失败或挖矿中崩溃后，显卡从失败偏移再降 2 步继续（不高于最后确认的偏移），并保留已通过的步骤。每一步后都保存进度，
+  调校中途停止不会丢失任何东西。
+- **故障按币种计数。** 反复崩溃的显卡会暂时退出挖矿；屏幕显示 `OUT 14m`（剩余分钟数），显卡会自行恢复。在一个币种上被排除的显卡仍可挖另一个币种。
+  你主动进行的启动（重启矿工、新的飞行表、正常停止后重启机器）会给显卡新的机会。
+- **防止无休止调校和反复重启**（所有币种）：一块卡反复失败会关闭其 auto-uv 24 小时（该卡以最后确认的偏移挖矿）；调校期间矿机反复重启会暂停调校，
+  直到 `--uv-unpause` / `--uv-reset-all` 或新版本；未完成的调校在下次启动时继续。只计真正的失败：调校边缘的故障不计。这些状态显示在屏幕、
+  统计行、API 和 HiveOS 中：`[AUTO-UV GPU3 OFF 24h]`、`[AUTO-UV PAUSED]`、`[AUTO-UV NOT CALM]`。
+- **Turing（RTX 20xx、GTX 16xx、CMP HX），所有币种：**结果在挖矿负载上确认更长时间才算数；不久后再次崩溃的显卡会立即回到其稳定偏移，
+  不再一次次降低。旧版本调校的 Turing 配置会进行一次这种较长的检查。
+- **Pearl，仅更换矿工内核**（驱动和锁频不变）：已保存的结果只做简短检查，显卡立即开始挖矿。
+- **每个结果都会说明耗时**（`RESULT ... tuning took 1 min 58 s, 6 checks`）；表格的 RIG 行显示整台矿机的节省和调校时间（`-8.5% in 1m 32s`）。
+
+![Ting 上的 auto-uv：两块卡在 +360 的一步失败，它们在低 2 步处继续挖矿](docs/img/ffg181-autouv-ting-failed.png)
+
+**一次性参数。** `--uv-reset`、`--uv-reset-all`、`--uv-unpause`（同 `--uv-parallel-reset`）和 `--auto-lock-reset` **只在你主动启动时生效一次**：
+重启矿工或停止 + 启动、新的飞行表、手动启动、正常停止后重启机器。故障后的重启会跳过它们，因此崩溃不会抹掉进度。只为一次启动加上这些参数，
+之后从飞行表中删掉：留在飞行表中的 `--uv-reset` 会在你每次重启时从头调校，**`--uv-unpause` 绝不要留在飞行表中**：它会在每次启动时解除重启保护。
+
+CMFD：效率以 FW/W 表示。
+
+### 31. 屏幕：显卡表格，1.8.1 新增
+
+在终端中（HiveOS 矿工屏幕、Windows 控制台或 Windows Terminal、Linux shell），矿工不再滚动日志，而是显示一张原地刷新的表格。
+**日志本身不变：**日志文件、`tee`、HiveOS 的 `miner log` 和 h-stats.sh 仍然得到与以前完全相同的每一行。
+
+![FreeForGem 1.8.1 挖 NEB，4× RTX 3070，启动后几秒](docs/img/ffg181-screen-neb.png)
+
+**模式**
+
+- `--ui auto`（默认）：有人在看终端时显示表格，否则显示普通日志行。
+- `--ui table`：即使 auto 不画表格也显示表格；`--ui lines`：旧的逐行日志。
+- `--ui ascii` / `--ui unicode`（或 `FFG_UI_ASCII=1`）：用 `+ - |` 或 Unicode 线条画框。终端显示奇怪字母而不是线条时用 `ascii`。
+- `--no-color`（或 `NO_COLOR=1`）：不着色；状态通过标记识别。
+- `--ui-demo [COIN] [SECS]`：用虚构矿机显示表格，不触碰显卡和矿池（COIN：pearl、noid、prox、ting、cmfd、neb、split），用于查看样式和颜色。
+- `--ui-dump N`：每第 N 帧同时写入 `ffg-ui-frames.txt`（附在错误报告中）。
+
+**表头**
+
+| 行 | 显示内容 |
+|---|---|
+| 第一行 | 版本（蓝色条）、币种（紫色）及其算法；右侧 `up` 为矿工运行时间 |
+| `pool` | 矿池和矿工名（矿工名为绿色）；使用 `--split` 时每组各自显示 |
+| `net` | 视币种而定：区块高度、任务 id 和存在时间（`job 3440026a 8s`）、份额难度（`share d 1.50G`；矿池把它降得远低于正常值时为黄色）以及同一单位的全网难度（`net d 442T`）、数据集或模型（NEB `data slot 0 Kepler`，模型有自己的颜色）、到矿池的 ping、丢弃的过期份额（矿池已取消任务的份额；不是拒绝）、单独挖矿找到的区块 |
+| `mode` | 先是币种的算法（`pearlhash`、NOID `Poseidon2b eff` / `Poseidon2b speed`、PROX `BLAKE2b txid`、Ting `SHA-256`、CMFD `ForgeMatrix V4, FreeForgeMiner x.y.z`、NEB `nebhash v2`；`--split` 时按组），然后是币种模式、auto-uv、核心和显存锁频 |
+| `args` | 你给出的参数：选项名青色，值白色。机密以 `***` 隐藏（`--password`、HiveOS 令牌、矿池机密）。长行按词换行 |
+| `!` | 重要事件（警告、故障、拒绝、`clocks:`），最多 5 条，最新的在上面，每条有自己的“ago”计时，完整显示。它们占据固定的行区域，因此表格不会跳动 |
+| `!!` | 实时警报，持续到情况解除：`REBOOT NEEDED`（Xid 79）、`NO TABLE`（NEB）、`GPU LOST`、`LOCK NOT HELD`、HiveOS 配置的显存锁 |
+
+**列**
+
+| 列 | 含义 |
+|---|---|
+| GPU | 编号和状态标记（`●` 绿色：挖矿，`►`：调校） |
+| BUS | PCI 总线（灰色） |
+| NAME | 显卡型号 |
+| COIN | 显卡所在组的币种（仅 `--split`） |
+| TH/s、MH/s、GH/s、FW/s、MA/s | 以币种单位表示的算力（绿色） |
+| TEMP | 核心温度：绿色、黄色或红色 |
+| FAN | 风扇转速 %：绿色，60 % 起黄色，85 % 起红色 |
+| W | 功耗 |
+| PL | 显卡功耗上限；显卡触及上限时为红色 |
+| TH/W、MH/W…… | **每瓦**效率（青色） |
+| CORE/LOCK、MEM/LOCK | 实际频率 / 锁频（锁频为灰色）。NEB 使用 `--table-mclock 810` 时，该显存锁生效期间 `/810` 为青色 |
+| OFFSET | V/F 偏移和 auto-uv 状态，见下文 |
+| FOUND / ACC / REJ / STALE | 该卡的份额：找到 / 接受（绿色）/ 被矿池拒绝（红色）/ 过期（黄色） |
+| BAD | 该卡**挖矿时**被矿工检查发现、从未发送的错误结果。不是坏份额：被矿池拒绝的在 REJ。auto-uv 某一步中的错误结果是保护机制在工作：显示在 OFFSET 中，不计入 BAD。大于 0 时为红色 |
+| STATUS | mining / tuning / checking / `OUT 14m` / DEAD |
+| RIG 行 | 矿机合计：算力、功耗、每瓦效率、份额、调校的节省及耗时（`-8.5% in 1m 32s`）、在挖矿的显卡数 |
+
+表格下方的图例说明标记和颜色（该锁生效时还有 `/810 NEB table mem lock`）。币种没有数据的列会被隐藏。窗口较窄时先隐藏不太需要的列；
+任何内容都不会超出边缘。
+
+**OFFSET 单元格**
+
+| 样子 | 含义 |
+|---|---|
+| `► +300 ↑ 3/9` 橙色 | 正在调校：在此偏移上的第 3 / 9 步 |
+| `+450 ✓ confirm` 橙色 | 正在确认找到的偏移 |
+| `+375 ✗ failed` 橙色 | 在此偏移上的调校步骤失败 |
+| `+270 ✗ -2`、`+315 × roll-back` 橙色 | 某一步失败并回退 2 步 |
+| `+390 ✗ 15 wrong` 橙色 | 检查在当前步骤中发现 15 个错误结果：没有任何结果发往矿池 |
+| `+315 ✓ -9.6%` 绿色 | 已调好；在相同负载下相对基准的每瓦节省 |
+| `+315 ✓ tuned` 绿色 | 配置已应用，没有可计算百分比的基准 |
+| `-` 黄色 | 该卡的 auto-uv 已关闭 |
+| `OUT 14m` | 该卡因反复故障被排除所示分钟数；会自行恢复（第 30 节） |
+
+**消息颜色。** **黄色：**auto-uv 和 auto-lock 的行以及警告。**橙色：**属于显卡调校的一切，包括失败的步骤及其回退：这是调校在正常工作。
+**红色**只用于需要你处理的情况：被拒绝的份额、挖矿时的 BAD、GPU LOST、REBOOT NEEDED、NO TABLE、auto-uv 关闭或暂停、矿池不可用。
+
+![--split 四块卡四种币：COIN 列，每组一行 net，已调好的偏移为绿色](docs/img/ffg181-screen-split-4coins.png)
+
+![--split NEB + Pearl：表格上方的最新事件，回退为橙色](docs/img/ffg181-screen-split-notices.png)
+
+**在 HiveOS 中**打开 Hive Shell（或 SSH）并输入 `miner`。`miner log`、网页的 “Miner log” 和看门狗得到的是日志行，而不是重绘的屏幕。
+GNU screen 只有 16 种颜色：那里的橙色是暗黄色，标记 ✗ ✓ 显示为 × √。浏览器终端丢失表格的一部分时会自行恢复，`miner` 连接时表格会重新绘制。
+
+### 32. 把调校结果写入 HiveOS 超频配置：`--hive-oc-sync`，1.8.1 新增
+
+仅限 HiveOS，需配合 `--auto-uv`。显卡调好后，矿工把结果报告给 HiveOS；有 API 令牌时还会写入该矿机的超频配置：这样重启后、换用其他矿工时结果仍然保留。
+
+- **`--hive-oc-sync`**：在 **HiveOS 面板中发送一条消息**（该矿机的消息），例如 `FreeForGem auto-uv (Ting): 4 GPUs tuned at 1800 MHz:
+  -44 W (-11.8 %)`。详情列出每块卡（偏移、锁频、前后功耗）、合计，以及可直接粘贴到超频表单的 `Core Clock Offset: …` / `Lock Core Clock: …`
+  （使用 `--lock-mclock` 时还有 `Lock Mem Clock`）。只有结果变化时才再次发送，而不是每次启动都发。不写入任何内容。
+- **有令牌时**（`--hive-oc-sync-token-file 路径`，推荐；或 `--hive-oc-sync-token 令牌`，或 `$FFG_HIVE_TOKEN`）：发送同样的消息，并把已确认的
+  **偏移和锁频**自动写入超频配置：使用 `--lock-cclock` / `--auto-lock` 时写核心锁频，使用 `--lock-mclock` 时写显存锁频。若有飞行表算法的配置则用它，
+  否则用 *Default Config*。配置的其他部分（功耗上限、风扇、显存偏移、其他算法）不会改动。随后 HiveOS 在矿机上应用该配置。消息以
+  `applied to the OC profile`、`already in the OC profile` 结尾，或说明为什么没有写入。
+- **`--split`：**每组只写入自己的显卡并发送自己的消息；其他组的值保持不变。
+- **安全：**每次写入前都会保存配置副本。显卡失去其结果时，你原来的值会写回配置。你自己在配置中输入的值仍归你所有。仍在检查中的显卡不会拖住其他显卡。
+- **`--hive-oc-sync-test`：**发送一条测试消息，打印回答后退出；有令牌时还会检查消息是否送达。
+
+**如何创建令牌。** HiveOS 网页 → 账户设置 → *Sessions* / API → **专门为此新建一个 API 令牌**（令牌可完全访问你的矿场；单独的令牌可以单独撤销）。
+把它保存在矿机上只有 root 能读的文件中：
+
+```
+nano /root/ffg-hive-token          # 粘贴令牌，保存
+chmod 600 /root/ffg-hive-token
+```
+
+并在 *Extra config arguments* 中写入：`--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`。不要放在 `/hive-config`：
+那里的文件所有用户都能读取。直接写在飞行表中的令牌（`--hive-oc-sync-token …`）也能用，但这样它会出现在进程列表（`ps`）和矿机配置中；
+矿工在自己的日志和屏幕上会隐藏它。令牌被拒绝：一行橙色提示，到下次重启前不再写入超频配置，消息照常发送。
+
+![HiveOS 中的消息：每块卡的结果和超频配置的行](docs/img/ffg181-hiveos-ocsync-message.png)
+
+![--hive-oc-sync 之后的超频配置：CORE 360 360 345 345，LCORE 1800，LMEM 810](docs/img/ffg181-hiveos-oc-after.png)
+
+![矿工屏幕：CMFD 已调好（14 分钟内整机 −18 %）以及 “hive-oc-sync: sent to HiveOS” 一行](docs/img/ffg181-autouv-cmfd-tuned.png)
+
+### 33. 1.8.1 的其他改动（HiveOS、NEB、矿池）
+
+- **HiveOS 矿工窗口保持打开。** 出错退出后，矿工在同一窗口中重新启动（`freeforgem exited (code N), restarting in 5 s`）；这种启动会跳过一次性参数
+  （第 30 节）。`miner stop` / `miner restart`（包括 HiveOS 看门狗发出的）照常工作。频繁退出后，窗口会等待 10 分钟再启动；`miner restart` 立即启动。
+- **HiveOS 软件包名只能有一个连字符：**`freeforgem-1.8.1_hiveos.tar.gz`（名称-版本_hiveos）。有第二个连字符时，HiveOS 会取错矿工名，矿工会静默不启动。
+  HiveOS 按文件名缓存软件包：同名的新构建需要放在 URL 的新目录中，或在矿机上运行 `/hive/miners/custom/custom-get <URL> -f`。
+- **HiveOS 中任意币种飞行表的 `--split`：**飞行表的矿池和钱包归入飞行表币种的组。不带 `--algo` 的 NOID 飞行表可直接使用。
+- **NEB：**引擎 nebgpu 0.8.4，在 Turing 上更快。`--table-mclock 810` 只在 NEB 不需要显存的地方降低显存；需要完整显存频率的模型会保持全频，这是正确的
+  （在 810 MHz 下这种模型会损失大部分算力）。这种模型不再误报 `NO TABLE`。
+- **被弄坏的矿池会话会被替换**（NEB、NOID、PROX、Ting、Pearl stratum）：矿池降低了份额难度，或回答很晚且过期份额很多时，矿工会打开新会话：
+  黄色行 `pool: reconnecting: <原因>`。你的会话和开发者抽水的会话分别监视。
+- **所有币种都支持 `--api-port N`**（Pearl、NOID、PROX 和 CMFD 也支持；默认关闭，Ting 仍默认使用 4068）。
+- **开发者抽水不变：**1 %（第 10 节）。
