@@ -9,11 +9,19 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.2**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.3**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
   [FreeForGemPear releases](https://github.com/pepsykolya/FreeForGemPear/releases)
+
+## What's new in 1.8.3
+
+* **NEB earns more in its slow blocks:** 5–27 % more per watt there on RTX 30 cards.
+* **New, optional: another coin in slow NEB blocks** (`--neb-slow-alt pearl` / `noid` / `prox` / `ting` / `cmfd` with
+  `--alt-pool`, `--alt-wallet`): the card mines that coin only while it pays more per watt and comes back to NEB by itself.
+* **Pool:** a lost connection is noticed in about half a minute; still-valid shares are sent again.
+* Full list and SHA-256: [docs/release-1.8.3.md](docs/release-1.8.3.md).
 
 ## What's new in 1.8.2
 

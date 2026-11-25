@@ -14,11 +14,11 @@ flight sheet keeps running the old miner). Saved `--auto-uv` results are taken o
 **Installation URL (1.8.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 HiveOS caches the downloaded archive by its file name: every version has a new file name, so always paste the link of the new release.
-A package you build or rename yourself needs **exactly one dash** in its file name (`freeforgem-1.8.2_hiveos.tar.gz`, name-version_hiveos):
+A package you build or rename yourself needs **exactly one dash** in its file name (`freeforgem-1.8.3_hiveos.tar.gz`, name-version_hiveos):
 with a second dash HiveOS takes a wrong miner name and the miner silently does not start. A new build under the same file name
 is not downloaded again: put it in a new folder of the URL, or run `/hive/miners/custom/custom-get <URL> -f` on the rig.
 
@@ -412,11 +412,11 @@ HiveOS это другой майнер: **создайте новый полё�
 **Ссылка для установки (1.8.1):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 HiveOS кэширует скачанный архив по имени файла: у каждой версии новое имя файла, поэтому всегда вставляйте ссылку нового релиза.
-В имени пакета, который вы собрали или переименовали сами, должен быть **ровно один дефис** (`freeforgem-1.8.2_hiveos.tar.gz`,
+В имени пакета, который вы собрали или переименовали сами, должен быть **ровно один дефис** (`freeforgem-1.8.3_hiveos.tar.gz`,
 имя-версия_hiveos): со вторым дефисом HiveOS берёт неверное имя майнера, и майнер молча не стартует. Новая сборка под тем же именем
 файла заново не скачивается: положите её в новую папку URL или выполните на риге `/hive/miners/custom/custom-get <URL> -f`.
 
@@ -815,11 +815,11 @@ FreeForGem 在 HiveOS 中作为 **Custom miner（自定义矿工）** 运行：�
 **安装链接（1.8.1）：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 HiveOS 按文件名缓存下载的压缩包：每个版本的文件名都不同，所以请始终粘贴新版本的链接。
-你自己构建或改名的软件包，文件名中必须**只有一个短横线**（`freeforgem-1.8.2_hiveos.tar.gz`，名称-版本_hiveos）：
+你自己构建或改名的软件包，文件名中必须**只有一个短横线**（`freeforgem-1.8.3_hiveos.tar.gz`，名称-版本_hiveos）：
 如果有第二个短横线，HiveOS 会取错矿工名称，矿工会静默地不启动。同一文件名下的新构建不会被重新下载：请把它放到 URL 的新目录中，
 或在矿机上运行 `/hive/miners/custom/custom-get <URL> -f`。
 

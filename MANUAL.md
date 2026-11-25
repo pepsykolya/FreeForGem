@@ -51,7 +51,7 @@ FreeForGem runs on HiveOS as a **Custom miner**: no SSH and no manual installati
 **Installation URL (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 1. **Wallet.** In *Wallets*, add your PRL wallet: coin `PRL`, your `prl1...` address.
@@ -83,7 +83,7 @@ NEB, Ting and a rig with different coins on different cards: sections 24, 26 and
 ### 4. Linux without HiveOS
 
 ```
-tar xzf freeforgem-1.8.2-linux-x86_64.tar.gz
+tar xzf freeforgem-1.8.3-linux-x86_64.tar.gz
 cd freeforgem-1.8.1
 ./freeforgem --self-test        # optional: checks the GPU kernel against the CPU reference
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1     # LuckyPool
@@ -105,8 +105,8 @@ One process drives all GPUs and reconnects to the pool on its own. For a permane
 
 Native Windows build: no WSL, no CUDA installation, no Python. Only the NVIDIA driver is needed.
 
-1. Download **`freeforgem-1.8.2-windows-x64.zip`** from the release page:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2-windows-x64.zip`
+1. Download **`freeforgem-1.8.3-windows-x64.zip`** from the release page:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3-windows-x64.zip`
    and check its SHA-256 (section 9).
 2. Unpack it to a folder **without spaces or non-English letters**, e.g. `C:\FreeForGem`.
 3. Pick the start file for your pool — every one is ready to run, only the wallet has to be changed:
@@ -156,7 +156,7 @@ rem Lock clocks and power limit through the driver (Administrator; reset on rebo
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.2-windows-x64
+cd /d C:\Mining\freeforgem-1.8.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet YOUR_PRL_ADDRESS --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -299,9 +299,9 @@ If shares get rejected or the log shows `bad` hits, lower the core clock or the 
 
 Compare the result with the hash on the release page.
 
-* Linux: `sha256sum freeforgem-1.8.2-linux-x86_64.tar.gz freeforgem-1.8.2_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.8.2-windows-x64.zip SHA256` or
-  `Get-FileHash freeforgem-1.8.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.8.3-linux-x86_64.tar.gz freeforgem-1.8.3_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.8.3-windows-x64.zip SHA256` or
+  `Get-FileHash freeforgem-1.8.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Dev fee — 1%
 
@@ -1044,7 +1044,7 @@ address (on InnovLab: your holder id, 64 hex), Pool: *Configure in miner*, Miner
 | Field | proximamine | InnovLab | solo (your node) |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | same | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | same | same |
 | Hash algorithm | leave `----` (HiveOS has no `proxima` in its list) | same | same |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (or `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://NODE_IP:PORT` (the node's `mine.seeker.listen`) |
@@ -1356,7 +1356,7 @@ miner*, Miner *Custom* → *Setup Miner Config*:
 | Field | Suprnova | your gate |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | same |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | same |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (the blocks pay the node's `--miner-lock`) |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (with a backup: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://GATE_IP:3442` |
@@ -1845,7 +1845,7 @@ readable by every user). A rejected token: an orange line, no more OC writes unt
   (`freeforgem exited (code N), restarting in 5 s`); the one-shot flags (section 30) are skipped at such a start. `miner stop` /
   `miner restart` (also the HiveOS watchdog's) work as before. After frequent exits the window waits 10 minutes before the next
   start; `miner restart` starts it at once.
-- **The HiveOS package name has exactly one dash:** `freeforgem-1.8.2_hiveos.tar.gz` (name-version_hiveos). With a second dash
+- **The HiveOS package name has exactly one dash:** `freeforgem-1.8.3_hiveos.tar.gz` (name-version_hiveos). With a second dash
   HiveOS takes a wrong miner name and the miner silently does not start. HiveOS caches a package by its file name: a new build under
   the same name needs a new folder in the URL, or on the rig `/hive/miners/custom/custom-get <URL> -f`.
 - **HiveOS `--split` from a flight sheet of any coin:** the flight sheet's pool and wallet go to the group of the flight sheet's
@@ -1902,7 +1902,7 @@ FreeForGem запускается в HiveOS как **Custom miner**: SSH и ру
 **Ссылка для установки (1.8.0):**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 1. **Кошелёк.** В разделе *Wallets* добавьте кошелёк PRL: монета `PRL`, адрес `prl1...`.
@@ -1934,7 +1934,7 @@ NEB, Ting и риг с разными монетами на разных кар�
 ### 4. Linux без HiveOS
 
 ```
-tar xzf freeforgem-1.8.2-linux-x86_64.tar.gz
+tar xzf freeforgem-1.8.3-linux-x86_64.tar.gz
 cd freeforgem-1.8.1
 ./freeforgem --self-test        # по желанию: сверка GPU-ядра с CPU-эталоном
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1     # LuckyPool
@@ -1956,8 +1956,8 @@ cd freeforgem-1.8.1
 
 Нативная сборка: WSL, установка CUDA и Python не нужны. Нужен только драйвер NVIDIA.
 
-1. Скачайте **`freeforgem-1.8.2-windows-x64.zip`** со страницы релиза:
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2-windows-x64.zip`
+1. Скачайте **`freeforgem-1.8.3-windows-x64.zip`** со страницы релиза:
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3-windows-x64.zip`
    и сверьте SHA-256 (раздел 9).
 2. Распакуйте в папку **без пробелов и русских букв**, например `C:\FreeForGem`.
 3. Выберите файл запуска под свой пул — все готовы к работе, поменять нужно только кошелёк:
@@ -2007,7 +2007,7 @@ rem Фиксируем частоты и лимит мощности через 
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.2-windows-x64
+cd /d C:\Mining\freeforgem-1.8.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet ВАШ_АДРЕС_PRL --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -2147,9 +2147,9 @@ RTX 40 и 50 работают на гораздо более высоком ло
 
 Сравните результат с хешем на странице релиза.
 
-* Linux: `sha256sum freeforgem-1.8.2-linux-x86_64.tar.gz freeforgem-1.8.2_hiveos.tar.gz`
-* Windows: `certutil -hashfile freeforgem-1.8.2-windows-x64.zip SHA256` или
-  `Get-FileHash freeforgem-1.8.2-windows-x64.zip -Algorithm SHA256`
+* Linux: `sha256sum freeforgem-1.8.3-linux-x86_64.tar.gz freeforgem-1.8.3_hiveos.tar.gz`
+* Windows: `certutil -hashfile freeforgem-1.8.3-windows-x64.zip SHA256` или
+  `Get-FileHash freeforgem-1.8.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. Комиссия — 1%
 
@@ -2890,7 +2890,7 @@ Secure Boot должен быть выключен; сборка — сторо�
 | Поле | proximamine | InnovLab | соло (своя нода) |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | то же | то же |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | то же | то же |
 | Hash algorithm | оставить `----` (в списке HiveOS нет `proxima`) | так же | так же |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (WAL = holder id) | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701` (или `global.`, `us3.`, `hk.innovlab.cc:19701`) | `http://IP_НОДЫ:ПОРТ` (`mine.seeker.listen` ноды) |
@@ -3194,7 +3194,7 @@ Miner *Custom* → *Setup Miner Config*:
 | Поле | Suprnova | ваш шлюз |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | то же |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | то же |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%` (блоки получает `--miner-lock` ноды) |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804` (с резервным: `stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`) | `neb://IP_ШЛЮЗА:3442` |
@@ -3685,7 +3685,7 @@ chmod 600 /root/ffg-hive-token
   (`freeforgem exited (code N), restarting in 5 s`); разовые флаги (раздел 30) на таком старте пропускаются. `miner stop` /
   `miner restart` (и watchdog HiveOS) работают как раньше. После частых выходов окно ждёт 10 минут перед следующим стартом;
   `miner restart` запускает сразу.
-- **В имени пакета HiveOS ровно один дефис:** `freeforgem-1.8.2_hiveos.tar.gz` (имя-версия_hiveos). Со вторым дефисом HiveOS
+- **В имени пакета HiveOS ровно один дефис:** `freeforgem-1.8.3_hiveos.tar.gz` (имя-версия_hiveos). Со вторым дефисом HiveOS
   берёт неверное имя майнера, и майнер молча не стартует. HiveOS кэширует пакет по имени файла: новую сборку под тем же именем
   кладите в новую папку URL или на риге выполните `/hive/miners/custom/custom-get <URL> -f`.
 - **`--split` в HiveOS с листом любой монеты:** пул и кошелёк листа уходят в группу монеты листа. Лист NOID без `--algo`
@@ -3741,7 +3741,7 @@ FreeForGem 在 HiveOS 中作为 **Custom miner** 运行：无需 SSH，无需手
 **安装链接 (1.8.0)：**
 
 ```
-https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz
+https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz
 ```
 
 1. **钱包。** 在 *Wallets* 中添加 PRL 钱包：币种 `PRL`，你的 `prl1...` 地址。
@@ -3773,7 +3773,7 @@ NEB、Ting 以及在不同显卡上挖不同币的矿机：见第 24、26、27 �
 ### 4. 不使用 HiveOS 的 Linux
 
 ```
-tar xzf freeforgem-1.8.2-linux-x86_64.tar.gz
+tar xzf freeforgem-1.8.3-linux-x86_64.tar.gz
 cd freeforgem-1.8.1
 ./freeforgem --self-test        # 可选：将 GPU 内核与 CPU 参考实现比对
 ./freeforgem --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1     # LuckyPool
@@ -3795,8 +3795,8 @@ cd freeforgem-1.8.1
 
 原生 Windows 版本：无需 WSL、无需安装 CUDA、无需 Python。只需要 NVIDIA 驱动。
 
-1. 从发布页面下载 **`freeforgem-1.8.2-windows-x64.zip`**：
-   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2-windows-x64.zip`
+1. 从发布页面下载 **`freeforgem-1.8.3-windows-x64.zip`**：
+   `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3-windows-x64.zip`
    并核对 SHA-256（第 9 节）。
 2. 解压到**不含空格和非英文字符**的文件夹，例如 `C:\FreeForGem`。
 3. 选择对应矿池的启动文件——每个都可直接运行，只需修改钱包：
@@ -3837,7 +3837,7 @@ rem 通过驱动锁定频率和功耗限制（需管理员；重启后失效）�
 nvidia-smi -lgc 1665
 nvidia-smi -lmc 810
 nvidia-smi -pl 165
-cd /d C:\Mining\freeforgem-1.8.2-windows-x64
+cd /d C:\Mining\freeforgem-1.8.3-windows-x64
 :loop
 powershell -NoProfile -Command "& { .\freeforgem.exe --pool pearl-eu2.luckypool.io:3360 --wallet 你的PRL地址 --worker rig1 --auto-uv --uv-min 135 --uv-max 360 | Tee-Object -Append -FilePath C:\Mining\ffgp.log }"
 timeout /t 10
@@ -3957,9 +3957,9 @@ Turing（RTX 20 / GTX 16 / CMP 30HX–50HX，sm_75）自 1.5.3 起支持：与 R
 
 将结果与发布页面上的哈希比对。
 
-* Linux：`sha256sum freeforgem-1.8.2-linux-x86_64.tar.gz freeforgem-1.8.2_hiveos.tar.gz`
-* Windows：`certutil -hashfile freeforgem-1.8.2-windows-x64.zip SHA256` 或
-  `Get-FileHash freeforgem-1.8.2-windows-x64.zip -Algorithm SHA256`
+* Linux：`sha256sum freeforgem-1.8.3-linux-x86_64.tar.gz freeforgem-1.8.3_hiveos.tar.gz`
+* Windows：`certutil -hashfile freeforgem-1.8.3-windows-x64.zip SHA256` 或
+  `Get-FileHash freeforgem-1.8.3-windows-x64.zip -Algorithm SHA256`
 
 ### 10. 开发者抽水 — 1%
 
@@ -4562,7 +4562,7 @@ NVIDIA CMP 挖矿卡（CMP 50HX 等）在官方驱动下只能发挥很小一部
 | 字段 | proximamine | InnovLab | 单机（自己的节点） |
 |---|---|---|---|
 | Miner name | `freeforgem` | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | 同左 | 同左 |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | 同左 | 同左 |
 | Hash algorithm | 保持 `----`（HiveOS 列表中没有 `proxima`） | 同左 | 同左 |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%`（WAL = holder id） | `%WORKER_NAME%` |
 | Pool URL | `stratum+ssl://pool.proximamine.com:3334` | `innov+tls://eu3.innovlab.cc:19701`（或 `global.`、`us3.`、`hk.innovlab.cc:19701`） | `http://节点IP:端口`（节点的 `mine.seeker.listen`） |
@@ -4763,7 +4763,7 @@ NEB（nebhash v2）由 FreeForGem 的 NEB 模块挖掘，该模块就是并入 F
 | 字段 | Suprnova | 你的网关 |
 |---|---|---|
 | Miner name | `freeforgem` | `freeforgem` |
-| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.2/freeforgem-1.8.2_hiveos.tar.gz` | 同左 |
+| Installation URL | `https://github.com/pepsykolya/FreeForGem/releases/download/v1.8.3/freeforgem-1.8.3_hiveos.tar.gz` | 同左 |
 | Hash algorithm | `nebhash` | `nebhash` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` | `%WAL%.%WORKER_NAME%`（区块奖励归节点的 `--miner-lock`） |
 | Pool URL | `stratum+tcp://neb.suprnova.cc:7804`（带备用：`stratum+tcp://neb.suprnova.cc:7804,stratum+tcp://neb.suprnova.cc:7805`） | `neb://网关IP:3442` |
@@ -5191,7 +5191,7 @@ chmod 600 /root/ffg-hive-token
 
 - **HiveOS 矿工窗口保持打开。** 出错退出后，矿工在同一窗口中重新启动（`freeforgem exited (code N), restarting in 5 s`）；这种启动会跳过一次性参数
   （第 30 节）。`miner stop` / `miner restart`（包括 HiveOS 看门狗发出的）照常工作。频繁退出后，窗口会等待 10 分钟再启动；`miner restart` 立即启动。
-- **HiveOS 软件包名只能有一个连字符：**`freeforgem-1.8.2_hiveos.tar.gz`（名称-版本_hiveos）。有第二个连字符时，HiveOS 会取错矿工名，矿工会静默不启动。
+- **HiveOS 软件包名只能有一个连字符：**`freeforgem-1.8.3_hiveos.tar.gz`（名称-版本_hiveos）。有第二个连字符时，HiveOS 会取错矿工名，矿工会静默不启动。
   HiveOS 按文件名缓存软件包：同名的新构建需要放在 URL 的新目录中，或在矿机上运行 `/hive/miners/custom/custom-get <URL> -f`。
 - **HiveOS 中任意币种飞行表的 `--split`：**飞行表的矿池和钱包归入飞行表币种的组。不带 `--algo` 的 NOID 飞行表可直接使用。
 - **NEB：**引擎 nebgpu 0.8.4，在 Turing 上更快。`--table-mclock 810` 只在 NEB 不需要显存的地方降低显存；需要完整显存频率的模型会保持全频，这是正确的
