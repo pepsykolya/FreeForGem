@@ -9,11 +9,23 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.0**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.1**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
   [FreeForGemPear releases](https://github.com/pepsykolya/FreeForGemPear/releases)
+
+## What's new in 1.8.1
+
+* **auto-uv while mining on every coin:** cards keep mining and submitting shares while they are tuned; all cards at once as RAM
+  allows; no built-in offset ceiling; much faster tuning (4x RTX 3070: NOID ~9 min instead of ~25, PROX ~5 instead of ~16).
+* **Turing (RTX 20xx, GTX 16xx, CMP HX):** every result is confirmed 5 minutes on its mining load; repeated crashes go straight to
+  the stable offset.
+* **A table screen** with every GPU (hashrate, power, per watt, clocks, offset and tuning state, shares) and the latest events.
+* **HiveOS:** `--hive-oc-sync` writes the tuned offsets and clock locks into the worker's OC profile; the miner window restarts
+  itself; `--split` works from a flight sheet of any coin.
+* **Pools:** a spoiled pool session is replaced automatically. **NEB:** engine nebgpu 0.8.4, faster on Turing.
+* Full list, SHA-256 of the packages (English / Русский / 中文): [docs/release-1.8.1.md](docs/release-1.8.1.md).
 
 ## What's new in 1.8.0
 
