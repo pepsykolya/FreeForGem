@@ -127,11 +127,12 @@ With `--auto-uv`, once the cards are tuned:
 - With a **HiveOS API token** the miner also writes the confirmed offsets and the core / memory clock locks it sets (`--lock-cclock` /
   `--auto-lock`, `--lock-mclock`) into this worker's OC profile (the flight sheet's algo, else *Default Config*); HiveOS applies it on the rig.
   The rest of the profile (power limit, fans, other algos) is not touched; a copy is kept before every write. With `--split` every group writes only its own cards and sends its own message.
-- **The token:** HiveOS web → account settings → *Sessions* / API → a new token **just for this** (it gives full access to your farm). On the
-  rig: `nano /root/ffg-hive-token` (paste, save), `chmod 600 /root/ffg-hive-token`, and in *Extra config arguments*
-  `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. A file readable by root only is better than
-  `--hive-oc-sync-token TOKEN` in the flight sheet: that one is visible in `ps` and in the rig's config (the miner masks it in its own log).
-  Not in `/hive-config`: files there are readable by every user.
+- **The token:** HiveOS web → account settings → *Sessions* / API → a new token **just for this**. Put it into *Extra config arguments*:
+  `--auto-uv --hive-oc-sync --hive-oc-sync-token YOUR_TOKEN`. The miner masks the token on its screen and in its log.
+- **Or keep it out of the flight sheet:** a token in the flight sheet is seen by everyone with access to the farm, and on the rig in `ps` and
+  in the rig's config. If you prefer not to have it there: on the rig `nano /root/ffg-hive-token` (paste, save),
+  `chmod 600 /root/ffg-hive-token`, and in *Extra config arguments* `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`
+  (not in `/hive-config`: files there are readable by every user).
 - `--hive-oc-sync-test` sends one test message and exits. A rejected token (401/403): an orange line, no more writes until the next
   restart, the messages go on. MANUAL.md, section 32.
 
@@ -524,11 +525,12 @@ HiveOS кэширует скачанный архив по имени файла
 - С **API-токеном HiveOS** майнер ещё и записывает подтверждённые offset и локи ядра / памяти, которые он ставит (`--lock-cclock` /
   `--auto-lock`, `--lock-mclock`), в профиль разгона этого воркера (алгоритм листа, иначе *Default Config*); HiveOS применяет его на риге.
   Остальное в профиле (лимит мощности, вентиляторы, другие алгоритмы) не трогается; перед каждой записью сохраняется копия. С `--split` каждая группа пишет только свои карты и шлёт своё сообщение.
-- **Токен:** веб HiveOS → настройки аккаунта → *Sessions* / API → новый токен **только для этого** (он даёт полный доступ к ферме). На риге:
-  `nano /root/ffg-hive-token` (вставить, сохранить), `chmod 600 /root/ffg-hive-token`, а в *Extra config arguments*
-  `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. Файл, который читает только root, лучше, чем
-  `--hive-oc-sync-token ТОКЕН` в листе: такой токен виден в `ps` и в конфиге рига (в своём логе майнер его маскирует). Не в `/hive-config`:
-  файлы там читает любой пользователь.
+- **Токен:** веб HiveOS → настройки аккаунта → *Sessions* / API → новый токен **только для этого**. Впишите в *Extra config arguments*:
+  `--auto-uv --hive-oc-sync --hive-oc-sync-token ВАШ_ТОКЕН`. Майнер маскирует токен на экране и в логе.
+- **Или без токена в листе:** токен в полётном листе видят все, у кого есть доступ к ферме, а на риге он виден в `ps` и в конфиге рига. Если не
+  хотите держать его в листе: на риге `nano /root/ffg-hive-token` (вставить, сохранить), `chmod 600 /root/ffg-hive-token`, а в
+  *Extra config arguments* `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token` (не в `/hive-config`: файлы там читает
+  любой пользователь).
 - `--hive-oc-sync-test` шлёт одно тестовое сообщение и выходит. Отклонённый токен (401/403): оранжевая строка, до следующего рестарта
   записей больше нет, сообщения идут дальше. MANUAL.md, раздел 32.
 
@@ -915,11 +917,11 @@ Pearl 不需要高显存频率：
 - 有 **HiveOS API 令牌** 时，矿工还会把已确认的偏移以及它设置的核心 / 显存锁频（`--lock-cclock` / `--auto-lock`、`--lock-mclock`）写入此矿机
   的超频配置（飞行表的算法，否则为 *Default Config*）；HiveOS 在矿机上应用它。配置的其余部分（功耗限制、风扇、其他算法）不会改动；每次写入前
   都会保存副本。使用 `--split` 时，每组只写入自己的显卡并发送自己的消息。
-- **令牌：** HiveOS 网页 → 账户设置 → *Sessions* / API → 创建一个**专门用于此的**新令牌（它拥有你农场的完全权限）。在矿机上：
-  `nano /root/ffg-hive-token`（粘贴、保存），`chmod 600 /root/ffg-hive-token`，并在 *Extra config arguments* 中写
-  `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`。只有 root 能读的文件比飞行表中的
-  `--hive-oc-sync-token TOKEN` 更好：后者在 `ps` 和矿机配置中可见（矿工在自己的日志中会遮蔽它）。不要放在 `/hive-config`：那里的文件所有用户
-  都能读取。
+- **令牌：** HiveOS 网页 → 账户设置 → *Sessions* / API → 创建一个**专门用于此的**新令牌。写进 *Extra config arguments*：
+  `--auto-uv --hive-oc-sync --hive-oc-sync-token 你的令牌`。矿工在屏幕和日志中会隐藏令牌。
+- **或者不把令牌放在飞行表中：**飞行表中的令牌，所有能访问该矿场的人都能看到，在矿机上它也出现在 `ps` 和矿机配置中。如果不想放在飞行表里：
+  在矿机上 `nano /root/ffg-hive-token`（粘贴、保存），`chmod 600 /root/ffg-hive-token`，并在 *Extra config arguments* 中写
+  `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`（不要放在 `/hive-config`：那里的文件所有用户都能读取）。
 - `--hive-oc-sync-test` 发送一条测试消息后退出。令牌被拒绝（401/403）：一行橙色提示，直到下次重启不再写入，消息继续发送。MANUAL.md 第 32 节。
 
 ### 自动选择核心锁频（可选，`--auto-lock`，1.7.8 新增）

@@ -1803,7 +1803,7 @@ writes them into this worker's OC profile: then they stay after a reboot and wit
   tuned at 1800 MHz: -44 W (-11.8 %)`. Its details list every card (offset, lock, watts before and after), the total, and the
   lines `Core Clock Offset: …` / `Lock Core Clock: …` (with `--lock-mclock` also `Lock Mem Clock`) ready to paste into the OC form.
   It is sent again only when the results change, not at every start. Nothing is written.
-- **With a token** (`--hive-oc-sync-token-file PATH`, preferred, or `--hive-oc-sync-token TOKEN`, or `$FFG_HIVE_TOKEN`): the same
+- **With a token** (`--hive-oc-sync-token TOKEN`, or `--hive-oc-sync-token-file PATH`, or `$FFG_HIVE_TOKEN`): the same
   message, and the confirmed **offsets and clock locks** go into the OC profile by themselves: the core lock with `--lock-cclock` /
   `--auto-lock`, the memory lock with `--lock-mclock`. The profile of the flight sheet's algo is used if there is one, else
   *Default Config*. The rest of the profile (power limit, fans, memory offset, other algos) is not touched. HiveOS then applies the
@@ -1813,18 +1813,25 @@ writes them into this worker's OC profile: then they stay after a reboot and wit
   profile. Values you type into the profile yourself stay yours. A card that is still being checked does not hold up the others.
 - **`--hive-oc-sync-test`:** sends one test message, prints the answer and exits; with a token it also checks that it arrived.
 
-**Making the token.** HiveOS web → account settings → *Sessions* / API → a **new API token just for this** (a token gives full
-access to your farm; a separate one can be revoked alone). Keep it in a file on the rig that only root can read:
+**Making the token.** HiveOS web → account settings → *Sessions* / API → a **new API token just for this** (a separate token can
+be revoked alone). Put it into the flight sheet's *Extra config arguments*:
+
+```
+--auto-uv --hive-oc-sync --hive-oc-sync-token YOUR_TOKEN
+```
+
+The miner masks the token on its screen and in its log.
+
+**Or keep the token out of the flight sheet:** a token in the flight sheet is seen by everyone with access to the farm, and on the
+rig in `ps` and in the rig's config. If you prefer not to have it there, put it in a file that only root can read:
 
 ```
 nano /root/ffg-hive-token          # paste the token, save
 chmod 600 /root/ffg-hive-token
 ```
 
-and put into *Extra config arguments*: `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. Not in
-`/hive-config`: the files there are readable by every user. A token written straight into the flight sheet
-(`--hive-oc-sync-token …`) works too, but it is then visible in the process list (`ps`) and in the rig's config; the miner masks it
-in its own log and screen. A rejected token: an orange line, no more OC writes until the next restart, the messages go on.
+and use `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token` (not in `/hive-config`: the files there are
+readable by every user). A rejected token: an orange line, no more OC writes until the next restart, the messages go on.
 
 ![The message in HiveOS: results per card and the lines for the OC profile](docs/img/ffg181-hiveos-ocsync-message.png)
 
@@ -3634,7 +3641,7 @@ BAD при майнинге, GPU LOST, REBOOT NEEDED, NO TABLE, auto-uv выкл
   tuned at 1800 MHz: -44 W (-11.8 %)`. В подробностях — каждая карта (смещение, лок, ватты до и после), итог и строки
   `Core Clock Offset: …` / `Lock Core Clock: …` (с `--lock-mclock` ещё `Lock Mem Clock`), готовые для вставки в форму разгона.
   Повторно шлётся, только когда результаты изменились, а не на каждом старте. Ничего не записывается.
-- **С токеном** (`--hive-oc-sync-token-file ПУТЬ` — лучше всего, или `--hive-oc-sync-token ТОКЕН`, или `$FFG_HIVE_TOKEN`): то же
+- **С токеном** (`--hive-oc-sync-token ТОКЕН`, или `--hive-oc-sync-token-file ПУТЬ`, или `$FFG_HIVE_TOKEN`): то же
   сообщение, а подтверждённые **смещения и локи частот** сами записываются в профиль разгона: лок ядра — при `--lock-cclock` /
   `--auto-lock`, лок памяти — при `--lock-mclock`. Берётся профиль алгоритма полётного листа, если он есть, иначе *Default Config*.
   Остальное в профиле (лимит мощности, вентиляторы, смещение памяти, другие алгоритмы) не трогается. Затем HiveOS применяет
@@ -3646,18 +3653,25 @@ BAD при майнинге, GPU LOST, REBOOT NEEDED, NO TABLE, auto-uv выкл
   остальные.
 - **`--hive-oc-sync-test`:** шлёт одно тестовое сообщение, печатает ответ и выходит; с токеном ещё проверяет, что оно дошло.
 
-**Как сделать токен.** Веб HiveOS → настройки аккаунта → *Sessions* / API → **новый API-токен только для этого** (токен даёт
-полный доступ к ферме; отдельный можно отозвать отдельно). Храните его на риге в файле, который читает только root:
+**Как сделать токен.** Веб HiveOS → настройки аккаунта → *Sessions* / API → **новый API-токен только для этого** (отдельный токен
+можно отозвать отдельно). Впишите его в *Extra config arguments* полётного листа:
+
+```
+--auto-uv --hive-oc-sync --hive-oc-sync-token ВАШ_ТОКЕН
+```
+
+Майнер маскирует токен на экране и в логе.
+
+**Или без токена в листе:** токен в полётном листе видят все, у кого есть доступ к ферме, а на риге он виден в `ps` и в конфиге
+рига. Если не хотите держать его в листе, положите его в файл, который читает только root:
 
 ```
 nano /root/ffg-hive-token          # вставить токен, сохранить
 chmod 600 /root/ffg-hive-token
 ```
 
-и в *Extra config arguments*: `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`. Не в `/hive-config`:
-файлы там читает любой пользователь. Токен прямо в полётном листе (`--hive-oc-sync-token …`) тоже работает, но тогда он виден
-в списке процессов (`ps`) и в конфиге рига; в своём логе и на экране майнер его маскирует. Отклонённый токен: оранжевая строка,
-до следующего рестарта в профиль больше не пишется, сообщения идут дальше.
+и используйте `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token` (не в `/hive-config`: файлы там читает
+любой пользователь). Отклонённый токен: оранжевая строка, до следующего рестарта в профиль больше не пишется, сообщения идут дальше.
 
 ![Сообщение в HiveOS: результаты по картам и строки для профиля разгона](docs/img/ffg181-hiveos-ocsync-message.png)
 
@@ -5139,7 +5153,7 @@ GNU screen 只有 16 种颜色：那里的橙色是暗黄色，标记 ✗ ✓ �
 - **`--hive-oc-sync`**：在 **HiveOS 面板中发送一条消息**（该矿机的消息），例如 `FreeForGem auto-uv (Ting): 4 GPUs tuned at 1800 MHz:
   -44 W (-11.8 %)`。详情列出每块卡（偏移、锁频、前后功耗）、合计，以及可直接粘贴到超频表单的 `Core Clock Offset: …` / `Lock Core Clock: …`
   （使用 `--lock-mclock` 时还有 `Lock Mem Clock`）。只有结果变化时才再次发送，而不是每次启动都发。不写入任何内容。
-- **有令牌时**（`--hive-oc-sync-token-file 路径`，推荐；或 `--hive-oc-sync-token 令牌`，或 `$FFG_HIVE_TOKEN`）：发送同样的消息，并把已确认的
+- **有令牌时**（`--hive-oc-sync-token 令牌`，或 `--hive-oc-sync-token-file 路径`，或 `$FFG_HIVE_TOKEN`）：发送同样的消息，并把已确认的
   **偏移和锁频**自动写入超频配置：使用 `--lock-cclock` / `--auto-lock` 时写核心锁频，使用 `--lock-mclock` 时写显存锁频。若有飞行表算法的配置则用它，
   否则用 *Default Config*。配置的其他部分（功耗上限、风扇、显存偏移、其他算法）不会改动。随后 HiveOS 在矿机上应用该配置。消息以
   `applied to the OC profile`、`already in the OC profile` 结尾，或说明为什么没有写入。
@@ -5147,17 +5161,25 @@ GNU screen 只有 16 种颜色：那里的橙色是暗黄色，标记 ✗ ✓ �
 - **安全：**每次写入前都会保存配置副本。显卡失去其结果时，你原来的值会写回配置。你自己在配置中输入的值仍归你所有。仍在检查中的显卡不会拖住其他显卡。
 - **`--hive-oc-sync-test`：**发送一条测试消息，打印回答后退出；有令牌时还会检查消息是否送达。
 
-**如何创建令牌。** HiveOS 网页 → 账户设置 → *Sessions* / API → **专门为此新建一个 API 令牌**（令牌可完全访问你的矿场；单独的令牌可以单独撤销）。
-把它保存在矿机上只有 root 能读的文件中：
+**如何创建令牌。** HiveOS 网页 → 账户设置 → *Sessions* / API → **专门为此新建一个 API 令牌**（单独的令牌可以单独撤销）。
+把它写进飞行表的 *Extra config arguments*：
+
+```
+--auto-uv --hive-oc-sync --hive-oc-sync-token 你的令牌
+```
+
+矿工在屏幕和日志中会隐藏令牌。
+
+**或者不把令牌放在飞行表中：**飞行表中的令牌，所有能访问该矿场的人都能看到，在矿机上它也出现在 `ps` 和矿机配置中。
+如果不想把它放在飞行表里，可以把它保存在只有 root 能读的文件中：
 
 ```
 nano /root/ffg-hive-token          # 粘贴令牌，保存
 chmod 600 /root/ffg-hive-token
 ```
 
-并在 *Extra config arguments* 中写入：`--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`。不要放在 `/hive-config`：
-那里的文件所有用户都能读取。直接写在飞行表中的令牌（`--hive-oc-sync-token …`）也能用，但这样它会出现在进程列表（`ps`）和矿机配置中；
-矿工在自己的日志和屏幕上会隐藏它。令牌被拒绝：一行橙色提示，到下次重启前不再写入超频配置，消息照常发送。
+并使用 `--auto-uv --hive-oc-sync --hive-oc-sync-token-file /root/ffg-hive-token`（不要放在 `/hive-config`：那里的文件所有用户都能读取）。
+令牌被拒绝：一行橙色提示，到下次重启前不再写入超频配置，消息照常发送。
 
 ![HiveOS 中的消息：每块卡的结果和超频配置的行](docs/img/ffg181-hiveos-ocsync-message.png)
 
