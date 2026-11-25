@@ -9,11 +9,17 @@ FreeForGem is the multi-coin line of [FreeForGemPear](https://github.com/pepsyko
 `freeforgem`, HiveOS custom miner `freeforgem`). FreeForGemPear continues as the Pearl miner in its own repository; saved
 `--auto-uv` results of FreeForGemPear are imported automatically on the first start.
 
-* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.1**)
+* **Download:** [Releases](https://github.com/pepsykolya/FreeForGem/releases) (latest: **1.8.2**)
 * **Manual** (English / Русский / 中文): **[MANUAL.md](MANUAL.md)** — HiveOS, Linux, Windows, pools, overclocking, undervolt, troubleshooting
 * **HiveOS step by step:** [HIVEOS.md](HIVEOS.md)
 * **History / older versions:** [FreeForGemPear](https://github.com/pepsykolya/FreeForGemPear),
   [FreeForGemPear releases](https://github.com/pepsykolya/FreeForGemPear/releases)
+
+## What's new in 1.8.2
+
+* A fix release on top of 1.8.1: Turing cards (RTX 20xx, GTX 16xx, CMP HX) no longer climb above a confirmed profile without a
+  check; a new miner version no longer starts the `--auto-uv` tuning of NEB, PROX and Ting again; the message after a GPU fault
+  names the right offset. [docs/release-1.8.2.md](docs/release-1.8.2.md).
 
 ## What's new in 1.8.1
 
